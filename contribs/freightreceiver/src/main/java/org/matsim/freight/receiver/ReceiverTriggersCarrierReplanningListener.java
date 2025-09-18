@@ -42,11 +42,13 @@ import java.util.Map;
 
 class ReceiverTriggersCarrierReplanningListener implements IterationStartsListener {
     private final ReceiverConfigGroup receiverConfig;
-    @Inject private Scenario sc;
+	private Scenario sc;
 
-    ReceiverTriggersCarrierReplanningListener(){
-        this.receiverConfig = ConfigUtils.addOrGetModule( sc.getConfig(), ReceiverConfigGroup.class );
-    }
+	@Inject
+	ReceiverTriggersCarrierReplanningListener(Scenario sc) {
+		this.sc = sc;
+		this.receiverConfig = ConfigUtils.addOrGetModule(sc.getConfig(), ReceiverConfigGroup.class);
+	}
 
     @Override
     public void notifyIterationStarts(IterationStartsEvent event) {

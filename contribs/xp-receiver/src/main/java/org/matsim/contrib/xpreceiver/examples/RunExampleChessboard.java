@@ -1,5 +1,6 @@
 package org.matsim.contrib.xpreceiver.examples;
 
+import org.matsim.api.core.v01.Coord;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.Scenario;
 import org.matsim.api.core.v01.network.Network;
@@ -17,6 +18,7 @@ import org.matsim.contrib.xpreceiver.util.ReceiverUtils;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
 import org.matsim.core.controler.Controler;
+import org.matsim.core.controler.OutputDirectoryHierarchy;
 import org.matsim.core.network.NetworkUtils;
 import org.matsim.core.scenario.ScenarioUtils;
 import org.matsim.freight.carriers.Carrier;
@@ -36,7 +38,8 @@ public final class RunExampleChessboard {
         receiverConfig.setTimeWindowMutationStep(600.0);
 
         config.controller().setLastIteration(1);
-        config.controller().setOverwriteFileSetting(ConfigUtils.OverwriteFileSetting.deleteDirectoryIfExists);
+        config.controller().setOverwriteFileSetting(
+				OutputDirectoryHierarchy.OverwriteFileSetting.overwriteExistingFiles);
         config.qsim().setEndTime(12 * 3600);
         config.qsim().setNumberOfThreads(1);
 
@@ -51,8 +54,8 @@ public final class RunExampleChessboard {
     }
 
     private static void buildNetwork(Network network) {
-        Node n1 = NetworkUtils.createAndAddNode(network, Id.createNodeId("1"), 0.0, 0.0);
-        Node n2 = NetworkUtils.createAndAddNode(network, Id.createNodeId("2"), 1000.0, 0.0);
+        Node n1 = NetworkUtils.createAndAddNode(network, Id.createNodeId("1"), new Coord(0.0, 0.0));
+        Node n2 = NetworkUtils.createAndAddNode(network, Id.createNodeId("2"), new Coord(1000.0, 0.0));
         NetworkUtils.createAndAddLink(network, Id.createLinkId("1-2"), n1, n2, 1000.0, 50.0, 1000.0, 1.0);
         NetworkUtils.createAndAddLink(network, Id.createLinkId("2-1"), n2, n1, 1000.0, 50.0, 1000.0, 1.0);
     }

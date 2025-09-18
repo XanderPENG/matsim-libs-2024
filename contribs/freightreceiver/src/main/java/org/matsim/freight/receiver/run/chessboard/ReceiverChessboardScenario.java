@@ -285,6 +285,7 @@ public class ReceiverChessboardScenario {
                 .setCostPerDistanceUnit(7.34E-3)
                 .setCostPerTimeUnit(0.171)
                 .build();
+		typeHeavy.setNetworkMode("car");
         CarrierVehicle.Builder carrierHVehicleBuilder = CarrierVehicle.Builder.newInstance(Id.createVehicleId("heavy"), carrierLocation, typeHeavy);
         CarrierVehicle heavy = carrierHVehicleBuilder
                 .setEarliestStart(Time.parseTime("06:00:00"))
@@ -299,6 +300,7 @@ public class ReceiverChessboardScenario {
                 .setCostPerDistanceUnit(4.22E-3)
                 .setCostPerTimeUnit(0.089)
                 .build();
+		typeLight.setNetworkMode("car");
         CarrierVehicle.Builder carrierLVehicleBuilder = CarrierVehicle.Builder.newInstance(Id.createVehicleId("light"), carrierLocation, typeLight);
         CarrierVehicle light = carrierLVehicleBuilder
                 .setEarliestStart(Time.parseTime("06:00:00"))

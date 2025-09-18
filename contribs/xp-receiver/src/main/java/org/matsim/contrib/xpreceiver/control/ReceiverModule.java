@@ -25,7 +25,7 @@ public final class ReceiverModule extends AbstractModule {
     public void install() {
         ReceiverConfigGroup configGroup = ConfigUtils.addOrGetModule(getConfig(), ReceiverConfigGroup.class);
 
-        bind(ReceiverConfigGroup.class).toInstance(configGroup);
+//        bind(ReceiverConfigGroup.class).toInstance(configGroup);
         bind(ReceiverCostAllocation.class).toInstance(costAllocation);
         bind(ReceiverScoringFunctionFactory.class).toInstance(new ReceiverScoringFunctionFactoryMoneyOnly());
 
