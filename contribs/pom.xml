@@ -74,9 +74,10 @@
 		<module>dvrp</module>
 		<module>ev</module>
 		<module>emissions</module>
-		<module>freight</module>
-		<module>freightreceiver</module>
-		<module>hybridsim</module>
+                <module>freight</module>
+                <module>freightreceiver</module>
+                <module>xp-receiver</module>
+                <module>hybridsim</module>
 		<module>informed-mode-choice</module>
 		<module>integration</module>
 		<module>locationchoice</module>
