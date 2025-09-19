@@ -76,7 +76,7 @@
 		<module>emissions</module>
                 <module>freight</module>
                 <module>freightreceiver</module>
-                <module>xp-receiver</module>
+                <module>xp-collaboration</module>
                 <module>hybridsim</module>
 		<module>informed-mode-choice</module>
 		<module>integration</module>

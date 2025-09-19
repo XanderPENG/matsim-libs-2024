@@ -5,7 +5,7 @@ import com.google.inject.Provider;
 import org.matsim.contrib.xpreceiver.config.ReceiverConfigGroup;
 
 /**
- * Provides strategy managers based on configuration.
+ * Provides org.matsim.freightcollaboration.strategy managers based on configuration.
  */
 public final class ReceiverReplanningUtils {
     private ReceiverReplanningUtils() {

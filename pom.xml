@@ -259,7 +259,7 @@
 
             <dependency>
                 <groupId>org.codehaus.plexus</groupId>
-                <artifactId>plexus-utils</artifactId>
+                <artifactId>plexus-org.matsim.freightcollaboration.utils</artifactId>
                 <version>4.0.2</version>
             </dependency>
 
