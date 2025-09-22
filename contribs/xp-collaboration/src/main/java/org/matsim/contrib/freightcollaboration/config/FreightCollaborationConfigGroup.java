@@ -16,6 +16,7 @@ public class FreightCollaborationConfigGroup extends ReflectiveConfigGroup {
 	private Set<CollaborationParamSet> collaborationParamSets = new LinkedHashSet<>();
 
 	public static final String GROUP_NAME = "freightCollaboration";
+	public static final String ELEMENT_NAME = "freightCollaborators";
 
 	public FreightCollaborationConfigGroup() {
 		super(GROUP_NAME);

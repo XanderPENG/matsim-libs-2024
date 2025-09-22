@@ -4,6 +4,7 @@ import com.google.inject.Inject;
 import com.google.inject.Singleton;
 import org.matsim.api.core.v01.Scenario;
 import org.matsim.contrib.freightcollaboration.CollaboratorRole;
+import org.matsim.contrib.freightcollaboration.GrandFreightCoalition;
 import org.matsim.contrib.freightcollaboration.config.CollaborationParamSet;
 import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfigGroup;
 
@@ -23,6 +24,7 @@ public class FreightCoalitionManager {
 	private Scenario scenario;
 
 	private Set<CollaboratorRole> allCollaboratorRoles = null;
+	private GrandFreightCoalition grandFreightCoalition;
 
 	public FreightCoalitionManager() {
 	}
@@ -46,4 +48,13 @@ public class FreightCoalitionManager {
 		}
 		return allCollaboratorRoles;
 	}
+
+	public GrandFreightCoalition getGrandFreightCoalition() {
+		return grandFreightCoalition;
+	}
+
+	public void setGrandFreightCoalition(GrandFreightCoalition grandFreightCoalition) {
+		this.grandFreightCoalition = grandFreightCoalition;
+	}
+
 }

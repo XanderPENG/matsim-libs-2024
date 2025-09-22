@@ -1,5 +1,6 @@
 package org.matsim.contrib.freightcollaboration;
 
+import org.matsim.api.core.v01.population.BasicPlan;
 import org.matsim.api.core.v01.population.HasPlansAndId;
 import org.matsim.freight.carriers.Carrier;
 import org.matsim.freight.logistics.LSP;

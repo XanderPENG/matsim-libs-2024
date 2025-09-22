@@ -48,6 +48,11 @@ public class FreightCollaboratorImpl<T extends HasPlansAndId<?, ?>> implements F
 	}
 
 	@Override
+	public boolean getCollaborationStatus() {
+		return this.collaborationEnabled;
+	}
+
+	@Override
 	public void enableCollaboration() {
 		this.collaborationEnabled = true;
 	}

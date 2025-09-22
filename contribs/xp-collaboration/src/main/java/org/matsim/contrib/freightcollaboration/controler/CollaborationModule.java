@@ -4,8 +4,10 @@ import com.google.inject.Provides;
 import com.google.inject.Singleton;
 import org.matsim.api.core.v01.Scenario;
 import org.matsim.contrib.freightcollaboration.CollaboratorRole;
+import org.matsim.contrib.freightcollaboration.FreightCollaborators;
 import org.matsim.contrib.freightcollaboration.config.CollaborationParamSet;
 import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfigGroup;
+import org.matsim.contrib.freightcollaboration.listener.FormFreightCoalitionListener;
 import org.matsim.contrib.freightcollaboration.listener.NotifyCoalitionInfoListener;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controler;
@@ -19,15 +21,21 @@ import java.util.Set;
  */
 public class CollaborationModule extends AbstractModule {
 
-	public CollaboratorModules collaboratorModules;
+	private final CollaboratorModules collaboratorModules;
+	private final FreightCollaborators freightCollaborators;
 
-	public CollaborationModule(CollaboratorModules modules) {
+	public CollaborationModule(CollaboratorModules modules, FreightCollaborators freightCollaborators) {
 		this.collaboratorModules = modules;
+		this.freightCollaborators = freightCollaborators;
 	}
 
 	@Override
 	public void install() {
 		this.addControlerListenerBinding().to(NotifyCoalitionInfoListener.class);
+		this.addControlerListenerBinding().to(FormFreightCoalitionListener.class);
+		// Bind the FreightCoalitionManager as a singleton at the start of the simulation
+		this.bind(FreightCoalitionManager.class).asEagerSingleton();
+		this.bind(FreightCollaborators.class).toInstance(freightCollaborators);
 	}
 
 	public void installAllCollaboratorModules(Controler controler) {

@@ -45,6 +45,8 @@ public interface FreightCollaborator<T extends HasPlansAndId<?, ?>> {
 	 */
 	<P extends BasicPlan> P getTypedSelectedPlan();
 
+	boolean getCollaborationStatus();
+
 	void enableCollaboration();
 
 	void disableCollaboration();

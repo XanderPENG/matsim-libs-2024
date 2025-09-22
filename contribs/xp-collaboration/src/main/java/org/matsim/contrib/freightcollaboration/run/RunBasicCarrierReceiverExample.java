@@ -5,11 +5,14 @@ import org.matsim.api.core.v01.Scenario;
 import org.matsim.api.core.v01.network.Link;
 import org.matsim.contrib.freightcollaboration.CollaborationTypes;
 import org.matsim.contrib.freightcollaboration.CollaboratorRole;
+import org.matsim.contrib.freightcollaboration.FreightCollaboratorFactory;
+import org.matsim.contrib.freightcollaboration.FreightCollaborators;
 import org.matsim.contrib.freightcollaboration.config.CollaborationParamSet;
 import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfigGroup;
 import org.matsim.contrib.freightcollaboration.controler.CollaborationModule;
 import org.matsim.contrib.freightcollaboration.controler.CollaboratorModules;
 import org.matsim.contrib.freightcollaboration.strategy.CollaborationStrategies;
+import org.matsim.contrib.freightcollaboration.utils.LinkFreightAgentToFreightCollaborator;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
 import org.matsim.core.controler.Controler;
@@ -82,9 +85,24 @@ public class RunBasicCarrierReceiverExample {
 		// Add proper ReceiverModule to handle receiver simulation
 		ReceiverModule receiverModule = new ReceiverModule(ReceiverUtils.createFixedReceiverCostAllocation(100.0));
 		receiverModule.setReplanningType(ReceiverReplanningType.timeWindow);
+
+		// Map Carriers and Receivers as FreightCollaborators
+		// TODO: This should be done more elegantly, e.g., provide a utility method in @FreightCollaborationUtils.
+		FreightCollaborators freightCollaborators = new FreightCollaborators();
+		for (Carrier carrier : CarriersUtils.getCarriers(scenario).getCarriers().values()) {
+			// Assume all carriers are willing to collaborate in this example
+			var carrierCollaborator = LinkFreightAgentToFreightCollaborator.map(carrier, true);
+			freightCollaborators.addFreightCollaborator(carrierCollaborator);
+		}
+		for (Receiver receiver : ReceiverUtils.getReceivers(scenario).getReceivers().values()) {
+			// FIXME: The collaborationStatus param will not function here, as the receiver's collaboration status is already defined by itself.
+			var receiverCollaborator = LinkFreightAgentToFreightCollaborator.map(receiver, true);
+			freightCollaborators.addFreightCollaborator(receiverCollaborator);
+		}
+
 		// Add collaboration modules
 		CollaboratorModules collaboratorModules = new CollaboratorModules(Map.of(CollaboratorRole.RECEIVER, receiverModule));
-		CollaborationModule collaborationModule = new CollaborationModule(collaboratorModules);
+		CollaborationModule collaborationModule = new CollaborationModule(collaboratorModules, freightCollaborators);
 		// Install all collaborator modules
 		collaborationModule.installAllCollaboratorModules(controler);
 		// Install the collaboration module itself
@@ -95,7 +113,6 @@ public class RunBasicCarrierReceiverExample {
 		controler.run();
 
 	}
-
 
 
 	public static Config createExampleConfigWithDefaultNetwork() {
