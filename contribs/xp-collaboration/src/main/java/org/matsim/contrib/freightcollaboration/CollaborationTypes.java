@@ -1,5 +1,8 @@
 package org.matsim.contrib.freightcollaboration;
 
+import java.util.HashSet;
+import java.util.Set;
+
 public enum CollaborationTypes implements CollaborationType {
 
 	CARRIER_CARRIER("Carrier-Carrier", "Collaboration between carriers for joint deliveries") {
@@ -56,10 +59,12 @@ public enum CollaborationTypes implements CollaborationType {
 
 	private final String type;
 	private final String description;
+	private final Set<CollaboratorRole> allowedRoles = new HashSet<>();
 
 	CollaborationTypes(String type, String description) {
 		this.type = type;
 		this.description = description;
+		identifyAllowedRoles();
 	}
 
 	@Override
@@ -71,5 +76,46 @@ public enum CollaborationTypes implements CollaborationType {
 	public String getDescription() {
 		return description;
 	}
+
+	@Override
+	public Set<CollaboratorRole> getAllowedRoles() {
+		return Set.copyOf(allowedRoles);
+	}
+
+	/**
+	 * Identify and populate the allowed roles for this collaboration type, when it is initialized.
+	 */
+	private void identifyAllowedRoles() {
+		switch (this) {
+			case CARRIER_CARRIER -> {
+				allowedRoles.add(CollaboratorRole.CARRIER);
+			}
+			case RECEIVER_RECEIVER -> {
+				allowedRoles.add(CollaboratorRole.RECEIVER);
+			}
+			case LSP_LSP -> {
+				allowedRoles.add(CollaboratorRole.LSP);
+			}
+			case CARRIER_LSP -> {
+				allowedRoles.add(CollaboratorRole.CARRIER);
+				allowedRoles.add(CollaboratorRole.LSP);
+			}
+			case CARRIER_RECEIVER -> {
+				allowedRoles.add(CollaboratorRole.CARRIER);
+				allowedRoles.add(CollaboratorRole.RECEIVER);
+			}
+			case LSP_RECEIVER -> {
+				allowedRoles.add(CollaboratorRole.LSP);
+				allowedRoles.add(CollaboratorRole.RECEIVER);
+			}
+			case MIXED -> {
+				allowedRoles.add(CollaboratorRole.CARRIER);
+				allowedRoles.add(CollaboratorRole.LSP);
+				allowedRoles.add(CollaboratorRole.RECEIVER);
+			}
+			default -> throw new IllegalStateException("Unexpected value: " + this);
+		}
+	}
+
 }
 

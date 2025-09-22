@@ -8,7 +8,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>org.matsim.contrib</groupId>
     <artifactId>xp-collaboration</artifactId>
-    <name>xp-receiver</name>
+    <name>xp-collaboration</name>
 
     <dependencies>
         <dependency>
@@ -19,6 +19,11 @@
         <dependency>
             <groupId>org.matsim.contrib</groupId>
             <artifactId>freight</artifactId>
+            <version>${project.parent.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.matsim.contrib</groupId>
+            <artifactId>freightreceiver</artifactId>
             <version>${project.parent.version}</version>
         </dependency>
     </dependencies>

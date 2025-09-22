@@ -9,6 +9,7 @@ import org.matsim.contrib.freightcollaboration.config.CollaborationParamSet;
 import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfigGroup;
 import org.matsim.contrib.freightcollaboration.controler.CollaborationModule;
 import org.matsim.contrib.freightcollaboration.controler.CollaboratorModules;
+import org.matsim.contrib.freightcollaboration.strategy.CollaborationStrategies;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
 import org.matsim.core.controler.Controler;
@@ -32,9 +33,9 @@ public class RunBasicCarrierReceiverExample {
 		Config config = createExampleConfigWithDefaultNetwork();
 
 		// add freight collaboration config group
-		// @TODO: Here, the strategies is a set of strings, it could be better to be a set of strategy enums.
+		// Now using proper CollaborationStrategies enum instead of strings
 		CollaborationParamSet collaborationParamSet = new CollaborationParamSet(CollaborationTypes.CARRIER_RECEIVER,
-			Set.of("ReceiverTimeWindowMutator", "CollaborationStatusMutator"));
+			Set.of(CollaborationStrategies.RECEIVER_TIME_WINDOW_MUTATION, CollaborationStrategies.COLLABORATION_STATUS_MUTATION));
 		/** @FIXME: It seems very strange to specify the input network file here again, because it is already specified in the main config file.
 		 * But in the final version, users should specify all related params in the freight collaboration config group.
 		 * Hence, it is still kept here for now.
@@ -57,6 +58,7 @@ public class RunBasicCarrierReceiverExample {
 		// FIXME: The user is not supposed to do this manually, it should be done by the freight collaboration module/config group automatically.
 		ReceiverConfigGroup receiverConfigGroup = ConfigUtils.addOrGetModule(scenario.getConfig(), ReceiverConfigGroup.class);
 		receiverConfigGroup.setReplanningType(ReceiverReplanningType.timeWindow);
+//		config.addModule(receiverConfigGroup);  // This line is not needed, as the module is already added by ConfigUtils.addOrGetModule()
 		// Generate receivers
 		Receivers receivers = generateExampleReceivers();
 		// Add receivers into scenario
