@@ -1,19 +1,11 @@
-package org.matsim.contrib.freightcollaboration.controler;
+package org.matsim.contrib.freightcollaboration.controller;
 
-import com.google.inject.Provides;
-import com.google.inject.Singleton;
-import org.matsim.api.core.v01.Scenario;
 import org.matsim.contrib.freightcollaboration.CollaboratorRole;
 import org.matsim.contrib.freightcollaboration.FreightCollaborators;
-import org.matsim.contrib.freightcollaboration.config.CollaborationParamSet;
-import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfigGroup;
 import org.matsim.contrib.freightcollaboration.listener.FormFreightCoalitionListener;
 import org.matsim.contrib.freightcollaboration.listener.NotifyCoalitionInfoListener;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controler;
-
-import java.util.HashSet;
-import java.util.Set;
 
 /**
  * This module should extend AbstractModule and configure bindings for the freight collaboration framework.

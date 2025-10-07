@@ -1,4 +1,4 @@
-package org.matsim.contrib.freightcollaboration.controler;
+package org.matsim.contrib.freightcollaboration.controller;
 
 import com.google.inject.Inject;
 import com.google.inject.Singleton;

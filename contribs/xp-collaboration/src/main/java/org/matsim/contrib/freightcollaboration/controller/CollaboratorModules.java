@@ -1,4 +1,4 @@
-package org.matsim.contrib.freightcollaboration.controler;
+package org.matsim.contrib.freightcollaboration.controller;
 
 import org.matsim.contrib.freightcollaboration.CollaboratorRole;
 import org.matsim.core.controler.AbstractModule;

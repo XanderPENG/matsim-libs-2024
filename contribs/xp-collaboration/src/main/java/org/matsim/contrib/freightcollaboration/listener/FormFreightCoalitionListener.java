@@ -9,7 +9,7 @@ import org.matsim.contrib.freightcollaboration.CollaboratorRole;
 import org.matsim.contrib.freightcollaboration.FreightCollaborator;
 import org.matsim.contrib.freightcollaboration.FreightCollaborators;
 import org.matsim.contrib.freightcollaboration.GrandFreightCoalition;
-import org.matsim.contrib.freightcollaboration.controler.FreightCoalitionManager;
+import org.matsim.contrib.freightcollaboration.controller.FreightCoalitionManager;
 import org.matsim.core.controler.events.IterationStartsEvent;
 import org.matsim.core.controler.listener.IterationStartsListener;
 import org.matsim.freight.carriers.Carrier;

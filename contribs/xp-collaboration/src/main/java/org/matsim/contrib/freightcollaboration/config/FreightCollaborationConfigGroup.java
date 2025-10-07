@@ -2,6 +2,7 @@ package org.matsim.contrib.freightcollaboration.config;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.matsim.contrib.freightcollaboration.allocation.AllocationModels;
 import org.matsim.core.config.ReflectiveConfigGroup;
 import org.matsim.core.config.ReflectiveConfigGroup.StringGetter;
 import org.matsim.core.config.ReflectiveConfigGroup.StringSetter;
@@ -34,6 +35,9 @@ public class FreightCollaborationConfigGroup extends ReflectiveConfigGroup {
 	// Global parameters
 	@Parameter
 	public String INPUT_NETWORK_FILE;
+
+	// Allocation model set, Proportional allocation by default
+	public AllocationModels ALLOCATION_MODEL = AllocationModels.PROPORTIONAL;
 
 //	@StringSetter("collaborationParamSets")
 	public void setCollaborationParamSets(String value) {
@@ -75,6 +79,25 @@ public class FreightCollaborationConfigGroup extends ReflectiveConfigGroup {
 			return;
 		}
 		throw new IllegalArgumentException("Unsupported parameter set class: " + set);
+	}
+
+	/**
+	 * StringGetter and setter for allocation model
+	 *
+	 */
+	@StringGetter("ALLOCATION_MODEL")
+	public String getAllocationModelString() {
+		return ALLOCATION_MODEL.toString();
+	}
+
+	@StringSetter("ALLOCATION_MODEL")
+	public void setAllocationModelString(String allocationModel) {
+		try {
+			this.ALLOCATION_MODEL = AllocationModels.valueOf(allocationModel);
+		} catch (IllegalArgumentException e) {
+			throw new IllegalArgumentException("Invalid allocation model: " + allocationModel + ". Valid options are: " + String.join(", ",
+					java.util.Arrays.stream(AllocationModels.values()).map(Enum::name).toArray(String[]::new)));
+		}
 	}
 
 	public Set<CollaborationParamSet> getCollaborationParamSets() {
