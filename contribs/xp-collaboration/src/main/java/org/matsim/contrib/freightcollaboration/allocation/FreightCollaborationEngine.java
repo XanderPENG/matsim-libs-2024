@@ -9,6 +9,7 @@ import org.matsim.contrib.freightcollaboration.utils.AllocationUtils;
 import org.matsim.core.api.experimental.events.EventsManager;
 import org.matsim.core.config.Config;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -33,13 +34,12 @@ public class FreightCollaborationEngine {
 	@Inject
 	CollaborationDataStore collaborationDataStore;
 
-	// FIXME: it is not a single mutable coalition, instead, it should be a collection of coalitions
-	private final MutableFreightCoalition existingCoalition;
+	private final List<MutableFreightCoalition> existingCoalitions;
 
 	private final EventsManager existingEventsManager;
 
-	public FreightCollaborationEngine(MutableFreightCoalition existingCoalition, EventsManager existingEventsManager) {
-		this.existingCoalition = existingCoalition;
+	public FreightCollaborationEngine(List<MutableFreightCoalition> existingCoalitions, EventsManager existingEventsManager) {
+		this.existingCoalitions = existingCoalitions;
 		this.existingEventsManager = existingEventsManager;
 	}
 
@@ -63,14 +63,20 @@ public class FreightCollaborationEngine {
 			// TODO: only need to specify the distributor and assignee for the model input
 		} else {
 			// Need to run the freight psim to evaluate the new plans and calculate the contributions
-			// Extract the valid collaborators (player and distributor) based on the collaboration type
-			Map<Id<?>, FreightCollaborator<?>> validPlayer = extractValidPlayer();
-			Map<Id<?>, FreightCollaborator<?>> validDistributor = extractValidDistributor();
 
-			// Initialize and run the freight pseudo simulator
-			// TODO: pass the valid Player and Distributor to the pSim?
-			FreightPseudoSimulator freightPsim = new FreightPseudoSimulator();
-			Map<Set<Id<?>>, Double> subCoalitionsScoreMap = freightPsim.runAllSubCoalitions(validDistributor, validPlayer);
+			FreightPseudoSimulator freightPsim = new FreightPseudoSimulator(); // initialize a new psim instance
+
+			// A for-loop to iterate through all existing coalitions
+
+			for (MutableFreightCoalition coalition : existingCoalitions) {
+				// Extract the valid collaborators (player and distributor) based on the collaboration type
+				Map<Id<?>, FreightCollaborator<?>> validPlayer = extractValidPlayer(coalition);
+				Map<Id<?>, FreightCollaborator<?>> validDistributor = extractValidDistributor(coalition);
+				Map<Set<Id<?>>, Double> subCoalitionsScoreMap = freightPsim.runAllSubCoalitions(validDistributor, validPlayer);
+				// add the sub-coalitions scores to the data store
+				collaborationDataStore.addSimulatedCoalitionScores(coalition, subCoalitionsScoreMap);
+			}
+
 			allocationModel.allocate();
 		}
 
@@ -78,7 +84,7 @@ public class FreightCollaborationEngine {
 
 	}
 
-	private Map<Id<?>, FreightCollaborator<?>> extractValidPlayer() {
+	private Map<Id<?>, FreightCollaborator<?>> extractValidPlayer(MutableFreightCoalition existingCoalition) {
 		return switch (collaborationType) {
 			case CARRIER_RECEIVER -> existingCoalition.getCollaboratorsMapByRole(CollaboratorRole.RECEIVER);
 			case CARRIER_CARRIER -> existingCoalition.getCollaboratorsMapByRole(CollaboratorRole.CARRIER);
@@ -87,7 +93,7 @@ public class FreightCollaborationEngine {
 
 	}
 
-	private Map<Id<?>, FreightCollaborator<?>> extractValidDistributor() {
+	private Map<Id<?>, FreightCollaborator<?>> extractValidDistributor(MutableFreightCoalition existingCoalition) {
 		return switch (collaborationType) {
 			case CARRIER_RECEIVER -> existingCoalition.getCollaboratorsMapByRole(CollaboratorRole.CARRIER);
 			case CARRIER_CARRIER -> existingCoalition.getCollaboratorsMapByRole(CollaboratorRole.CARRIER);

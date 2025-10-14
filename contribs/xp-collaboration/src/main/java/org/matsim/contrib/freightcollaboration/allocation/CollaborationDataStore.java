@@ -4,9 +4,12 @@ import com.google.inject.Singleton;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.population.BasicPlan;
 import org.matsim.contrib.freightcollaboration.CollaboratorRole;
+import org.matsim.contrib.freightcollaboration.MutableFreightCoalition;
+import org.matsim.core.utils.collections.Tuple;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 @Singleton
 public class CollaborationDataStore {
@@ -15,10 +18,12 @@ public class CollaborationDataStore {
 	// Note: this map should not be changed after initialization.
 	private final Map<CollaboratorRole, Map<Id<?>, ? extends BasicPlan>> originalPlans;
 	private Map<CollaboratorRole, Map<Id<?>, Double>> contributions;
+	private Map<MutableFreightCoalition, Map<Set<Id<?>>, Double>> simulatedCoalitionScores;
 
 
 	public CollaborationDataStore(Map<CollaboratorRole, Map<Id<?>, ? extends BasicPlan>> originalPlans) {
 		this.originalPlans = originalPlans;
+		resetSimulatedCoalitionScores();
 		resetContributions();
 	}
 
@@ -37,6 +42,21 @@ public class CollaborationDataStore {
 			contributions.put(role, roleContributions);
 		}
 
+	}
+
+	/**
+	 * Add the psim subcoalitions scores to the data store.
+	 */
+	public void addSimulatedCoalitionScores(MutableFreightCoalition coalition, Map<Set<Id<?>>, Double> subCoalitionScores) {
+		if (simulatedCoalitionScores == null) {
+			simulatedCoalitionScores = new HashMap<>();
+		}
+		// Add the new entry
+		simulatedCoalitionScores.put(coalition, subCoalitionScores);
+	}
+
+	private void resetSimulatedCoalitionScores() {
+		simulatedCoalitionScores = null;
 	}
 
 }

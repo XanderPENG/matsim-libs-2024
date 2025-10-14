@@ -27,7 +27,6 @@ public class FreightPseudoSimulator {
 		// For each sub-coalition, simulate it and record its score
 		for (Set<Id<?>> subCoalition : subCoalitionScoreMap.keySet()) {
 			// if it is the empty set
-
 			if (subCoalition.isEmpty()) {
 				// No collaboration, set score to 0 (ignore)
 				continue;
@@ -42,6 +41,8 @@ public class FreightPseudoSimulator {
 
 		return subCoalitionScoreMap;
 	}
+
+
 
 
 }
