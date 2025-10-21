@@ -8,6 +8,7 @@ import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfig
 import org.matsim.contrib.freightcollaboration.utils.AllocationUtils;
 import org.matsim.core.api.experimental.events.EventsManager;
 import org.matsim.core.config.Config;
+import org.matsim.core.router.util.TravelTime;
 
 import java.util.List;
 import java.util.Map;
@@ -36,11 +37,14 @@ public class FreightCollaborationEngine {
 
 	private final List<MutableFreightCoalition> existingCoalitions;
 
-	private final EventsManager existingEventsManager;
+	// FIXME: I do not see any reason to have this field if it is not used
+//	private final EventsManager existingEventsManager;
 
-	public FreightCollaborationEngine(List<MutableFreightCoalition> existingCoalitions, EventsManager existingEventsManager) {
+	private TravelTime travelTime;
+
+	public FreightCollaborationEngine(List<MutableFreightCoalition> existingCoalitions, TravelTime travelTime) {
 		this.existingCoalitions = existingCoalitions;
-		this.existingEventsManager = existingEventsManager;
+		this.travelTime = travelTime;
 	}
 
 
@@ -64,7 +68,7 @@ public class FreightCollaborationEngine {
 		} else {
 			// Need to run the freight psim to evaluate the new plans and calculate the contributions
 
-			FreightPseudoSimulator freightPsim = new FreightPseudoSimulator(); // initialize a new psim instance
+			FreightPseudoSimulator freightPsim = new FreightPseudoSimulator(travelTime); // initialize a new psim instance
 
 			// A for-loop to iterate through all existing coalitions
 

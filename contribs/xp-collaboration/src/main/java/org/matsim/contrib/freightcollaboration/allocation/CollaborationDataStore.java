@@ -1,7 +1,9 @@
 package org.matsim.contrib.freightcollaboration.allocation;
 
+import com.google.inject.Inject;
 import com.google.inject.Singleton;
 import org.matsim.api.core.v01.Id;
+import org.matsim.api.core.v01.network.Network;
 import org.matsim.api.core.v01.population.BasicPlan;
 import org.matsim.contrib.freightcollaboration.CollaboratorRole;
 import org.matsim.contrib.freightcollaboration.MutableFreightCoalition;
@@ -57,6 +59,10 @@ public class CollaborationDataStore {
 
 	private void resetSimulatedCoalitionScores() {
 		simulatedCoalitionScores = null;
+	}
+
+	public Map<CollaboratorRole, Map<Id<?>, ? extends BasicPlan>> getOriginalPlans() {
+		return originalPlans;
 	}
 
 }
