@@ -80,11 +80,15 @@ public class FreightCollaborationEngine {
 				// add the sub-coalitions scores to the data store
 				collaborationDataStore.addSimulatedCoalitionScores(coalition, subCoalitionsScoreMap);
 			}
-
-			allocationModel.allocate();
+			// TODO: the allocation value type should be specified in the config later
+			allocationModel.allocate(AllocationValueTypes.COST_SAVINGS);
 		}
 
 		// Something to do with triggering the MATSim scoring module
+		/**
+		 * Here, we may need to add a custom scoring function to each collaborator agent, by implementing the @BasicScoring,
+		 * since it will definitely be called at the end the MATSim scoring phase
+		 */
 
 	}
 
@@ -105,6 +109,9 @@ public class FreightCollaborationEngine {
 		};
 	}
 
+	private void injectScoringFunctionForValueAllocation(){
+
+	}
 
 
 }

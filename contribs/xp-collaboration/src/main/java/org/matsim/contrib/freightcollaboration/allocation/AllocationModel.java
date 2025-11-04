@@ -4,5 +4,5 @@ public interface AllocationModel {
 
 
 
-	void allocate();
+	void allocate(AllocationValueTypes type);
 }

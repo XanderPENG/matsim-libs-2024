@@ -21,6 +21,7 @@ public class CollaborationDataStore {
 	private final Map<CollaboratorRole, Map<Id<?>, ? extends BasicPlan>> originalPlans;
 	private Map<CollaboratorRole, Map<Id<?>, Double>> contributions;
 	private Map<MutableFreightCoalition, Map<Set<Id<?>>, Double>> simulatedCoalitionScores;
+	private Map<Id<?>, Double> allocatedValues;
 
 
 	public CollaborationDataStore(Map<CollaboratorRole, Map<Id<?>, ? extends BasicPlan>> originalPlans) {
@@ -63,6 +64,18 @@ public class CollaborationDataStore {
 
 	public Map<CollaboratorRole, Map<Id<?>, ? extends BasicPlan>> getOriginalPlans() {
 		return originalPlans;
+	}
+
+	public Map<MutableFreightCoalition, Map<Set<Id<?>>, Double>> getSimulatedCoalitionScores() {
+		return simulatedCoalitionScores;
+	}
+
+	public Map<Id<?>, Double> getAllocatedValues() {
+		return allocatedValues;
+	}
+
+	public void setAllocatedValues(Map<Id<?>, Double> allocatedValues) {
+		this.allocatedValues = allocatedValues;
 	}
 
 }
