@@ -20,8 +20,8 @@ This file lists tasks that need to be done in the freight collaboration project.
   
 - [ ] Implement test examples, using the freight chessboard scenario
   - [ ] Create a simple chessboard scenario with several carriers and receivers
-  - [ ] Create own carrier scoring function factory, considering the income/charges from receivers
-  - [ ] Similarly but more complex, create receiver scoring function factory -> 
+  - [X] Create own carrier scoring function factory, considering the income/charges from receivers
+  - [X] Similarly but more complex, create receiver scoring function factory -> 
     add a BasicScoring function that can lead to cost when the receivers relax their time windows/service times.
     (this needs to be bonded (using `addOveridingModule`) before the simulation starts.)
   - [ ] Test the allocation models on this scenario

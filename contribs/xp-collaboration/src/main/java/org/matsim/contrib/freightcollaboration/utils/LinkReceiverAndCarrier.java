@@ -7,7 +7,9 @@ import com.graphhopper.jsprit.core.problem.solution.VehicleRoutingProblemSolutio
 import com.graphhopper.jsprit.core.util.Solutions;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.network.Network;
+import org.matsim.contrib.freightcollaboration.CollaboratorRole;
 import org.matsim.contrib.freightcollaboration.FreightCollaborator;
+import org.matsim.contrib.freightcollaboration.FreightCollaborators;
 import org.matsim.core.router.util.TravelTime;
 import org.matsim.freight.carriers.Carrier;
 import org.matsim.freight.carriers.CarrierPlan;
@@ -83,5 +85,26 @@ public class LinkReceiverAndCarrier {
 		// Assign this plan now to the carrier and make it the selected carrier plan
 		carrier.addPlan(newPlan);
 		carrier.setSelectedPlan(newPlan);
+	}
+
+	@SuppressWarnings("unchecked")
+	public static Set<FreightCollaborator<Receiver>> findLinkedReceivers(Carrier carrierFreightCollaborator, FreightCollaborators freightCollaborators){
+		Set<FreightCollaborator<Receiver>> linkedReceivers = new java.util.HashSet<>();
+		for (FreightCollaborator<?> receiverCollaborator : freightCollaborators.getFreightCollaboratorsByRole(CollaboratorRole.RECEIVER).values()) {
+			if (!(receiverCollaborator.getDelegate() instanceof Receiver)) continue;
+			Receiver receiver = (Receiver) receiverCollaborator.getDelegate();
+			if (receiver == null) continue;
+			ReceiverPlan receiverPlan = receiver.getSelectedPlan();
+			if (receiverPlan == null) continue;
+			// Check if this receiver has any orders linked to the given carrier
+			for (ReceiverOrder order : receiverPlan.getReceiverOrders()){
+				if (order == null || order.getCarrierId() == null) continue;
+				if (order.getCarrierId().equals(carrierFreightCollaborator.getId())) {
+					linkedReceivers.add((FreightCollaborator<Receiver>) receiverCollaborator);
+					break; // No need to check further orders for this receiver
+				}
+			}
+		}
+		return linkedReceivers;
 	}
 }
