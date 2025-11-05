@@ -42,6 +42,7 @@ import java.util.Map;
 
 class ReceiverTriggersCarrierReplanningListener implements IterationStartsListener {
     private final ReceiverConfigGroup receiverConfig;
+//	@Inject
 	private Scenario sc;
 
 	@Inject

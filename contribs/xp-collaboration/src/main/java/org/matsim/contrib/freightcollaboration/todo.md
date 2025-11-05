@@ -13,7 +13,19 @@ This file lists tasks that need to be done in the freight collaboration project.
 - [ ] Implement the specific allocation models
   - [ ] Proportional model
   - [ ] Marginal contribution model
-  - [ ] Shapley value model
+  - [X] Shapley value model
+
+- [ ] Distribute the cost or cost savings to the players
+  - [X] Currently, it will allocate the cost savings to each receiver at the iteration ends (AllocationToScoreListener).
+  
+- [ ] Implement test examples, using the freight chessboard scenario
+  - [ ] Create a simple chessboard scenario with several carriers and receivers
+  - [ ] Create own carrier scoring function factory, considering the income/charges from receivers
+  - [ ] Similarly but more complex, create receiver scoring function factory -> 
+    add a BasicScoring function that can lead to cost when the receivers relax their time windows/service times.
+    (this needs to be bonded (using `addOveridingModule`) before the simulation starts.)
+  - [ ] Test the allocation models on this scenario
+  - [ ] Analyze the results and validate the allocation models
 
 One thing need to be considered here is: since there will be several mutable coalitions, where receivers could be in different coalitions,
    which means these receivers could be distributed cost multiple times (from different coalitions/carriers),

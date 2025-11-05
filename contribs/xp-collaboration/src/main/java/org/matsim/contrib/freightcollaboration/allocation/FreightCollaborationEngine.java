@@ -28,9 +28,6 @@ public class FreightCollaborationEngine {
 	@Inject
 	private FreightCollaborators freightCollaborators;
 
-	@Inject
-	private CollaborationType collaborationType;
-
 	// Set it as package-private to be accessible from scorers and allocation models
 	@Inject
 	CollaborationDataStore collaborationDataStore;
@@ -40,7 +37,7 @@ public class FreightCollaborationEngine {
 	// FIXME: I do not see any reason to have this field if it is not used
 //	private final EventsManager existingEventsManager;
 
-	private TravelTime travelTime;
+	private final TravelTime travelTime;
 
 	public FreightCollaborationEngine(List<MutableFreightCoalition> existingCoalitions, TravelTime travelTime) {
 		this.existingCoalitions = existingCoalitions;
@@ -71,7 +68,6 @@ public class FreightCollaborationEngine {
 			FreightPseudoSimulator freightPsim = new FreightPseudoSimulator(travelTime); // initialize a new psim instance
 
 			// A for-loop to iterate through all existing coalitions
-
 			for (MutableFreightCoalition coalition : existingCoalitions) {
 				// Extract the valid collaborators (player and distributor) based on the collaboration type
 				Map<Id<?>, FreightCollaborator<?>> validPlayer = extractValidPlayer(coalition);
@@ -87,12 +83,18 @@ public class FreightCollaborationEngine {
 		// Something to do with triggering the MATSim scoring module
 		/**
 		 * Here, we may need to add a custom scoring function to each collaborator agent, by implementing the @BasicScoring,
-		 * since it will definitely be called at the end the MATSim scoring phase
+		 * since it will definitely be called at the end the MATSim scoring phase.
+		 *
+		 * It seems we cannot directly inject the scoring function here, so that we have two options:
+		 * 1. Create a custom ScoringFunctionFactory that creates a SumScoringFunction with our custom scoring function included at the start of the simulation
+		 * 2. Modify the scores after the scoring phase using the iteration ends listener.
+		 * Now, I temporarily choose the second option for simplicity.
 		 */
 
 	}
 
 	private Map<Id<?>, FreightCollaborator<?>> extractValidPlayer(MutableFreightCoalition existingCoalition) {
+		CollaborationType collaborationType = existingCoalition.getCollaborationType();
 		return switch (collaborationType) {
 			case CARRIER_RECEIVER -> existingCoalition.getCollaboratorsMapByRole(CollaboratorRole.RECEIVER);
 			case CARRIER_CARRIER -> existingCoalition.getCollaboratorsMapByRole(CollaboratorRole.CARRIER);
@@ -102,6 +104,7 @@ public class FreightCollaborationEngine {
 	}
 
 	private Map<Id<?>, FreightCollaborator<?>> extractValidDistributor(MutableFreightCoalition existingCoalition) {
+		CollaborationType collaborationType = existingCoalition.getCollaborationType();
 		return switch (collaborationType) {
 			case CARRIER_RECEIVER -> existingCoalition.getCollaboratorsMapByRole(CollaboratorRole.CARRIER);
 			case CARRIER_CARRIER -> existingCoalition.getCollaboratorsMapByRole(CollaboratorRole.CARRIER);

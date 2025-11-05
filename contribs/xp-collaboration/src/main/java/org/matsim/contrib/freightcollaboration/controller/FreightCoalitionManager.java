@@ -5,10 +5,12 @@ import com.google.inject.Singleton;
 import org.matsim.api.core.v01.Scenario;
 import org.matsim.contrib.freightcollaboration.CollaboratorRole;
 import org.matsim.contrib.freightcollaboration.GrandFreightCoalition;
+import org.matsim.contrib.freightcollaboration.MutableFreightCoalition;
 import org.matsim.contrib.freightcollaboration.config.CollaborationParamSet;
 import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfigGroup;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -25,6 +27,7 @@ public class FreightCoalitionManager {
 
 	private Set<CollaboratorRole> allCollaboratorRoles = null;
 	private GrandFreightCoalition grandFreightCoalition;
+	private List<MutableFreightCoalition> mutableFreightCoalitions;
 
 	public FreightCoalitionManager() {
 	}
@@ -57,4 +60,11 @@ public class FreightCoalitionManager {
 		this.grandFreightCoalition = grandFreightCoalition;
 	}
 
+	public List<MutableFreightCoalition> getMutableFreightCoalitions() {
+		return mutableFreightCoalitions;
+	}
+
+	public void setMutableFreightCoalitions(List<MutableFreightCoalition> mutableFreightCoalitions) {
+		this.mutableFreightCoalitions = mutableFreightCoalitions;
+	}
 }

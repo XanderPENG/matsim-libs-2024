@@ -2,6 +2,8 @@ package org.matsim.contrib.freightcollaboration.listener;
 
 import com.google.inject.Inject;
 import org.matsim.api.core.v01.network.Network;
+import org.matsim.contrib.freightcollaboration.allocation.FreightCollaborationEngine;
+import org.matsim.contrib.freightcollaboration.controller.FreightCoalitionManager;
 import org.matsim.core.api.experimental.events.EventsManager;
 import org.matsim.core.config.Config;
 import org.matsim.core.controler.events.AfterMobsimEvent;
@@ -15,10 +17,15 @@ public class FreightCollaborationListener implements IterationStartsListener, Af
 
 	@Inject
 	private EventsManager events;
+
 	@Inject
 	private Network network;
+
 	@Inject
 	private Config config;
+
+	@Inject
+	FreightCoalitionManager freightCollaborationManager;
 
 	private TravelTimeCalculator ttc;
 
@@ -39,6 +46,7 @@ public class FreightCollaborationListener implements IterationStartsListener, Af
 
 	@Override
 	public void notifyAfterMobsim(AfterMobsimEvent event) {
+
 		// Get the events-based TravelTime
 		if (ttc == null) throw new IllegalStateException("TTC not initialized for this iteration.");
 		TravelTime tt = ttc.getLinkTravelTimes();
@@ -47,6 +55,8 @@ public class FreightCollaborationListener implements IterationStartsListener, Af
 		 * Use the TravelTime for the freight collaboration logic
 		 */
 
+		FreightCollaborationEngine collaborationEngine = new FreightCollaborationEngine(freightCollaborationManager.getMutableFreightCoalitions(), tt);
+		collaborationEngine.runCollaboration();
 
 		// Remove the TravelTimeCalculator as an event handler, to avoid interference with next iteration
 		events.removeHandler(ttc);

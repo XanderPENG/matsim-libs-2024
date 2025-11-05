@@ -6,9 +6,7 @@ import org.matsim.api.core.v01.network.Network;
 import org.matsim.api.core.v01.population.Activity;
 import org.matsim.api.core.v01.population.Leg;
 import org.matsim.api.core.v01.population.Route;
-import org.matsim.contrib.freightcollaboration.CollaborationType;
-import org.matsim.contrib.freightcollaboration.CollaborationTypes;
-import org.matsim.contrib.freightcollaboration.FreightCollaborator;
+import org.matsim.contrib.freightcollaboration.*;
 import org.matsim.contrib.freightcollaboration.utils.AllocationUtils;
 import org.matsim.contrib.freightcollaboration.utils.LinkReceiverAndCarrier;
 import org.matsim.core.population.PopulationUtils;
@@ -37,6 +35,9 @@ public class FreightPseudoSimulator {
 
 	@Inject
 	Network network;
+
+	@Inject
+	FreightCollaborators freightCollaborators;
 
 	// Travel time to be used in the pseudo-simulation, which is based on the events of the main-MATSim simulation
 	TravelTime tt;
@@ -90,11 +91,27 @@ public class FreightPseudoSimulator {
 	private double runPSim(Map<Id<?>, FreightCollaborator<?>> copyDistributors, Map<Id<?>, FreightCollaborator<?>> copyPlayers) {
 		var collaboratorRoleOfDistributors = copyDistributors.values().iterator().next().getRole();
 		var collaboratorRoleOfPlayers = copyPlayers.values().iterator().next().getRole();
-
 		// if it is carrier-receiver collaboration - runCarrierPSim
 		if (CollaborationTypes.CARRIER_RECEIVER.isCompatible(collaboratorRoleOfDistributors, collaboratorRoleOfPlayers)) {
 			var carrierCollaborator = (FreightCollaborator<Carrier>) copyDistributors.values().iterator().next();
-			var receiverCollaborators = (Set<FreightCollaborator<Receiver>>) (Set<?>) Set.copyOf(copyPlayers.values());
+			var receiverCollaborators = new HashSet<>((Set<FreightCollaborator<Receiver>>) (Set<?>) Set.copyOf(copyPlayers.values()));
+			Set<FreightCollaborator<Receiver>> nonCollaboratingReceivers = new HashSet<>();
+			@SuppressWarnings("unchecked")
+			Map<Id<?>, FreightCollaborator<Receiver>> allReceivers = (Map<Id<?>, FreightCollaborator<Receiver>>) (Map<?, ?>) freightCollaborators.getFreightCollaboratorsByRole(CollaboratorRole.RECEIVER);
+			allReceivers.values().forEach(receiverCollaborator -> {
+				// if this receiver is not in the collaborating players for this carrier, check whether it is a non-collaborating receiver for this carrier
+				if (!copyPlayers.containsKey(receiverCollaborator.getId())) {
+					ReceiverPlan receiverPlan = receiverCollaborator.getTypedSelectedPlan();
+					// check whether this receiver has orders for this carrier
+					boolean hasOrdersForThisCarrier = receiverPlan.getReceiverOrders().stream()
+							.anyMatch(order -> order.getCarrierId().equals(carrierCollaborator.getId()));
+					if (hasOrdersForThisCarrier) {
+						nonCollaboratingReceivers.add(receiverCollaborator);
+					}
+				}
+			});
+			// merge the non-collaborating receivers and the collaborating ones
+			receiverCollaborators.addAll(nonCollaboratingReceivers);
 			// need to re-generate the carrier plan based on the new receiver plans/requests
 			LinkReceiverAndCarrier.receiversTriggerCarrierReplan(carrierCollaborator, receiverCollaborators,
 					network, tt
@@ -277,4 +294,3 @@ public class FreightPseudoSimulator {
 
 
 }
-

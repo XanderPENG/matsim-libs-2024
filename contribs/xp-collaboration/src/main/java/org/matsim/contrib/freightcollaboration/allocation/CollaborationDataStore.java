@@ -19,7 +19,6 @@ public class CollaborationDataStore {
 	// This map stores the original plans of each collaborator before any modifications due to collaboration.
 	// Note: this map should not be changed after initialization.
 	private final Map<CollaboratorRole, Map<Id<?>, ? extends BasicPlan>> originalPlans;
-	private Map<CollaboratorRole, Map<Id<?>, Double>> contributions;
 	private Map<MutableFreightCoalition, Map<Set<Id<?>>, Double>> simulatedCoalitionScores;
 	private Map<Id<?>, Double> allocatedValues;
 
@@ -27,24 +26,6 @@ public class CollaborationDataStore {
 	public CollaborationDataStore(Map<CollaboratorRole, Map<Id<?>, ? extends BasicPlan>> originalPlans) {
 		this.originalPlans = originalPlans;
 		resetSimulatedCoalitionScores();
-		resetContributions();
-	}
-
-	private void resetContributions() {
-
-		// Reset the contributions map to zero for all collaborators for the new iteration.
-		// This make sure that contributions has the same structure as originalPlans
-		contributions = new HashMap<>();
-		for (Map.Entry <CollaboratorRole, Map<Id<?>, ? extends BasicPlan>> entry : originalPlans.entrySet()) {
-			var role = entry.getKey();
-			var plansMap = entry.getValue();
-			Map<Id<?>, Double> roleContributions = new HashMap<>();
-			for (Id<?> id : plansMap.keySet()) {
-				roleContributions.put(id, 0.0);
-			}
-			contributions.put(role, roleContributions);
-		}
-
 	}
 
 	/**
@@ -76,6 +57,12 @@ public class CollaborationDataStore {
 
 	public void setAllocatedValues(Map<Id<?>, Double> allocatedValues) {
 		this.allocatedValues = allocatedValues;
+	}
+
+	// Reset the entire data store (only used at the beginning of a new simulation)
+	public void reset(){
+		resetSimulatedCoalitionScores();
+		allocatedValues = null;
 	}
 
 }
