@@ -25,6 +25,8 @@ import com.graphhopper.jsprit.io.algorithm.VehicleRoutingAlgorithms;
 import org.apache.logging.log4j.LogManager;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.Scenario;
+import org.matsim.core.controler.events.BeforeMobsimEvent;
+import org.matsim.core.controler.listener.BeforeMobsimListener;
 import org.matsim.freight.carriers.*;
 import org.matsim.freight.carriers.jsprit.MatsimJspritFactory;
 import org.matsim.freight.carriers.jsprit.NetworkBasedTransportCosts;
@@ -40,7 +42,11 @@ import java.net.URL;
 import java.util.Collection;
 import java.util.Map;
 
-class ReceiverTriggersCarrierReplanningListener implements IterationStartsListener {
+/**
+ * I add the BeforeMobsimListener interface to be able to trigger carrier replanning there, instead of in IterationStarts.
+ * As it will clean the carrier plans and results in errors in the carrier strategy copying plans in the replanning phase.
+ */
+class ReceiverTriggersCarrierReplanningListener implements IterationStartsListener, BeforeMobsimListener {
     private final ReceiverConfigGroup receiverConfig;
 //	@Inject
 	private Scenario sc;
@@ -53,79 +59,157 @@ class ReceiverTriggersCarrierReplanningListener implements IterationStartsListen
 
     @Override
     public void notifyIterationStarts(IterationStartsEvent event) {
-        /* Replan the carrier at iteration zero, and one iteration after the receivers have replanned. */
-        if(event.getIteration() > 0 &&
-                           (event.getIteration()+1) % ConfigUtils.addOrGetModule(sc.getConfig(), ReceiverConfigGroup.class).getReceiverReplanningInterval() != 0) {
-            return;
-        }
-        LogManager.getLogger(ReceiverTriggersCarrierReplanningListener.class).info("--> Receiver triggering carrier to replan.");
-        // Adds the receiver agents that are part of the current (sub)coalition.
-        CollaborationUtils.setCoalitionFromReceiverAttributes( sc );
-
-        // clean out plans, services, shipments from carriers:
-        Map<Id<Carrier>, Carrier> carriers = CarriersUtils.getCarriers(sc).getCarriers();
-        for( Carrier carrier : carriers.values() ){
-            carrier.clearPlans();
-            carrier.getShipments().clear();
-            carrier.getServices().clear();
-        }
-
-        // re-fill the carriers from the receiver orders:
-        Map<Id<Receiver>, Receiver> receivers = ReceiverUtils.getReceivers( sc ).getReceivers();
-        int nn = 0 ;
-        for( Receiver receiver : receivers.values() ){
-            ReceiverPlan receiverPlan = receiver.getSelectedPlan();
-            for( ReceiverOrder receiverOrder : receiverPlan.getReceiverOrders() ){
-                for( Order order : receiverOrder.getReceiverProductOrders() ){
-                    nn++ ;
-                    CarrierShipment.Builder builder = CarrierShipment.Builder.newInstance(
-                                    Id.create("Order" + receiverPlan.getReceiver().getId().toString() + nn, CarrierShipment.class),
-                                    order.getProduct().getProductType().getOriginLinkId(),
-                                    order.getReceiver().getLinkId(),
-                                    (int) (Math.round(order.getDailyOrderQuantity()*order.getProduct().getProductType().getRequiredCapacity())) );
-                    CarrierShipment newShipment = builder
-                                                                  .setDeliveryDuration( order.getServiceDuration() )
-                                                                  .setDeliveryStartingTimeWindow( receiverPlan.getTimeWindows().get( 0 ) )
-                                                                  // TODO This only looks at the FIRST time window. This may need revision once we handle multiple
-                                                                  // time windows.
-                                                                  .build();
-                    if (newShipment.getCapacityDemand() != 0) {
-                        receiverOrder.getCarrier().getShipments().put(newShipment.getId(), newShipment );
-                    }
-                }
-            }
-        }
-
-        for( Carrier carrier : carriers.values() ){
-            // for all carriers, re-run jsprit:
-
-            VehicleRoutingProblem.Builder vrpBuilder = MatsimJspritFactory.createRoutingProblemBuilder(carrier, sc.getNetwork());
-
-            NetworkBasedTransportCosts netBasedCosts = NetworkBasedTransportCosts.Builder.newInstance(sc.getNetwork(), carrier.getCarrierCapabilities().getVehicleTypes()).build();
-            VehicleRoutingProblem vrp = vrpBuilder.setRoutingCost(netBasedCosts).build();
-
-            //read and create a pre-configured algorithms to solve the vrp
-            URL algoConfigFileName = IOUtils.extendUrl( sc.getConfig().getContext(), "initialPlanAlgorithm.xml");
-            VehicleRoutingAlgorithm vra = VehicleRoutingAlgorithms.readAndCreateAlgorithm(vrp, algoConfigFileName);
-
-            //solve the problem
-            Collection<VehicleRoutingProblemSolution> solutions = vra.searchSolutions();
-
-            //create a new carrierPlan from the best solution
-            CarrierPlan newPlan = MatsimJspritFactory.createPlan(carrier, Solutions.bestOf( solutions ) );
-
-            //route plan
-            NetworkRouter.routePlan(newPlan, netBasedCosts);
-
-            //assign this plan now to the carrier and make it the selected carrier plan
-            carrier.addPlan(newPlan);
-
-        }
-        String outputdirectory = sc.getConfig().controller().getOutputDirectory();
-        outputdirectory += outputdirectory.endsWith("/") ? "" : "/";
-//        new CarrierPlanWriter(CarrierControlerUtils.getCarriers(sc)).write(outputdirectory + ReceiverConfigGroup.CARRIERS_FILE);
-        new CarrierPlanWriter(CarriersUtils.getCarriers(sc)).write(outputdirectory +receiverConfig.getCarriersFile() );
-//        new ReceiversWriter( ReceiverUtils.getReceivers( sc ) ).write(outputdirectory + ReceiverConfigGroup.RECEIVERS_FILE);
-        new ReceiversWriter( ReceiverUtils.getReceivers( sc ) ).write(outputdirectory + receiverConfig.getReceiversFile());
+//        /* Replan the carrier at iteration zero, and one iteration after the receivers have replanned. */
+//        if(event.getIteration() > 0 &&
+//                           (event.getIteration()+1) % ConfigUtils.addOrGetModule(sc.getConfig(), ReceiverConfigGroup.class).getReceiverReplanningInterval() != 0) {
+//            return;
+//        }
+//        LogManager.getLogger(ReceiverTriggersCarrierReplanningListener.class).info("--> Receiver triggering carrier to replan.");
+//        // Adds the receiver agents that are part of the current (sub)coalition.
+//        CollaborationUtils.setCoalitionFromReceiverAttributes( sc );
+//
+//        // clean out plans, services, shipments from carriers:
+//        Map<Id<Carrier>, Carrier> carriers = CarriersUtils.getCarriers(sc).getCarriers();
+//        for( Carrier carrier : carriers.values() ){
+//            carrier.clearPlans();
+//            carrier.getShipments().clear();
+//            carrier.getServices().clear();
+//        }
+//
+//        // re-fill the carriers from the receiver orders:
+//        Map<Id<Receiver>, Receiver> receivers = ReceiverUtils.getReceivers( sc ).getReceivers();
+//        int nn = 0 ;
+//        for( Receiver receiver : receivers.values() ){
+//            ReceiverPlan receiverPlan = receiver.getSelectedPlan();
+//            for( ReceiverOrder receiverOrder : receiverPlan.getReceiverOrders() ){
+//                for( Order order : receiverOrder.getReceiverProductOrders() ){
+//                    nn++ ;
+//                    CarrierShipment.Builder builder = CarrierShipment.Builder.newInstance(
+//                                    Id.create("Order" + receiverPlan.getReceiver().getId().toString() + nn, CarrierShipment.class),
+//                                    order.getProduct().getProductType().getOriginLinkId(),
+//                                    order.getReceiver().getLinkId(),
+//                                    (int) (Math.round(order.getDailyOrderQuantity()*order.getProduct().getProductType().getRequiredCapacity())) );
+//                    CarrierShipment newShipment = builder
+//                                                                  .setDeliveryDuration( order.getServiceDuration() )
+//                                                                  .setDeliveryStartingTimeWindow( receiverPlan.getTimeWindows().get( 0 ) )
+//                                                                  // TODO This only looks at the FIRST time window. This may need revision once we handle multiple
+//                                                                  // time windows.
+//                                                                  .build();
+//                    if (newShipment.getCapacityDemand() != 0) {
+//                        receiverOrder.getCarrier().getShipments().put(newShipment.getId(), newShipment );
+//                    }
+//                }
+//            }
+//        }
+//
+//        for( Carrier carrier : carriers.values() ){
+//            // for all carriers, re-run jsprit:
+//
+//            VehicleRoutingProblem.Builder vrpBuilder = MatsimJspritFactory.createRoutingProblemBuilder(carrier, sc.getNetwork());
+//
+//            NetworkBasedTransportCosts netBasedCosts = NetworkBasedTransportCosts.Builder.newInstance(sc.getNetwork(), carrier.getCarrierCapabilities().getVehicleTypes()).build();
+//            VehicleRoutingProblem vrp = vrpBuilder.setRoutingCost(netBasedCosts).build();
+//
+//            //read and create a pre-configured algorithms to solve the vrp
+//            URL algoConfigFileName = IOUtils.extendUrl( sc.getConfig().getContext(), "initialPlanAlgorithm.xml");
+//            VehicleRoutingAlgorithm vra = VehicleRoutingAlgorithms.readAndCreateAlgorithm(vrp, algoConfigFileName);
+//
+//            //solve the problem
+//            Collection<VehicleRoutingProblemSolution> solutions = vra.searchSolutions();
+//
+//            //create a new carrierPlan from the best solution
+//            CarrierPlan newPlan = MatsimJspritFactory.createPlan(carrier, Solutions.bestOf( solutions ) );
+//
+//            //route plan
+//            NetworkRouter.routePlan(newPlan, netBasedCosts);
+//
+//            //assign this plan now to the carrier and make it the selected carrier plan
+//            carrier.addPlan(newPlan);
+//
+//        }
+//        String outputdirectory = sc.getConfig().controller().getOutputDirectory();
+//        outputdirectory += outputdirectory.endsWith("/") ? "" : "/";
+////        new CarrierPlanWriter(CarrierControlerUtils.getCarriers(sc)).write(outputdirectory + ReceiverConfigGroup.CARRIERS_FILE);
+//        new CarrierPlanWriter(CarriersUtils.getCarriers(sc)).write(outputdirectory +receiverConfig.getCarriersFile() );
+////        new ReceiversWriter( ReceiverUtils.getReceivers( sc ) ).write(outputdirectory + ReceiverConfigGroup.RECEIVERS_FILE);
+//        new ReceiversWriter( ReceiverUtils.getReceivers( sc ) ).write(outputdirectory + receiverConfig.getReceiversFile());
     }
+
+	@Override
+	public void notifyBeforeMobsim(BeforeMobsimEvent event) {
+		/* Replan the carrier at iteration zero, and one iteration after the receivers have replanned. */
+		if(event.getIteration() > 0 &&
+			(event.getIteration()+1) % ConfigUtils.addOrGetModule(sc.getConfig(), ReceiverConfigGroup.class).getReceiverReplanningInterval() != 0) {
+			return;
+		}
+		LogManager.getLogger(ReceiverTriggersCarrierReplanningListener.class).info("--> Receiver triggering carrier to replan.");
+		// Adds the receiver agents that are part of the current (sub)coalition.
+		CollaborationUtils.setCoalitionFromReceiverAttributes( sc );
+
+		// clean out plans, services, shipments from carriers:
+		Map<Id<Carrier>, Carrier> carriers = CarriersUtils.getCarriers(sc).getCarriers();
+		for( Carrier carrier : carriers.values() ){
+			carrier.clearPlans();
+			carrier.getShipments().clear();
+			carrier.getServices().clear();
+		}
+
+		// re-fill the carriers from the receiver orders:
+		Map<Id<Receiver>, Receiver> receivers = ReceiverUtils.getReceivers( sc ).getReceivers();
+		int nn = 0 ;
+		for( Receiver receiver : receivers.values() ){
+			ReceiverPlan receiverPlan = receiver.getSelectedPlan();
+			for( ReceiverOrder receiverOrder : receiverPlan.getReceiverOrders() ){
+				for( Order order : receiverOrder.getReceiverProductOrders() ){
+					nn++ ;
+					CarrierShipment.Builder builder = CarrierShipment.Builder.newInstance(
+						Id.create("Order" + receiverPlan.getReceiver().getId().toString() + nn, CarrierShipment.class),
+						order.getProduct().getProductType().getOriginLinkId(),
+						order.getReceiver().getLinkId(),
+						(int) (Math.round(order.getDailyOrderQuantity()*order.getProduct().getProductType().getRequiredCapacity())) );
+					CarrierShipment newShipment = builder
+						.setDeliveryDuration( order.getServiceDuration() )
+						.setDeliveryStartingTimeWindow( receiverPlan.getTimeWindows().get( 0 ) )
+						// TODO This only looks at the FIRST time window. This may need revision once we handle multiple
+						// time windows.
+						.build();
+					if (newShipment.getCapacityDemand() != 0) {
+						receiverOrder.getCarrier().getShipments().put(newShipment.getId(), newShipment );
+					}
+				}
+			}
+		}
+
+		for( Carrier carrier : carriers.values() ){
+			// for all carriers, re-run jsprit:
+
+			VehicleRoutingProblem.Builder vrpBuilder = MatsimJspritFactory.createRoutingProblemBuilder(carrier, sc.getNetwork());
+
+			NetworkBasedTransportCosts netBasedCosts = NetworkBasedTransportCosts.Builder.newInstance(sc.getNetwork(), carrier.getCarrierCapabilities().getVehicleTypes()).build();
+			VehicleRoutingProblem vrp = vrpBuilder.setRoutingCost(netBasedCosts).build();
+
+			//read and create a pre-configured algorithms to solve the vrp
+			URL algoConfigFileName = IOUtils.extendUrl( sc.getConfig().getContext(), "initialPlanAlgorithm.xml");
+			VehicleRoutingAlgorithm vra = VehicleRoutingAlgorithms.readAndCreateAlgorithm(vrp, algoConfigFileName);
+
+			//solve the problem
+			Collection<VehicleRoutingProblemSolution> solutions = vra.searchSolutions();
+
+			//create a new carrierPlan from the best solution
+			CarrierPlan newPlan = MatsimJspritFactory.createPlan(carrier, Solutions.bestOf( solutions ) );
+
+			//route plan
+			NetworkRouter.routePlan(newPlan, netBasedCosts);
+
+			//assign this plan now to the carrier and make it the selected carrier plan
+			carrier.addPlan(newPlan);
+
+		}
+		String outputdirectory = sc.getConfig().controller().getOutputDirectory();
+		outputdirectory += outputdirectory.endsWith("/") ? "" : "/";
+//        new CarrierPlanWriter(CarrierControlerUtils.getCarriers(sc)).write(outputdirectory + ReceiverConfigGroup.CARRIERS_FILE);
+		new CarrierPlanWriter(CarriersUtils.getCarriers(sc)).write(outputdirectory +receiverConfig.getCarriersFile() );
+//        new ReceiversWriter( ReceiverUtils.getReceivers( sc ) ).write(outputdirectory + ReceiverConfigGroup.RECEIVERS_FILE);
+		new ReceiversWriter( ReceiverUtils.getReceivers( sc ) ).write(outputdirectory + receiverConfig.getReceiversFile());
+	}
 }

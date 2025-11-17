@@ -32,6 +32,12 @@ public class AllocationToScoreListener implements IterationEndsListener {
 
 	@Override
 	public void notifyIterationEnds(IterationEndsEvent event) {
+		// Also, skip if this is the first iteration
+		if (event.getIteration() == scenario.getConfig().controller().getFirstIteration()) {
+			LOGGER.info("First iteration - skipping allocation to score conversion.");
+			return;
+		}
+
 		convertAllocationToScores();
 	}
 
@@ -40,7 +46,7 @@ public class AllocationToScoreListener implements IterationEndsListener {
 	 * This is a temporary solution until a more integrated approach is implemented within the scoring functions.
 	 */
 	private void convertAllocationToScores(){
-		if (collaborationDataStore.getAllocatedValues().isEmpty()){
+		if (collaborationDataStore.getAllocatedValues() == null || collaborationDataStore.getAllocatedValues().isEmpty()){
 			LOGGER.warn("No allocated values found. Skipping allocation to score conversion.");
 			return;
 		}

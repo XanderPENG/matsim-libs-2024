@@ -1,6 +1,8 @@
 package org.matsim.contrib.freightcollaboration.allocation;
 
 import com.google.inject.Inject;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.network.Network;
 import org.matsim.api.core.v01.population.Activity;
@@ -25,25 +27,33 @@ import org.matsim.freight.logistics.LSP;
 import org.matsim.freight.logistics.LSPPlan;
 import org.matsim.freight.receiver.Receiver;
 import org.matsim.freight.receiver.ReceiverPlan;
+import org.slf4j.LoggerFactory;
 
 import java.util.*;
 
 public class FreightPseudoSimulator {
 
-	@Inject
+//	@Inject
 	CollaborationDataStore collaborationDataStore;
 
-	@Inject
+//	@Inject
 	Network network;
 
-	@Inject
+//	@Inject
 	FreightCollaborators freightCollaborators;
 
 	// Travel time to be used in the pseudo-simulation, which is based on the events of the main-MATSim simulation
 	TravelTime tt;
 
-	FreightPseudoSimulator(TravelTime tt) {
+	private static Logger LOGGER = LogManager.getLogger(FreightPseudoSimulator.class);
+
+//	FreightPseudoSimulator() {}
+
+	FreightPseudoSimulator(CollaborationDataStore dataStore, Network network, FreightCollaborators freightCollaborators, TravelTime tt) {
 		this.tt = tt;
+		this.collaborationDataStore = dataStore;
+		this.network = network;
+		this.freightCollaborators = freightCollaborators;
 	}
 
 	void run() {
@@ -54,6 +64,7 @@ public class FreightPseudoSimulator {
 	 * For each sub-coalition, record its scores and return them as a map
 	 */
 	Map<Set<Id<?>>, Double> runAllSubCoalitions(Map<Id<?>, FreightCollaborator<?>> distributors, Map<Id<?>, FreightCollaborator<?>> players) {
+		LOGGER.info("Starting Freight Pseudo Simulator");
 		// Generate all possible sub-coalitions of the given players
 		var subCoalitionScoreMap = AllocationUtils.generateSubsets(players);
 		// For each sub-coalition, simulate it and record its score
@@ -291,6 +302,9 @@ public class FreightPseudoSimulator {
 		}
 	}
 
+	void setTravelTime(TravelTime travelTime) {
+		this.tt = travelTime;
+	}
 
 
 }

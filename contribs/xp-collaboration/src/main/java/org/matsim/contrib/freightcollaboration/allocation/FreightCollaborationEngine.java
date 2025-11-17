@@ -1,6 +1,8 @@
 package org.matsim.contrib.freightcollaboration.allocation;
 
 import com.google.inject.Inject;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.Scenario;
 import org.matsim.contrib.freightcollaboration.*;
@@ -19,27 +21,30 @@ import static org.matsim.contrib.freightcollaboration.CollaborationTypes.CARRIER
 
 public class FreightCollaborationEngine {
 
-	@Inject
-	private Scenario scenario;
+	private final Scenario scenario;
 
-	@Inject
-	private Config config;
+	private final Config config;
 
-	@Inject
-	private FreightCollaborators freightCollaborators;
+	private final FreightCollaborators freightCollaborators;
 
 	// Set it as package-private to be accessible from scorers and allocation models
-	@Inject
-	CollaborationDataStore collaborationDataStore;
+	final CollaborationDataStore collaborationDataStore;
 
 	private final List<MutableFreightCoalition> existingCoalitions;
+
+	private static final Logger LOGGER = LogManager.getLogger(FreightCollaborationEngine.class);
 
 	// FIXME: I do not see any reason to have this field if it is not used
 //	private final EventsManager existingEventsManager;
 
 	private final TravelTime travelTime;
 
-	public FreightCollaborationEngine(List<MutableFreightCoalition> existingCoalitions, TravelTime travelTime) {
+	public FreightCollaborationEngine(Config config, Scenario scenario, FreightCollaborators freightCollaborators,
+			CollaborationDataStore collaborationDataStore, List<MutableFreightCoalition> existingCoalitions, TravelTime travelTime) {
+		this.config = config;
+		this.scenario = scenario;
+		this.freightCollaborators = freightCollaborators;
+		this.collaborationDataStore = collaborationDataStore;
 		this.existingCoalitions = existingCoalitions;
 		this.travelTime = travelTime;
 	}
@@ -58,14 +63,14 @@ public class FreightCollaborationEngine {
 		//     // Perform specific logic for this collaboration type
 		// }
 		FreightCollaborationConfigGroup fcg = (FreightCollaborationConfigGroup) config.getModules().get(FreightCollaborationConfigGroup.GROUP_NAME);
-		AllocationModel allocationModel = AllocationUtils.createAllocationModel(fcg.ALLOCATION_MODEL);
+		AllocationModel allocationModel = AllocationUtils.createAllocationModel(fcg.ALLOCATION_MODEL, collaborationDataStore);
 		if (fcg.ALLOCATION_MODEL == AllocationModels.PROPORTIONAL) {
 			// Do not need to run the freight psim with such allocation model
 			// TODO: only need to specify the distributor and assignee for the model input
 		} else {
 			// Need to run the freight psim to evaluate the new plans and calculate the contributions
 
-			FreightPseudoSimulator freightPsim = new FreightPseudoSimulator(travelTime); // initialize a new psim instance
+			FreightPseudoSimulator freightPsim = new FreightPseudoSimulator(collaborationDataStore, scenario.getNetwork(), freightCollaborators, travelTime); // initialize a new psim instance
 
 			// A for-loop to iterate through all existing coalitions
 			for (MutableFreightCoalition coalition : existingCoalitions) {
@@ -77,6 +82,10 @@ public class FreightCollaborationEngine {
 				collaborationDataStore.addSimulatedCoalitionScores(coalition, subCoalitionsScoreMap);
 			}
 			// TODO: the allocation value type should be specified in the config later
+			if (existingCoalitions.isEmpty()) {
+				LOGGER.info("No valid coalitions found, skipping the allocation process.");
+				return;
+			}
 			allocationModel.allocate(AllocationValueTypes.COST_SAVINGS);
 		}
 

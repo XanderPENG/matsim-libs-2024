@@ -1,5 +1,7 @@
 package org.matsim.contrib.freightcollaboration.utils;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.population.HasPlansAndId;
 import org.matsim.contrib.freightcollaboration.FreightCollaborator;
@@ -8,23 +10,29 @@ import org.matsim.contrib.freightcollaboration.FreightCollaboratorImpl;
 import org.matsim.contrib.freightcollaboration.CollaboratorRole;
 import org.matsim.contrib.freightcollaboration.allocation.AllocationModel;
 import org.matsim.contrib.freightcollaboration.allocation.AllocationModels;
+import org.matsim.contrib.freightcollaboration.allocation.CollaborationDataStore;
+import org.matsim.contrib.freightcollaboration.allocation.ShapleyValueAllocationModel;
 import org.matsim.freight.carriers.*;
 import org.matsim.freight.logistics.LSP;
 import org.matsim.freight.receiver.Receiver;
 import org.matsim.freight.receiver.ReceiverPlan;
 import org.matsim.freight.receiver.ReceiverUtils;
+import org.slf4j.LoggerFactory;
 
 import java.util.*;
 
 public class AllocationUtils {
 
-	public static AllocationModel createAllocationModel(AllocationModels allocationModelType) {
+	private static Logger LOGGER = LogManager.getLogger(AllocationUtils.class);
+
+	// TODO: the CollaborationDataStore should be injected via Guice, fix it later
+	public static AllocationModel createAllocationModel(AllocationModels allocationModelType, CollaborationDataStore collaborationDataStore) {
 		// Placeholder for actual implementation
 		switch (allocationModelType){
 			case AllocationModels.PROPORTIONAL:
 				// return new ProportionalAllocation();
 			case AllocationModels.SHAPLEY:
-				// return new ShapleyValueAllocationModel();
+				return new ShapleyValueAllocationModel(collaborationDataStore);
 			case AllocationModels.MARGINAL:
 				// return new MarginalContributionAllocationModel();
 			default:
@@ -69,6 +77,8 @@ public class AllocationUtils {
 	 */
 	@SuppressWarnings("unchecked")
 	public static <T extends FreightCollaborator<?>> Map<Id<?>, T> deepCopyCollaboratorsMap(Map<Id<?>, T> originalMap) {
+		LOGGER.info("Deep copy collaborators map");
+
 		Map<Id<?>, T> copiedMap = new HashMap<>();
 
 		for (Map.Entry<Id<?>, T> entry : originalMap.entrySet()) {
@@ -85,6 +95,7 @@ public class AllocationUtils {
 
 	/**
 	 * Deep copies a single FreightCollaborator by creating a new instance of its delegate agent.
+	 * @FIXME: Curretnly, the revceiverTriggerCarriersReplanning will reset the carrier plan (without scores), which will result in erroer when using CarrierUtils.copyPlan
 	 */
 	@SuppressWarnings("unchecked")
 	private static FreightCollaborator<?> deepCopyCollaborator(FreightCollaborator<?> originalCollaborator) {
@@ -114,7 +125,8 @@ public class AllocationUtils {
 
 					// Copy plans
 					for (CarrierPlan plan : originalCarrier.getPlans()) {
-						CarrierPlan copiedPlan = CarriersUtils.copyPlan(plan);
+						// Since the carrier plan will not have scores during the PSim, we can set it as 0.0
+						CarrierPlan copiedPlan = copyNoScorePlan(plan);
 						copiedCarrier.addPlan(copiedPlan);
 					}
 
@@ -188,6 +200,26 @@ public class AllocationUtils {
 		}
 
 		return copiedCollaborator;
+	}
+
+	static CarrierPlan copyNoScorePlan(CarrierPlan plan2copy) {
+		List<ScheduledTour> tours = new ArrayList<>();
+		for (ScheduledTour sTour : plan2copy.getScheduledTours()) {
+			double depTime = sTour.getDeparture();
+			CarrierVehicle vehicle = sTour.getVehicle();
+			Tour tour = sTour.getTour().duplicate();
+			tours.add(ScheduledTour.newInstance(tour, vehicle, depTime));
+		}
+		CarrierPlan copiedPlan = new CarrierPlan(plan2copy.getCarrier(), tours);
+		double initialScoreOfCopiedPlan;
+		if (plan2copy.getScore() != null) {
+			initialScoreOfCopiedPlan = plan2copy.getScore();
+		} else {
+			initialScoreOfCopiedPlan = 0.0;
+		}
+		copiedPlan.setScore(initialScoreOfCopiedPlan);
+		return copiedPlan;
+
 	}
 
 }

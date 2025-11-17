@@ -10,8 +10,9 @@ class ShapleyValueAllocationModelTest {
 
     @Test
     void calculateShapleyValues() {
+		CollaborationDataStore dataStore = null;  // Placeholder, not used in this test
         // Test implementation for calculateShapleyValues method
-        ShapleyValueAllocationModel model = new ShapleyValueAllocationModel();
+        ShapleyValueAllocationModel model = new ShapleyValueAllocationModel(dataStore);
 
         Map<Set<Id<?>>, Double> coalitionAndScores = generateCoalitionsAndPositiveScores();
         Map<Id<?>, Double> shapley = model.calculateShapleyValues(coalitionAndScores);

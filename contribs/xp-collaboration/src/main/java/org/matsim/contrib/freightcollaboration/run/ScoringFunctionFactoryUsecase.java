@@ -21,9 +21,12 @@ import java.util.Set;
 
 public class ScoringFunctionFactoryUsecase {
 
-	public class CarrierScoringFunctionFactoryUsecase implements CarrierScoringFunctionFactory {
+	public static class CarrierScoringFunctionFactoryUsecase implements CarrierScoringFunctionFactory {
 		@Inject
 		private Network network;
+
+		@Inject
+		FreightCollaborators freightCollaborators;
 
 		@Override
 		public ScoringFunction createScoringFunction(Carrier carrier) {
@@ -31,19 +34,20 @@ public class ScoringFunctionFactoryUsecase {
 			sf.addScoringFunction(new CarrierScoringFunctionFactoryImpl.SimpleDriversLegScoring(carrier, network));
 			sf.addScoringFunction(new CarrierScoringFunctionFactoryImpl.SimpleVehicleEmploymentScoring(carrier));
 			sf.addScoringFunction(new CarrierScoringFunctionFactoryImpl.SimpleDriversActivityScoring());
-			sf.addScoringFunction(new SimpleChargingReceiverScoring(carrier));
+			sf.addScoringFunction(new SimpleChargingReceiverScoring(carrier, freightCollaborators));
 			return sf;
 		}
 
 		public static class SimpleChargingReceiverScoring implements SumScoringFunction.BasicScoring {
 
 			private Carrier carrier;
-			@Inject
+
 			FreightCollaborators freightCollaborators;
 
-			public SimpleChargingReceiverScoring(Carrier carrier) {
+			public SimpleChargingReceiverScoring(Carrier carrier, FreightCollaborators freightCollaborators) {
 				super();
 				this.carrier = carrier;
+				this.freightCollaborators = freightCollaborators;
 			}
 
 			private double score = 0.0;
@@ -65,7 +69,7 @@ public class ScoringFunctionFactoryUsecase {
 		}
 	}
 
-	public class ReceiverScoringFunctionFactoryUsecase implements ReceiverScoringFunctionFactory {
+	public static class ReceiverScoringFunctionFactoryUsecase implements ReceiverScoringFunctionFactory {
 
 		private CollaborationDataStore collaborationDataStore;
 

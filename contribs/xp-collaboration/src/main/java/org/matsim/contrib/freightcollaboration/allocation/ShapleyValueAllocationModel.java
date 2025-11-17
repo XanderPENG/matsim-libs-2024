@@ -11,8 +11,12 @@ import java.util.Set;
 
 public class ShapleyValueAllocationModel implements AllocationModel {
 
-	@Inject
+//	@Inject
 	CollaborationDataStore collaborationDataStore;
+
+	public ShapleyValueAllocationModel(CollaborationDataStore collaborationDataStore) {
+		this.collaborationDataStore = collaborationDataStore;
+	}
 
 	@Override
 	public void allocate(AllocationValueTypes type) {

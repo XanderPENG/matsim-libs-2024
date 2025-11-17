@@ -1,7 +1,12 @@
 package org.matsim.contrib.freightcollaboration.listener;
 
 import com.google.inject.Inject;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.matsim.api.core.v01.Scenario;
 import org.matsim.api.core.v01.network.Network;
+import org.matsim.contrib.freightcollaboration.FreightCollaborators;
+import org.matsim.contrib.freightcollaboration.allocation.CollaborationDataStore;
 import org.matsim.contrib.freightcollaboration.allocation.FreightCollaborationEngine;
 import org.matsim.contrib.freightcollaboration.controller.FreightCoalitionManager;
 import org.matsim.core.api.experimental.events.EventsManager;
@@ -25,9 +30,20 @@ public class FreightCollaborationListener implements IterationStartsListener, Af
 	private Config config;
 
 	@Inject
+	private Scenario scenario;
+
+	@Inject
+	private FreightCollaborators freightCollaborators;
+
+	@Inject
+	private CollaborationDataStore collaborationDataStore;
+
+	@Inject
 	FreightCoalitionManager freightCollaborationManager;
 
 	private TravelTimeCalculator ttc;
+
+	private static final Logger LOGGER = LogManager.getLogger(FreightCollaborationListener.class);
 
 	@Override
 	public void notifyIterationStarts(IterationStartsEvent event) {
@@ -47,6 +63,16 @@ public class FreightCollaborationListener implements IterationStartsListener, Af
 	@Override
 	public void notifyAfterMobsim(AfterMobsimEvent event) {
 
+		// if this is the first iteration, skip the collaboration process
+		if (event.getIteration() == scenario.getConfig().controller().getFirstIteration()) {
+			// Remove the TravelTimeCalculator as an event handler, to avoid interference with next iteration
+			events.removeHandler(ttc);
+			ttc = null;
+			LOGGER.info("Skipping freight collaboration process at the first iteration.");
+			return;
+		}
+
+
 		// Get the events-based TravelTime
 		if (ttc == null) throw new IllegalStateException("TTC not initialized for this iteration.");
 		TravelTime tt = ttc.getLinkTravelTimes();
@@ -55,7 +81,8 @@ public class FreightCollaborationListener implements IterationStartsListener, Af
 		 * Use the TravelTime for the freight collaboration logic
 		 */
 
-		FreightCollaborationEngine collaborationEngine = new FreightCollaborationEngine(freightCollaborationManager.getMutableFreightCoalitions(), tt);
+		FreightCollaborationEngine collaborationEngine = new FreightCollaborationEngine(config, scenario, freightCollaborators,
+			collaborationDataStore, freightCollaborationManager.getMutableFreightCoalitions(), tt);
 		collaborationEngine.runCollaboration();
 
 		// Remove the TravelTimeCalculator as an event handler, to avoid interference with next iteration
