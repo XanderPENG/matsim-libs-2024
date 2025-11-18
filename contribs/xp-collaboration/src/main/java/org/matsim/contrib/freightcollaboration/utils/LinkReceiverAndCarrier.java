@@ -77,6 +77,7 @@ public class LinkReceiverAndCarrier {
 		VehicleRoutingProblem vrp = vrpBuilder.setRoutingCost(netBasedCosts).build();
 		// New a VRP algorithm and search for solutions
 		VehicleRoutingAlgorithm vra = new SchrimpfFactory().createAlgorithm(vrp);
+		vra.setMaxIterations(500);
 		Collection<VehicleRoutingProblemSolution> solutions = vra.searchSolutions();
 		// Create a new carrierPlan from the best solution
 		CarrierPlan newPlan = MatsimJspritFactory.createPlan(carrier, Solutions.bestOf(solutions));

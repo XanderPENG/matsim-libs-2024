@@ -1,6 +1,7 @@
 package org.matsim.contrib.freightcollaboration.controller;
 
 import org.matsim.api.core.v01.Id;
+import org.matsim.api.core.v01.Scenario;
 import org.matsim.api.core.v01.population.BasicPlan;
 import org.matsim.contrib.freightcollaboration.CollaboratorRole;
 import org.matsim.contrib.freightcollaboration.FreightCollaborator;
@@ -25,10 +26,12 @@ public class CollaborationModule extends AbstractModule {
 
 	private final CollaboratorModules collaboratorModules;
 	private final FreightCollaborators freightCollaborators;
+	private final Scenario scenario;
 
-	public CollaborationModule(CollaboratorModules modules, FreightCollaborators freightCollaborators) {
+	public CollaborationModule(CollaboratorModules modules, FreightCollaborators freightCollaborators, Scenario scenario) {
 		this.collaboratorModules = modules;
 		this.freightCollaborators = freightCollaborators;
+		this.scenario = scenario;
 	}
 
 	@Override
@@ -43,6 +46,7 @@ public class CollaborationModule extends AbstractModule {
 
 		// Initialize and bind the CollaborationDataStore so it is available for injection
 		CollaborationDataStore dataStore = initCollaborationDataStore();
+		dataStore.setScenario(scenario);
 		this.bind(CollaborationDataStore.class).toInstance(dataStore);
 	}
 

@@ -11,7 +11,6 @@ import org.matsim.api.core.v01.network.Network;
 import org.matsim.contrib.freightcollaboration.CollaborationTypes;
 import org.matsim.contrib.freightcollaboration.CollaboratorRole;
 import org.matsim.contrib.freightcollaboration.FreightCollaborators;
-import org.matsim.contrib.freightcollaboration.allocation.CollaborationDataStore;
 import org.matsim.contrib.freightcollaboration.config.CollaborationParamSet;
 import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfigGroup;
 import org.matsim.contrib.freightcollaboration.controller.CollaborationModule;
@@ -106,7 +105,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 		// Add collaboration modules
 		CollaboratorModules collaboratorModules = new CollaboratorModules(Map.of(CollaboratorRole.RECEIVER, receiverModule,
 			CollaboratorRole.CARRIER, new CarrierModule()));
-		CollaborationModule collaborationModule = new CollaborationModule(collaboratorModules, freightCollaborators);
+		CollaborationModule collaborationModule = new CollaborationModule(collaboratorModules, freightCollaborators, scenario);
 
 		// Install all collaborator modules
 		collaborationModule.installAllCollaboratorModules(controler);
@@ -224,7 +223,15 @@ public class RunCarrierReceiverShapleyAllocationExample {
 		Set<Id<Link>> collaborativeReceiversLocations = Set.of(
 			Id.createLinkId("j(4,1)R"),
 			Id.createLinkId("j(8,3)R"),
-			Id.createLinkId("i(9,2)"));
+			Id.createLinkId("i(9,2)"),
+			Id.createLinkId("j(7,5)"),
+			Id.createLinkId("j(8,5)R"),
+			Id.createLinkId("j(4,8)R"),
+			Id.createLinkId("i(6,2)"),
+			Id.createLinkId("i(4,8)"),
+			Id.createLinkId("i(3,2)"),
+			Id.createLinkId("i(1,5)R")
+		);
 
 		for (Id<Link> location : collaborativeReceiversLocations) {
 			Receiver receiver = ReceiverUtils.newInstance(Id.create("collaborativeReceiver_" + location, Receiver.class));
@@ -235,17 +242,17 @@ public class RunCarrierReceiverShapleyAllocationExample {
 		}
 
 		// 2 receivers not in the coalition
-		Set<Id<Link>> nonCollaborativeReceiversLocations = Set.of(
-			Id.createLinkId("j(1,7)"),
-			Id.createLinkId("j(0,4)R"));
-
-		for (Id<Link> location : nonCollaborativeReceiversLocations) {
-			Receiver receiver = ReceiverUtils.newInstance(Id.create("nonCollaborativeReceiver_" + location, Receiver.class));
-			receiver.setLinkId(location);
-			receiver.getAttributes().putAttribute(CollaborationUtils.ATTR_GRANDCOALITION_MEMBER, false);
-			receiver.getAttributes().putAttribute(CollaborationUtils.ATTR_COLLABORATION_STATUS, false);
-			receivers.addReceiver(receiver);
-		}
+//		Set<Id<Link>> nonCollaborativeReceiversLocations = Set.of(
+//			Id.createLinkId("j(1,7)"),
+//			Id.createLinkId("j(0,4)R"));
+//
+//		for (Id<Link> location : nonCollaborativeReceiversLocations) {
+//			Receiver receiver = ReceiverUtils.newInstance(Id.create("nonCollaborativeReceiver_" + location, Receiver.class));
+//			receiver.setLinkId(location);
+//			receiver.getAttributes().putAttribute(CollaborationUtils.ATTR_GRANDCOALITION_MEMBER, false);
+//			receiver.getAttributes().putAttribute(CollaborationUtils.ATTR_COLLABORATION_STATUS, false);
+//			receivers.addReceiver(receiver);
+//		}
 		return receivers;
 	}
 
@@ -310,11 +317,11 @@ public class RunCarrierReceiverShapleyAllocationExample {
 			Collection<Order> orders2 = new ArrayList<>();
 
 			Order Order1 = Order.Builder.newInstance(Id.create("Order1", Order.class), receiver, receiverProduct1)
-				.setServiceTime(5*60)
+				.setServiceTime(10*60)
 				.buildWithCalculatedOrderQuantity();
 
 			Order Order2 = Order.Builder.newInstance(Id.create("Order2", Order.class), receiver, receiverProduct2)
-				.setServiceTime(10*60)
+				.setServiceTime(20*60)
 				.buildWithCalculatedOrderQuantity();
 
 			orders1.add(Order1);
@@ -327,7 +334,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 			ReceiverPlan receiverPlan = ReceiverPlan.Builder.newInstance(receiver, status)
 				.addReceiverOrder(receiverOrder1)
 				.addReceiverOrder(receiverOrder2)
-				.addTimeWindow(TimeWindow.newInstance(6*60*60, 10*60*60))
+				.addTimeWindow(TimeWindow.newInstance(6*60*60, 9*60*60))
 //				.addTimeWindow(TimeWindow.newInstance(14*60*60, 18*60*60))
 				.build();
 

@@ -3,6 +3,7 @@ package org.matsim.contrib.freightcollaboration.allocation;
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
 import org.matsim.api.core.v01.Id;
+import org.matsim.api.core.v01.Scenario;
 import org.matsim.api.core.v01.network.Network;
 import org.matsim.api.core.v01.population.BasicPlan;
 import org.matsim.contrib.freightcollaboration.CollaboratorRole;
@@ -21,7 +22,7 @@ public class CollaborationDataStore {
 	private final Map<CollaboratorRole, Map<Id<?>, ? extends BasicPlan>> originalPlans;
 	private Map<MutableFreightCoalition, Map<Set<Id<?>>, Double>> simulatedCoalitionScores;
 	private Map<Id<?>, Double> allocatedValues;
-
+	private Scenario scenario;
 
 	public CollaborationDataStore(Map<CollaboratorRole, Map<Id<?>, ? extends BasicPlan>> originalPlans) {
 		this.originalPlans = originalPlans;
@@ -65,4 +66,11 @@ public class CollaborationDataStore {
 		allocatedValues = null;
 	}
 
+	public Scenario getScenario() {
+		return scenario;
+	}
+
+	public void setScenario(Scenario scenario) {
+		this.scenario = scenario;
+	}
 }

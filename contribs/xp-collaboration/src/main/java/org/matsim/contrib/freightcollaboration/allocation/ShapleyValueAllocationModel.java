@@ -4,7 +4,11 @@ import com.google.inject.Inject;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Id;
+import org.matsim.contrib.freightcollaboration.CollaborationTypes;
+import org.matsim.contrib.freightcollaboration.CollaboratorRole;
 import org.matsim.contrib.freightcollaboration.MutableFreightCoalition;
+import org.matsim.contrib.freightcollaboration.config.CollaborationParamSet;
+import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfigGroup;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -34,13 +38,24 @@ public class ShapleyValueAllocationModel implements AllocationModel {
 
 	// TODO: We may incorporate the allocation factor (i.e., how much cost savings could be allocated by the carrier) later if needed
 	public void allocateCostSavings() {
+		//@FIXME: the factor should be read from config
+		double allocationFactor = 0.9;
 		// Maintain a map to store final allocation values for each collaborator
 		Map<Id<?>, Double> finalAllocations = new HashMap<>();
 
 		// For-loop over all mutable coalitions
 		for (Map.Entry<MutableFreightCoalition, Map<Set<Id<?>>, Double>> entry : collaborationDataStore.getSimulatedCoalitionScores().entrySet()) {
 			MutableFreightCoalition coalition = entry.getKey();
+			// in this map key: subcoalition, but without the distributor ID (carrier) but only the players
 			Map<Set<Id<?>>, Double> coalitionScores = entry.getValue();
+
+			// Get the distributor (carrier) ID by collaboration types
+			Id<?> distributorId = null;
+			if (coalition.getCollaborationType() == CollaborationTypes.CARRIER_RECEIVER) {
+				distributorId = coalition.getCollaboratorsSetByRole(CollaboratorRole.CARRIER).iterator().next().getId();
+			} else {
+				throw new IllegalStateException("Unsupported collaboration type for Shapley Value allocation: " + coalition.getCollaborationType());
+			}
 
 			// Calculate the cost savings for each subcoalition in  this coalition
 			double nonCollaborativeCost = coalitionScores.get(Set.of());
@@ -49,7 +64,7 @@ public class ShapleyValueAllocationModel implements AllocationModel {
 				Set<Id<?>> subCoalition = scoreEntry.getKey();
 				double collaborativeCost = scoreEntry.getValue();
 				// it should not be negative, so we use absolute value here to avoid any issue
-				double savings = Math.abs(nonCollaborativeCost - collaborativeCost);
+				double savings = collaborativeCost - nonCollaborativeCost;
 				if (savings < 0) {
 					logger.warn("Pls check that the collaborative cost savings should not be negative. now the savings: {}", savings);
 				}
@@ -58,13 +73,18 @@ public class ShapleyValueAllocationModel implements AllocationModel {
 
 			// Calculate Shapley values of cost savings for this coalition
 			Map<Id<?>, Double> shapleyValues = calculateShapleyValues(costSavings);
+			double totalShapleyValue = shapleyValues.values().stream().mapToDouble(Double::doubleValue).sum();
+			// reserve certain savings by the distributor based on the allocation factor and total cost savings
+			double reservedCostSavings = totalShapleyValue * (1-allocationFactor);
 
 			// record the allocations
 			for (Map.Entry<Id<?>, Double> shapleyEntry : shapleyValues.entrySet()) {
 				Id<?> collaboratorId = shapleyEntry.getKey();
 				double allocation = shapleyEntry.getValue();
-				finalAllocations.put(collaboratorId, finalAllocations.getOrDefault(collaboratorId, 0.0) + allocation);
+				finalAllocations.put(collaboratorId, finalAllocations.getOrDefault(collaboratorId, 0.0) + allocationFactor * allocation);
 			}
+			// Add the reserved savings to the distributor
+			finalAllocations.put(distributorId, finalAllocations.getOrDefault(distributorId, 0.0) + reservedCostSavings);
 		}
 
 		// Update the allocated values in the data store

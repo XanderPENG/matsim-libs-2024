@@ -101,7 +101,7 @@ public class RunBasicCarrierReceiverExample {
 
 		// Add collaboration modules
 		CollaboratorModules collaboratorModules = new CollaboratorModules(Map.of(CollaboratorRole.RECEIVER, receiverModule));
-		CollaborationModule collaborationModule = new CollaborationModule(collaboratorModules, freightCollaborators);
+		CollaborationModule collaborationModule = new CollaborationModule(collaboratorModules, freightCollaborators, scenario);
 		// Install all collaborator modules
 		collaborationModule.installAllCollaboratorModules(controler);
 		// Install the collaboration module itself

@@ -195,19 +195,24 @@ public class FormFreightCoalitionListener implements IterationStartsListener {
 							.forEach(productOrder -> {
 								originalServiceDurations.add(productOrder.getServiceDuration());
 							});
-					// case 1: if the TW has changed, i.e., this TWs has any TW that is not in the original TWs
-					thisTWs.forEach(timeWindow -> {
-						if (!originalTWs.contains(timeWindow)){
+					// case 1: if any of the TW has been extended
+					for (int i = 0; i < thisTWs.size(); i++) {
+						TimeWindow thisTW = thisTWs.get(i);
+						TimeWindow originalTW = originalTWs.get(i);
+						if (thisTW.getStart() < originalTW.getStart() ||
+								thisTW.getEnd() > originalTW.getEnd()) {
 							collaboratingReceivers.add(receiverCollaborator);
 						}
-					});
+					}
 
-					// case 2: if the service duration has changed, i.e., this service durations has any duration that is not in the original service durations
-					thisServiceDurations.forEach(serviceDuration -> {
-						if (!originalServiceDurations.contains(serviceDuration)) {
+					// case 2: if the service duration has been contracted
+					for (int i = 0; i < thisServiceDurations.size(); i++) {
+						double thisServiceDuration = thisServiceDurations.get(i);
+						double originalServiceDuration = originalServiceDurations.get(i);
+						if (thisServiceDuration < originalServiceDuration) {
 							collaboratingReceivers.add(receiverCollaborator);
 						}
-					});
+					}
 				}
 			}
 		}

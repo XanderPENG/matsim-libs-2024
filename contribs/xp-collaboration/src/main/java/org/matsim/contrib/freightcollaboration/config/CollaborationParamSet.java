@@ -22,6 +22,9 @@ public class CollaborationParamSet extends ReflectiveConfigGroup implements Mats
 	// Changed from Set<String> to Set<CollaborationStrategies>
 	private Set<CollaborationStrategies> COLLABORATION_STRATEGIES;
 
+	@Parameter
+	private double COST_SAVINGS_SHARING_THRESHOLD = 0.8;
+
 	public CollaborationParamSet() {
 		super(GROUP_NAME);
 	}
