@@ -19,12 +19,14 @@ class CarrierPSimScorer {
 	Map<Integer, Tuple<List<FreightActivity>, List<Leg>>> driverLegsAndActivities;
 	Carrier carrier;
 
-	@Inject
+//	@Inject
 	CarrierScoringFunctionFactory carrierScoringFunctionFactory;
 
-	CarrierPSimScorer(Map<Integer, Tuple<List<FreightActivity>, List<Leg>>> driverLegsAndActivities, Carrier carrier) {
+	CarrierPSimScorer(Map<Integer, Tuple<List<FreightActivity>, List<Leg>>> driverLegsAndActivities, Carrier carrier,
+					  CarrierScoringFunctionFactory carrierScoringFunctionFactory) {
 		this.driverLegsAndActivities = driverLegsAndActivities;
 		this.carrier = carrier;
+		this.carrierScoringFunctionFactory = carrierScoringFunctionFactory;
 	}
 
 	private void initScoringFunctions(){

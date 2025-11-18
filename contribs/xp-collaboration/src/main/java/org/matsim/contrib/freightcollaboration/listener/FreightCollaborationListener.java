@@ -17,6 +17,7 @@ import org.matsim.core.controler.listener.AfterMobsimListener;
 import org.matsim.core.controler.listener.IterationStartsListener;
 import org.matsim.core.router.util.TravelTime;
 import org.matsim.core.trafficmonitoring.TravelTimeCalculator;
+import org.matsim.freight.carriers.controller.CarrierScoringFunctionFactory;
 
 public class FreightCollaborationListener implements IterationStartsListener, AfterMobsimListener {
 
@@ -40,6 +41,9 @@ public class FreightCollaborationListener implements IterationStartsListener, Af
 
 	@Inject
 	FreightCoalitionManager freightCollaborationManager;
+
+	@Inject
+	CarrierScoringFunctionFactory carrierScoringFunctionFactory;
 
 	private TravelTimeCalculator ttc;
 
@@ -72,6 +76,8 @@ public class FreightCollaborationListener implements IterationStartsListener, Af
 			return;
 		}
 
+		// Reset the CollaborationDataStore for the new iteration
+		collaborationDataStore.reset();
 
 		// Get the events-based TravelTime
 		if (ttc == null) throw new IllegalStateException("TTC not initialized for this iteration.");
@@ -82,7 +88,7 @@ public class FreightCollaborationListener implements IterationStartsListener, Af
 		 */
 
 		FreightCollaborationEngine collaborationEngine = new FreightCollaborationEngine(config, scenario, freightCollaborators,
-			collaborationDataStore, freightCollaborationManager.getMutableFreightCoalitions(), tt);
+			collaborationDataStore, freightCollaborationManager.getMutableFreightCoalitions(), tt, carrierScoringFunctionFactory);
 		collaborationEngine.runCollaboration();
 
 		// Remove the TravelTimeCalculator as an event handler, to avoid interference with next iteration

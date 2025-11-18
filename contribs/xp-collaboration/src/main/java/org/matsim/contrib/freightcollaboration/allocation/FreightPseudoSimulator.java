@@ -12,12 +12,14 @@ import org.matsim.contrib.freightcollaboration.*;
 import org.matsim.contrib.freightcollaboration.utils.AllocationUtils;
 import org.matsim.contrib.freightcollaboration.utils.LinkReceiverAndCarrier;
 import org.matsim.core.population.PopulationUtils;
+import org.matsim.core.population.routes.NetworkRoute;
 import org.matsim.core.router.util.TravelTime;
 import org.matsim.core.utils.collections.Tuple;
 import org.matsim.freight.carriers.Carrier;
 import org.matsim.freight.carriers.CarrierPlan;
 import org.matsim.freight.carriers.ScheduledTour;
 import org.matsim.freight.carriers.Tour;
+import org.matsim.freight.carriers.controller.CarrierScoringFunctionFactory;
 import org.matsim.freight.carriers.controller.FreightActivity;
 import org.matsim.freight.carriers.events.AbstractCarrierEvent;
 import org.matsim.freight.carriers.events.CarrierEventCreatorUtils;
@@ -27,6 +29,7 @@ import org.matsim.freight.logistics.LSP;
 import org.matsim.freight.logistics.LSPPlan;
 import org.matsim.freight.receiver.Receiver;
 import org.matsim.freight.receiver.ReceiverPlan;
+import org.matsim.vehicles.Vehicle;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
@@ -45,15 +48,20 @@ public class FreightPseudoSimulator {
 	// Travel time to be used in the pseudo-simulation, which is based on the events of the main-MATSim simulation
 	TravelTime tt;
 
+	CarrierScoringFunctionFactory carrierScoringFunctionFactory;
+
 	private static Logger LOGGER = LogManager.getLogger(FreightPseudoSimulator.class);
 
 //	FreightPseudoSimulator() {}
 
-	FreightPseudoSimulator(CollaborationDataStore dataStore, Network network, FreightCollaborators freightCollaborators, TravelTime tt) {
+	FreightPseudoSimulator(CollaborationDataStore dataStore, Network network,
+						   FreightCollaborators freightCollaborators, TravelTime tt,
+						   CarrierScoringFunctionFactory carrierScoringFunctionFactory) {
 		this.tt = tt;
 		this.collaborationDataStore = dataStore;
 		this.network = network;
 		this.freightCollaborators = freightCollaborators;
+		this.carrierScoringFunctionFactory = carrierScoringFunctionFactory;
 	}
 
 	void run() {
@@ -72,7 +80,20 @@ public class FreightPseudoSimulator {
 			// if it is the empty set
 			if (subCoalition.isEmpty()) {
 				// No collaboration, set score to 0 (ignore)
-				continue;
+				// FIXME: is it appropriate to set it to 0?
+				Map<Id<?>, FreightCollaborator<?>> copyDistributors = AllocationUtils.deepCopyCollaboratorsMap(distributors);
+				Map<Id<?>, FreightCollaborator<?>> copyPlayers = AllocationUtils.deepCopyCollaboratorsMap(players);
+
+				// identify non-collaborating members
+				Set<Id<?>> nonCollaboratingMembers = players.keySet();
+				// For these non-collaborating members/players, we need to use their original plans from the data store
+				resetNonCollaboratingMembersPlans(nonCollaboratingMembers, copyPlayers);
+
+				// run PSim for this sub-coalition
+				double score = runPSim(copyDistributors, copyPlayers);
+
+				// record the score
+				subCoalitionScoreMap.put(subCoalition, score);
 //			} else if (subCoalition.size() == players.size()) {  // also using psim
 //				// Full coalition, use the existing main-MATSim events
 //				continue;
@@ -130,7 +151,8 @@ public class FreightPseudoSimulator {
 			// Then run the carrier PSim
 			var driverLegsAndActivitiesMap = runActivityBasedCarrierSimulation(carrierCollaborator.getDelegate());
 			// calculate the score based on the output legs and activities
-			CarrierPSimScorer carrierPSimScorer = new CarrierPSimScorer(driverLegsAndActivitiesMap, carrierCollaborator.getDelegate());
+			CarrierPSimScorer carrierPSimScorer = new CarrierPSimScorer(driverLegsAndActivitiesMap,
+				carrierCollaborator.getDelegate(), carrierScoringFunctionFactory);
 			return carrierPSimScorer.getScore();
 
 		} else if (CollaborationTypes.LSP_RECEIVER.isCompatible(collaboratorRoleOfDistributors, collaboratorRoleOfPlayers)) {
@@ -217,6 +239,7 @@ public class FreightPseudoSimulator {
 		// for-loop to process each tour in the carrier plan
 		for (ScheduledTour tour: selectedPlan.getScheduledTours()) {
 			double timeCursor = tour.getDeparture(); // start time of the tour, but it does not matter in this activity-based psim
+			Id<Vehicle> vehicleId = tour.getVehicle().getId(); // route must have vehicle id set
 			List<FreightActivity> freightActivities = new ArrayList<>();
 			List<Leg> matsimLegs = new ArrayList<>();
 
@@ -232,7 +255,10 @@ public class FreightPseudoSimulator {
 					Leg matsimLeg = PopulationUtils.createLeg(tour.getVehicle().getType().getNetworkMode());
 					matsimLeg.setDepartureTime(((Tour.Leg) el).getExpectedDepartureTime());
 					matsimLeg.setTravelTime(((Tour.Leg) el).getExpectedTransportTime());
-					matsimLeg.setRoute(((Tour.Leg) el).getRoute());
+					NetworkRoute nRoute = (NetworkRoute) ((Tour.Leg) el).getRoute();
+					nRoute.setVehicleId(vehicleId);
+					matsimLeg.setRoute(nRoute);
+
 					// add to matsimLegs
 					matsimLegs.add(matsimLeg);
 

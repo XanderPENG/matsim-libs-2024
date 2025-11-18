@@ -28,7 +28,8 @@ class TimeWindowStrategyManagerFactory implements Provider<ReceiverStrategyManag
 	@Override
 	public ReceiverStrategyManager get() {
 		final ReceiverStrategyManager strategyManager = new ReceiverStrategyManagerImpl();
-		strategyManager.setMaxPlansPerAgent(5);
+		// Changed from 5 to 3; XP, Nov 2025
+		strategyManager.setMaxPlansPerAgent(3);
 
 		{
 			GenericPlanStrategyImpl<ReceiverPlan, Receiver> strategy = new GenericPlanStrategyImpl<>((new ExpBetaPlanChanger.Factory<ReceiverPlan, Receiver>()).setBetaValue(10.0).build());

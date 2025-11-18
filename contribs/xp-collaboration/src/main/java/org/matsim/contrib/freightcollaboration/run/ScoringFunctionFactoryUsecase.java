@@ -62,7 +62,7 @@ public class ScoringFunctionFactoryUsecase {
 				// Get linked receivers for this carrier
 				Set<FreightCollaborator<Receiver>> linkedReceivers = LinkReceiverAndCarrier.findLinkedReceivers(carrier, freightCollaborators);
 				// Charge a fixed fee for each linked receiver
-				double feePerReceiver = 100.0; //
+				double feePerReceiver = 200.0; //
 				score = linkedReceivers.size() * feePerReceiver;
 				return score;
 			}
@@ -124,7 +124,7 @@ public class ScoringFunctionFactoryUsecase {
 
 			@Override
 			public double getScore() {
-				return this.penalty * findChangedOrders();
+				return -this.penalty * findChangedOrders();
 			}
 
 			private double findChangedOrders() {

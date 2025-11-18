@@ -2,6 +2,7 @@ package org.matsim.contrib.freightcollaboration.run;
 
 import com.google.inject.Provider;
 import jakarta.inject.Inject;
+import org.hsqldb.lib.MapEntry;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.Scenario;
 import org.matsim.api.core.v01.TransportMode;
@@ -70,7 +71,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 		ReceiverUtils.setReceivers(receivers, scenario);
 
 		// Generate receiver orders and plans and carrier shipments
-		RunBasicCarrierReceiverExample.ReceiverOrderGeneration receiverOrderGeneration = new RunBasicCarrierReceiverExample.ReceiverOrderGeneration(receivers, carriers);
+		ReceiverOrderGeneration receiverOrderGeneration = new ReceiverOrderGeneration(receivers, carriers);
 		receiverOrderGeneration.generateAllReceiverOrders();
 
 		// Write the freight scenario into output directory
@@ -85,7 +86,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 		Controler controler = new Controler(scenario);
 
 		// Add proper ReceiverModule to handle receiver simulation
-		ReceiverModule receiverModule = new ReceiverModule(ReceiverUtils.createFixedReceiverCostAllocation(100.0));
+		ReceiverModule receiverModule = new ReceiverModule(ReceiverUtils.createFixedReceiverCostAllocation(200.0));
 		receiverModule.setReplanningType(ReceiverReplanningType.timeWindow);
 
 		// Map Carriers and Receivers as FreightCollaborators
@@ -114,7 +115,11 @@ public class RunCarrierReceiverShapleyAllocationExample {
 		controler.addOverridingModule(collaborationModule);
 		// Install the scoring function
 		// Get carriers and carrier vehicle types
+		CarrierVehicleTypes carrierVehicleTypes = CarrierVehicleTypes.getVehicleTypes(scenarioCarriers);
 		CarrierVehicleTypes types = CarriersUtils.getCarrierVehicleTypes(scenario);
+		// put vehicle types into the scenario carrier vehicle types to ensure consistency
+		types.getVehicleTypes().putAll(carrierVehicleTypes.getVehicleTypes());
+
 		controler.addOverridingModule(new AbstractModule() {
 
 			@Override
@@ -138,7 +143,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 		config.controller().setOutputDirectory("output/carrierReceiverShapleyExample/");
 		config.controller().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.overwriteExistingFiles);
 		config.controller().setFirstIteration(0);
-		config.controller().setLastIteration(10);
+		config.controller().setLastIteration(100);
 		return config;
 	}
 
@@ -211,7 +216,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 		return carriers;
 	}
 
-	public static Receivers generateExampleReceivers() {
+	static Receivers generateExampleReceivers() {
 
 		Receivers receivers = ReceiverUtils.createReceivers();
 
@@ -323,7 +328,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 				.addReceiverOrder(receiverOrder1)
 				.addReceiverOrder(receiverOrder2)
 				.addTimeWindow(TimeWindow.newInstance(6*60*60, 10*60*60))
-				.addTimeWindow(TimeWindow.newInstance(14*60*60, 18*60*60))
+//				.addTimeWindow(TimeWindow.newInstance(14*60*60, 18*60*60))
 				.build();
 
 			this.receiverPlans.put(receiver.getId(), receiverPlan);

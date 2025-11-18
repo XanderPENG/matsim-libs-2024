@@ -11,6 +11,7 @@ import org.matsim.contrib.freightcollaboration.utils.AllocationUtils;
 import org.matsim.core.api.experimental.events.EventsManager;
 import org.matsim.core.config.Config;
 import org.matsim.core.router.util.TravelTime;
+import org.matsim.freight.carriers.controller.CarrierScoringFunctionFactory;
 
 import java.util.List;
 import java.util.Map;
@@ -34,19 +35,23 @@ public class FreightCollaborationEngine {
 
 	private static final Logger LOGGER = LogManager.getLogger(FreightCollaborationEngine.class);
 
+	private CarrierScoringFunctionFactory carrierScoringFunctionFactory;
+
 	// FIXME: I do not see any reason to have this field if it is not used
 //	private final EventsManager existingEventsManager;
 
 	private final TravelTime travelTime;
 
 	public FreightCollaborationEngine(Config config, Scenario scenario, FreightCollaborators freightCollaborators,
-			CollaborationDataStore collaborationDataStore, List<MutableFreightCoalition> existingCoalitions, TravelTime travelTime) {
+			CollaborationDataStore collaborationDataStore, List<MutableFreightCoalition> existingCoalitions, TravelTime travelTime,
+									  CarrierScoringFunctionFactory carrierScoringFunctionFactory) {
 		this.config = config;
 		this.scenario = scenario;
 		this.freightCollaborators = freightCollaborators;
 		this.collaborationDataStore = collaborationDataStore;
 		this.existingCoalitions = existingCoalitions;
 		this.travelTime = travelTime;
+		this.carrierScoringFunctionFactory = carrierScoringFunctionFactory;
 	}
 
 
@@ -70,7 +75,8 @@ public class FreightCollaborationEngine {
 		} else {
 			// Need to run the freight psim to evaluate the new plans and calculate the contributions
 
-			FreightPseudoSimulator freightPsim = new FreightPseudoSimulator(collaborationDataStore, scenario.getNetwork(), freightCollaborators, travelTime); // initialize a new psim instance
+			FreightPseudoSimulator freightPsim = new FreightPseudoSimulator(collaborationDataStore, scenario.getNetwork(),
+				freightCollaborators, travelTime, carrierScoringFunctionFactory); // initialize a new psim instance
 
 			// A for-loop to iterate through all existing coalitions
 			for (MutableFreightCoalition coalition : existingCoalitions) {

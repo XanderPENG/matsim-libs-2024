@@ -66,6 +66,8 @@ class TimeWindowUpperBoundMutator implements GenericPlanStrategyModule<ReceiverP
 		return switch (move) {
 			case 0 -> extendTimeWindowUpwards(tw);
 			case 1 -> contractTimeWindowTop(tw);
+			// Temporarily disable contraction of time window upper bound; XP, Nov 2025
+//			case 1 -> tw;
 			default -> throw new IllegalArgumentException("Cannot wiggle TimeWindow with move type '" + move + "'.");
 		};
 	}

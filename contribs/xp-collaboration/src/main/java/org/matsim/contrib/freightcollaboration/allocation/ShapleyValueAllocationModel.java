@@ -1,6 +1,8 @@
 package org.matsim.contrib.freightcollaboration.allocation;
 
 import com.google.inject.Inject;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Id;
 import org.matsim.contrib.freightcollaboration.MutableFreightCoalition;
 
@@ -13,6 +15,8 @@ public class ShapleyValueAllocationModel implements AllocationModel {
 
 //	@Inject
 	CollaborationDataStore collaborationDataStore;
+
+	private static final Logger logger = LogManager.getLogger(ShapleyValueAllocationModel.class);
 
 	public ShapleyValueAllocationModel(CollaborationDataStore collaborationDataStore) {
 		this.collaborationDataStore = collaborationDataStore;
@@ -44,7 +48,11 @@ public class ShapleyValueAllocationModel implements AllocationModel {
 			for (Map.Entry<Set<Id<?>>, Double> scoreEntry : coalitionScores.entrySet()) {
 				Set<Id<?>> subCoalition = scoreEntry.getKey();
 				double collaborativeCost = scoreEntry.getValue();
-				double savings = nonCollaborativeCost - collaborativeCost;
+				// it should not be negative, so we use absolute value here to avoid any issue
+				double savings = Math.abs(nonCollaborativeCost - collaborativeCost);
+				if (savings < 0) {
+					logger.warn("Pls check that the collaborative cost savings should not be negative. now the savings: {}", savings);
+				}
 				costSavings.put(subCoalition, savings);
 			}
 
