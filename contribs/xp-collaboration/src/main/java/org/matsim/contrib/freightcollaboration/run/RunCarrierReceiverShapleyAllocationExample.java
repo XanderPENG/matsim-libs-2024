@@ -85,7 +85,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 		Controler controler = new Controler(scenario);
 
 		// Add proper ReceiverModule to handle receiver simulation
-		ReceiverModule receiverModule = new ReceiverModule(ReceiverUtils.createFixedReceiverCostAllocation(200.0));
+		ReceiverModule receiverModule = new ReceiverModule(ReceiverUtils.createFixedReceiverCostAllocation(100.0));
 		receiverModule.setReplanningType(ReceiverReplanningType.timeWindow);
 
 		// Map Carriers and Receivers as FreightCollaborators
@@ -138,11 +138,11 @@ public class RunCarrierReceiverShapleyAllocationExample {
 		URL context = ExamplesUtils.getTestScenarioURL("freight-chessboard-9x9");
 		Config config = ConfigUtils.createConfig();
 		config.setContext(context);
-		config.network().setInputFile("grid9x9.xml");
+		config.network().setInputFile("/Volumes/External/gitProj/matsim-libs-2024/input/example_octagonal_network.xml");
 		config.controller().setOutputDirectory("output/carrierReceiverShapleyExample/");
 		config.controller().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.overwriteExistingFiles);
 		config.controller().setFirstIteration(0);
-		config.controller().setLastIteration(100);
+		config.controller().setLastIteration(10);
 		return config;
 	}
 
@@ -160,6 +160,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 			.setCapacity(3000)  // in kg
 			.setFixCost(100)
 			.setCostPerDistanceUnit(4.22E-3)
+//			.setCostPerDistanceUnit(0.04)
 			.setCostPerTimeUnit(0.089)
 			.build();
 		lightVanType.setNetworkMode("car");
@@ -176,13 +177,15 @@ public class RunCarrierReceiverShapleyAllocationExample {
 		Carrier carrier1 = CarriersUtils.createCarrier(Id.create("carrier1", Carrier.class));
 		CarrierVehicle lightVan = CarrierVehicle.Builder.newInstance(
 				Id.createVehicleId("lightVan1"),
-				Id.createLinkId("i(3,4)"),
+				Id.createLinkId("0_to_center"),
 				lightVanType)
+			.setEarliestStart(5*60*60)
 			.build();
 		CarrierVehicle heavyVan = CarrierVehicle.Builder.newInstance(
 				Id.createVehicleId("heavyVan1"),
-				Id.createLinkId("i(3,4)"),
+				Id.createLinkId("0_to_center"),
 				heavyVanType)
+			.setEarliestStart(5*60*60)
 			.build();
 		CarrierCapabilities carrierCapabilities1 = CarrierCapabilities.Builder.newInstance()
 			.addVehicle(lightVan)
@@ -193,24 +196,24 @@ public class RunCarrierReceiverShapleyAllocationExample {
 		carriers.addCarrier(carrier1);
 
 		// Create Carrier 2
-		Carrier carrier2 = CarriersUtils.createCarrier(Id.create("carrier2", Carrier.class));
-		CarrierVehicle lightVan2 = CarrierVehicle.Builder.newInstance(
-				Id.createVehicleId("lightVan2"),
-				Id.createLinkId("i(7,7)R"),
-				lightVanType)
-			.build();
-		CarrierVehicle heavyVan2 = CarrierVehicle.Builder.newInstance(
-				Id.createVehicleId("heavyVan2"),
-				Id.createLinkId("i(7,7)R"),
-				heavyVanType)
-			.build();
-		CarrierCapabilities carrierCapabilities2 = CarrierCapabilities.Builder.newInstance()
-			.addVehicle(lightVan2)
-			.addVehicle(heavyVan2)
-			.setFleetSize(CarrierCapabilities.FleetSize.INFINITE)
-			.build();
-		carrier2.setCarrierCapabilities(carrierCapabilities2);
-		carriers.addCarrier(carrier2);
+//		Carrier carrier2 = CarriersUtils.createCarrier(Id.create("carrier2", Carrier.class));
+//		CarrierVehicle lightVan2 = CarrierVehicle.Builder.newInstance(
+//				Id.createVehicleId("lightVan2"),
+//				Id.createLinkId("i(7,7)R"),
+//				lightVanType)
+//			.build();
+//		CarrierVehicle heavyVan2 = CarrierVehicle.Builder.newInstance(
+//				Id.createVehicleId("heavyVan2"),
+//				Id.createLinkId("i(7,7)R"),
+//				heavyVanType)
+//			.build();
+//		CarrierCapabilities carrierCapabilities2 = CarrierCapabilities.Builder.newInstance()
+//			.addVehicle(lightVan2)
+//			.addVehicle(heavyVan2)
+//			.setFleetSize(CarrierCapabilities.FleetSize.INFINITE)
+//			.build();
+//		carrier2.setCarrierCapabilities(carrierCapabilities2);
+//		carriers.addCarrier(carrier2);
 
 		return carriers;
 	}
@@ -221,16 +224,14 @@ public class RunCarrierReceiverShapleyAllocationExample {
 
 		// 3 receivers in the coalition
 		Set<Id<Link>> collaborativeReceiversLocations = Set.of(
-			Id.createLinkId("j(4,1)R"),
-			Id.createLinkId("j(8,3)R"),
-			Id.createLinkId("i(9,2)"),
-			Id.createLinkId("j(7,5)"),
-			Id.createLinkId("j(8,5)R"),
-			Id.createLinkId("j(4,8)R"),
-			Id.createLinkId("i(6,2)"),
-			Id.createLinkId("i(4,8)"),
-			Id.createLinkId("i(3,2)"),
-			Id.createLinkId("i(1,5)R")
+			Id.createLinkId("0_to_1"),
+			Id.createLinkId("1_to_2"),
+			Id.createLinkId("2_to_3"),
+			Id.createLinkId("3_to_4"),
+			Id.createLinkId("4_to_5"),
+			Id.createLinkId("5_to_6"),
+			Id.createLinkId("6_to_7"),
+			Id.createLinkId("7_to_0")
 		);
 
 		for (Id<Link> location : collaborativeReceiversLocations) {
@@ -257,11 +258,11 @@ public class RunCarrierReceiverShapleyAllocationExample {
 	}
 
 	public static class ReceiverOrderGeneration {
-		static Id<Link> carrier1OriginId = Id.createLinkId("i(3,4)");
-		static Id<Link> carrier2OriginId = Id.createLinkId("i(7,7)R");
+		static Id<Link> carrier1OriginId = Id.createLinkId("0_to_center");
+//		static Id<Link> carrier2OriginId = Id.createLinkId("i(7,7)R");
 
 		static Id<Carrier> carrier1Id = Id.create("carrier1", Carrier.class);
-		static Id<Carrier> carrier2Id = Id.create("carrier2", Carrier.class);
+//		static Id<Carrier> carrier2Id = Id.create("carrier2", Carrier.class);
 
 		private final Carriers carriers;
 		private final Receivers receivers;
@@ -284,12 +285,12 @@ public class RunCarrierReceiverShapleyAllocationExample {
 			productType1.setDescription("Product Type 1");
 			productType1.setRequiredCapacity(5);
 
-			ProductType productType2 = ReceiverUtils.createAndGetProductType(this.receivers, Id.create("productType2", ProductType.class), carrier2OriginId);
-			productType2.setDescription("Product Type 2");
-			productType2.setRequiredCapacity(10);
+//			ProductType productType2 = ReceiverUtils.createAndGetProductType(this.receivers, Id.create("productType2", ProductType.class), carrier2OriginId);
+//			productType2.setDescription("Product Type 2");
+//			productType2.setRequiredCapacity(10);
 
 			this.productTypes.put("productType1", productType1);
-			this.productTypes.put("productType2", productType2);
+//			this.productTypes.put("productType2", productType2);
 		}
 
 		public void generateAllReceiverOrders(){
@@ -306,35 +307,35 @@ public class RunCarrierReceiverShapleyAllocationExample {
 				.build();
 			receiver.addProduct(receiverProduct1);
 
-			ReceiverProduct receiverProduct2 = ReceiverProduct.Builder.newInstance()
-				.setProductType(this.productTypes.get("productType2"))
-				.setReorderingPolicy(ReceiverUtils.createSSReorderPolicy(200, 1000))
-				.build();
-			receiver.addProduct(receiverProduct2);
+//			ReceiverProduct receiverProduct2 = ReceiverProduct.Builder.newInstance()
+//				.setProductType(this.productTypes.get("productType2"))
+//				.setReorderingPolicy(ReceiverUtils.createSSReorderPolicy(200, 1000))
+//				.build();
+//			receiver.addProduct(receiverProduct2);
 
 			// generate orders for collaborative receivers
 			Collection<Order> orders1 = new ArrayList<>();
 			Collection<Order> orders2 = new ArrayList<>();
 
 			Order Order1 = Order.Builder.newInstance(Id.create("Order1", Order.class), receiver, receiverProduct1)
-				.setServiceTime(10*60)
-				.buildWithCalculatedOrderQuantity();
-
-			Order Order2 = Order.Builder.newInstance(Id.create("Order2", Order.class), receiver, receiverProduct2)
 				.setServiceTime(20*60)
 				.buildWithCalculatedOrderQuantity();
 
+//			Order Order2 = Order.Builder.newInstance(Id.create("Order2", Order.class), receiver, receiverProduct2)
+//				.setServiceTime(20*60)
+//				.buildWithCalculatedOrderQuantity();
+
 			orders1.add(Order1);
-			orders2.add(Order2);
+//			orders2.add(Order2);
 
 			// assign orders to receiver
 			ReceiverOrder receiverOrder1 = new ReceiverOrder(receiver.getId(), orders1, carrier1Id);
-			ReceiverOrder receiverOrder2 = new ReceiverOrder(receiver.getId(), orders2, carrier2Id);
+//			ReceiverOrder receiverOrder2 = new ReceiverOrder(receiver.getId(), orders2, carrier2Id);
 
 			ReceiverPlan receiverPlan = ReceiverPlan.Builder.newInstance(receiver, status)
 				.addReceiverOrder(receiverOrder1)
-				.addReceiverOrder(receiverOrder2)
-				.addTimeWindow(TimeWindow.newInstance(6*60*60, 9*60*60))
+//				.addReceiverOrder(receiverOrder2)
+				.addTimeWindow(TimeWindow.newInstance(6*60*60, 8*60*60))
 //				.addTimeWindow(TimeWindow.newInstance(14*60*60, 18*60*60))
 				.build();
 
@@ -351,7 +352,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 				1);
 
 			convertReceiverOrdersToInitialCarrierShipments(this.carriers, receiverOrder1, receiverPlan);
-			convertReceiverOrdersToInitialCarrierShipments(this.carriers, receiverOrder2, receiverPlan);
+//			convertReceiverOrdersToInitialCarrierShipments(this.carriers, receiverOrder2, receiverPlan);
 		}
 
 		void generateCollaborativeReceiverOrders(){

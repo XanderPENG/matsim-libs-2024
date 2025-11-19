@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE network SYSTEM "http://www.matsim.org/files/dtd/network_v2.dtd">
+<network>
+
+<!-- ====================================================================== -->
+
+	<nodes>
+		<node id="center" x="0.0" y="0.0" >
+		</node>
+		<node id="node_0" x="1000.0" y="0.0" >
+		</node>
+		<node id="node_1" x="707.1067811865476" y="707.1067811865474" >
+		</node>
+		<node id="node_2" x="6.123233995736766E-14" y="1000.0" >
+		</node>
+		<node id="node_3" x="-707.1067811865474" y="707.1067811865476" >
+		</node>
+		<node id="node_4" x="-1000.0" y="1.2246467991473532E-13" >
+		</node>
+		<node id="node_5" x="-707.1067811865477" y="-707.1067811865474" >
+		</node>
+		<node id="node_6" x="-1.8369701987210297E-13" y="-1000.0" >
+		</node>
+		<node id="node_7" x="707.1067811865473" y="-707.1067811865477" >
+		</node>
+	</nodes>
+
+<!-- ====================================================================== -->
+
+	<links capperiod="01:00:00" effectivecellsize="7.5" effectivelanewidth="3.75">
+		<link id="0_to_1" from="node_0" to="node_1" length="765.3668647301795" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="0_to_7" from="node_0" to="node_7" length="765.3668647301797" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="0_to_center" from="node_0" to="center" length="1000.0" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="1_to_0" from="node_1" to="node_0" length="765.3668647301795" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="1_to_2" from="node_1" to="node_2" length="765.3668647301795" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="1_to_center" from="node_1" to="center" length="1000.0" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="2_to_1" from="node_2" to="node_1" length="765.3668647301795" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="2_to_3" from="node_2" to="node_3" length="765.3668647301796" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="2_to_center" from="node_2" to="center" length="1000.0" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="3_to_2" from="node_3" to="node_2" length="765.3668647301796" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="3_to_4" from="node_3" to="node_4" length="765.3668647301795" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="3_to_center" from="node_3" to="center" length="1000.0" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="4_to_3" from="node_4" to="node_3" length="765.3668647301795" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="4_to_5" from="node_4" to="node_5" length="765.3668647301795" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="4_to_center" from="node_4" to="center" length="1000.0" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="5_to_4" from="node_5" to="node_4" length="765.3668647301795" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="5_to_6" from="node_5" to="node_6" length="765.3668647301795" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="5_to_center" from="node_5" to="center" length="1000.0" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="6_to_5" from="node_6" to="node_5" length="765.3668647301795" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="6_to_7" from="node_6" to="node_7" length="765.3668647301795" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="6_to_center" from="node_6" to="center" length="1000.0" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="7_to_0" from="node_7" to="node_0" length="765.3668647301797" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="7_to_6" from="node_7" to="node_6" length="765.3668647301795" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="7_to_center" from="node_7" to="center" length="1000.0" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="center_to_0" from="center" to="node_0" length="1000.0" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="center_to_1" from="center" to="node_1" length="1000.0" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="center_to_2" from="center" to="node_2" length="1000.0" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="center_to_3" from="center" to="node_3" length="1000.0" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="center_to_4" from="center" to="node_4" length="1000.0" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="center_to_5" from="center" to="node_5" length="1000.0" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="center_to_6" from="center" to="node_6" length="1000.0" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+		<link id="center_to_7" from="center" to="node_7" length="1000.0" freespeed="13.89" capacity="1000.0" permlanes="1.0" oneway="1" modes="car" >
+		</link>
+	</links>
+
+<!-- ====================================================================== -->
+
+</network>
