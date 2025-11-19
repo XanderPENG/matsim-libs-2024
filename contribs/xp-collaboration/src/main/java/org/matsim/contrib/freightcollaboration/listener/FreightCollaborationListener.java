@@ -6,6 +6,7 @@ import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Scenario;
 import org.matsim.api.core.v01.network.Network;
 import org.matsim.contrib.freightcollaboration.FreightCollaborators;
+import org.matsim.contrib.freightcollaboration.MutableFreightCoalition;
 import org.matsim.contrib.freightcollaboration.allocation.CollaborationDataStore;
 import org.matsim.contrib.freightcollaboration.allocation.FreightCollaborationEngine;
 import org.matsim.contrib.freightcollaboration.controller.FreightCoalitionManager;
@@ -18,6 +19,9 @@ import org.matsim.core.controler.listener.IterationStartsListener;
 import org.matsim.core.router.util.TravelTime;
 import org.matsim.core.trafficmonitoring.TravelTimeCalculator;
 import org.matsim.freight.carriers.controller.CarrierScoringFunctionFactory;
+
+import java.util.List;
+import java.util.Set;
 
 public class FreightCollaborationListener implements IterationStartsListener, AfterMobsimListener {
 
@@ -86,11 +90,20 @@ public class FreightCollaborationListener implements IterationStartsListener, Af
 		/**
 		 * Use the TravelTime for the freight collaboration logic
 		 */
-
-		FreightCollaborationEngine collaborationEngine = new FreightCollaborationEngine(config, scenario, freightCollaborators,
-			collaborationDataStore, freightCollaborationManager.getMutableFreightCoalitions(), tt, carrierScoringFunctionFactory);
-		collaborationEngine.runCollaboration();
-
+		List<MutableFreightCoalition> mutableFreightCoalitions = freightCollaborationManager.getMutableFreightCoalitions();
+		// if there are no existing coalitions, skip the collaboration process
+		if (mutableFreightCoalitions == null || mutableFreightCoalitions.isEmpty() ||
+			mutableFreightCoalitions.stream().allMatch(c -> c.size() == 1)) {
+			LOGGER.info("No existing freight coalitions found - skipping collaboration process for this iteration.");
+			// Remove the TravelTimeCalculator as an event handler, to avoid interference with next iteration
+			events.removeHandler(ttc);
+			ttc = null;
+			return;
+		} else {
+			FreightCollaborationEngine collaborationEngine = new FreightCollaborationEngine(config, scenario, freightCollaborators,
+				collaborationDataStore, freightCollaborationManager.getMutableFreightCoalitions(), tt, carrierScoringFunctionFactory);
+			collaborationEngine.runCollaboration();
+		}
 		// Remove the TravelTimeCalculator as an event handler, to avoid interference with next iteration
 		events.removeHandler(ttc);
 		ttc = null;
