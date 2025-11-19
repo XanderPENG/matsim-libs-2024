@@ -65,8 +65,10 @@ public class ShapleyValueAllocationModel implements AllocationModel {
 				double collaborativeCost = scoreEntry.getValue();
 				// it should not be negative, so we use absolute value here to avoid any issue
 				double savings = collaborativeCost - nonCollaborativeCost;
+				// @FIXME: it seems inevitable to have negative savings here, due to the VRP solution randomness. Now we reset it to zero
 				if (savings < 0) {
 					logger.warn("Pls check that the collaborative cost savings should not be negative. now the savings: {}", savings);
+					savings = 0.0;
 				}
 				costSavings.put(subCoalition, savings);
 			}

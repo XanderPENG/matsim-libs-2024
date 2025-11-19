@@ -129,7 +129,8 @@ public class FreightPseudoSimulator {
 			var receiverCollaborators = new HashSet<>((Set<FreightCollaborator<Receiver>>) (Set<?>) Set.copyOf(copyPlayers.values()));
 			Set<FreightCollaborator<Receiver>> nonCollaboratingReceivers = new HashSet<>();
 			@SuppressWarnings("unchecked")
-			Map<Id<?>, FreightCollaborator<Receiver>> allReceivers = (Map<Id<?>, FreightCollaborator<Receiver>>) (Map<?, ?>) freightCollaborators.getFreightCollaboratorsByRole(CollaboratorRole.RECEIVER);
+			Map<Id<?>, FreightCollaborator<Receiver>> globalReceivers = (Map<Id<?>, FreightCollaborator<Receiver>>) (Map<?, ?>) freightCollaborators.getFreightCollaboratorsByRole(CollaboratorRole.RECEIVER);
+			var allReceivers = AllocationUtils.deepCopyCollaboratorsMap(globalReceivers);
 			allReceivers.values().forEach(receiverCollaborator -> {
 				// if this receiver is not in the collaborating players for this carrier, check whether it is a non-collaborating receiver for this carrier
 				if (!copyPlayers.containsKey(receiverCollaborator.getId())) {
@@ -138,6 +139,8 @@ public class FreightPseudoSimulator {
 					boolean hasOrdersForThisCarrier = receiverPlan.getReceiverOrders().stream()
 							.anyMatch(order -> order.getCarrierId().equals(carrierCollaborator.getId()));
 					if (hasOrdersForThisCarrier) {
+						//FIXME: this is a non-collaborating receiver for this carrier, its plan should (or not?) be reset to the original one
+						receiverCollaborator.getDelegate().setSelectedPlan((ReceiverPlan) collaborationDataStore.getOriginalPlans().get(CollaboratorRole.RECEIVER).get(receiverCollaborator.getId()));
 						nonCollaboratingReceivers.add(receiverCollaborator);
 					}
 				}

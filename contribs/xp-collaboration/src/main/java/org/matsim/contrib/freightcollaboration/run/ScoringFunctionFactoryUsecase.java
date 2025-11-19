@@ -28,6 +28,9 @@ public class ScoringFunctionFactoryUsecase {
 		@Inject
 		FreightCollaborators freightCollaborators;
 
+		@Inject
+		CollaborationDataStore dataStore;
+
 		@Override
 		public ScoringFunction createScoringFunction(Carrier carrier) {
 			SumScoringFunction sf = new SumScoringFunction();
@@ -35,6 +38,7 @@ public class ScoringFunctionFactoryUsecase {
 			sf.addScoringFunction(new CarrierScoringFunctionFactoryImpl.SimpleVehicleEmploymentScoring(carrier));
 			sf.addScoringFunction(new CarrierScoringFunctionFactoryImpl.SimpleDriversActivityScoring());
 			sf.addScoringFunction(new SimpleChargingReceiverScoring(carrier, freightCollaborators));
+			sf.addScoringFunction(new retainCostSaving(carrier, dataStore));
 			return sf;
 		}
 
@@ -62,11 +66,37 @@ public class ScoringFunctionFactoryUsecase {
 				// Get linked receivers for this carrier
 				Set<FreightCollaborator<Receiver>> linkedReceivers = LinkReceiverAndCarrier.findLinkedReceivers(carrier, freightCollaborators);
 				// Charge a fixed fee for each linked receiver
-				double feePerReceiver = 100.0; //
+				double feePerReceiver = 200.0; //
 				score = linkedReceivers.size() * feePerReceiver;
 				return score;
 			}
 		}
+
+		static class retainCostSaving implements SumScoringFunction.BasicScoring {
+
+			private Carrier carrier;
+			private  CollaborationDataStore dataStore;
+
+			public retainCostSaving(Carrier carrier, CollaborationDataStore dataStore) {
+				super();
+				this.carrier = carrier;
+				this.dataStore = dataStore;
+			}
+
+			@Override
+			public void finish() {
+
+			}
+
+			@Override
+			public double getScore() {
+				if (dataStore.getAllocatedValues() == null || dataStore.getAllocatedValues().isEmpty()) {
+					return 0.0;
+				}
+				return dataStore.getAllocatedValues().getOrDefault(carrier.getId(), 0.0);
+			}
+		}
+
 	}
 
 	public static class ReceiverScoringFunctionFactoryUsecase implements ReceiverScoringFunctionFactory {
@@ -83,6 +113,7 @@ public class ScoringFunctionFactoryUsecase {
 			SumScoringFunction sf = new SumScoringFunction();
 			sf.addScoringFunction(new CarrierToReceiverCostAllocation());
 			sf.addScoringFunction(new ReceiverRelaxationPenalty(receiver, (double) 0.001, collaborationDataStore));
+			sf.addScoringFunction(new AllocationFromDistributor(receiver, collaborationDataStore));
 			return sf;
 		}
 
@@ -172,6 +203,31 @@ public class ScoringFunctionFactoryUsecase {
 				return relaxationAmountOfTW + relaxationAmountOfServiceDuration;
 			}
 
+		}
+
+		static class AllocationFromDistributor implements SumScoringFunction.BasicScoring {
+
+			Receiver receiver;
+			CollaborationDataStore collaborationDataStore;
+
+			AllocationFromDistributor(Receiver receiver, CollaborationDataStore collaborationDataStore) {
+				super();
+				this.collaborationDataStore = collaborationDataStore;
+				this.receiver = receiver;
+			}
+
+			@Override
+			public void finish() {
+
+			}
+
+			@Override
+			public double getScore() {
+				if (collaborationDataStore.getAllocatedValues() == null || collaborationDataStore.getAllocatedValues().isEmpty()) {
+					return 0.0;
+				}
+				return collaborationDataStore.getAllocatedValues().getOrDefault(receiver.getId(), 0.0);
+			}
 		}
 
 	}

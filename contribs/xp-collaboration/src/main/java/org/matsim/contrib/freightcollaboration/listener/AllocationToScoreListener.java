@@ -15,7 +15,7 @@ import org.matsim.core.controler.listener.IterationEndsListener;
 /**
  * This listener is intended to perform actions at the end of each iteration,
  * specifically related to converting computed allocation results into scores for freight collaboration.
- *
+ * @deprecated as we can implement it in the scoring functions directly now.
  * @author Xander Peng
  */
 public class AllocationToScoreListener implements IterationEndsListener {

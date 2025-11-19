@@ -1,5 +1,7 @@
 package org.matsim.contrib.freightcollaboration.controller;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.Scenario;
 import org.matsim.api.core.v01.population.BasicPlan;
@@ -11,8 +13,10 @@ import org.matsim.contrib.freightcollaboration.listener.AllocationToScoreListene
 import org.matsim.contrib.freightcollaboration.listener.FormFreightCoalitionListener;
 import org.matsim.contrib.freightcollaboration.listener.FreightCollaborationListener;
 import org.matsim.contrib.freightcollaboration.listener.NotifyCoalitionInfoListener;
+import org.matsim.contrib.freightcollaboration.utils.AllocationUtils;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controler;
+import org.matsim.freight.receiver.ReceiverPlan;
 
 import java.util.HashMap;
 import java.util.List;
@@ -27,6 +31,7 @@ public class CollaborationModule extends AbstractModule {
 	private final CollaboratorModules collaboratorModules;
 	private final FreightCollaborators freightCollaborators;
 	private final Scenario scenario;
+	private static Logger logger = LogManager.getLogger(CollaborationModule.class);
 
 	public CollaborationModule(CollaboratorModules modules, FreightCollaborators freightCollaborators, Scenario scenario) {
 		this.collaboratorModules = modules;
@@ -39,7 +44,8 @@ public class CollaborationModule extends AbstractModule {
 		this.addControlerListenerBinding().to(NotifyCoalitionInfoListener.class);
 		this.addControlerListenerBinding().to(FormFreightCoalitionListener.class);
 		this.addControlerListenerBinding().to(FreightCollaborationListener.class);
-		this.addControlerListenerBinding().to(AllocationToScoreListener.class);
+		// Implement the allocation in the scoring function directly, so this listener is not needed anymore
+//		this.addControlerListenerBinding().to(AllocationToScoreListener.class);
 		// Bind the FreightCoalitionManager as a singleton at the start of the simulation
 		this.bind(FreightCoalitionManager.class).asEagerSingleton();
 		this.bind(FreightCollaborators.class).toInstance(freightCollaborators);
@@ -73,7 +79,28 @@ public class CollaborationModule extends AbstractModule {
             for (Map.Entry<Id<?>, FreightCollaborator<?>> entry : collaboratorsById.entrySet()) {
                 FreightCollaborator<?> collaborator = entry.getValue();
                 if (collaborator == null) continue;
-                BasicPlan selected = collaborator.getSelectedPlan();
+                BasicPlan selected;
+				// Then, we need to deep copy the plan to avoid modifications during the simulation
+				switch (collaborator.getRole()) {
+					case CollaboratorRole.RECEIVER:
+						ReceiverPlan selectedPlan = collaborator.getTypedSelectedPlan();
+						selected = selectedPlan.createCopy();
+						break;
+					case CollaboratorRole.CARRIER:
+						try {
+							selected = AllocationUtils.copyNoScorePlan(collaborator.getTypedSelectedPlan());
+						} catch (NullPointerException e) {
+							logger.warn("Copy carrier plan into CollaborationDataStore failed for collaborator ID: {}. " +
+								"The selected plan might be null.", collaborator.getId());
+							selected = null;
+						}
+						break;
+					case CollaboratorRole.LSP:
+						// raise exception for now as LSP plan copying is not implemented yet
+						throw new UnsupportedOperationException("LSP plan copying is not implemented yet.");
+					default:
+						throw  new UnsupportedOperationException("Unknown role: " + collaborator.getRole());
+				}
                 if (selected != null) {
                     plansById.put(entry.getKey(), selected);
                 }

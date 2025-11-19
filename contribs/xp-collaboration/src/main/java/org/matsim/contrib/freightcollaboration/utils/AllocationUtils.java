@@ -131,11 +131,11 @@ public class AllocationUtils {
 					}
 
 					// Set selected plan if exists
-					if (originalCarrier.getSelectedPlan() != null) {
+					if (originalCarrier.getSelectedPlan() == null) {
 						// Find the corresponding copied plan and set it as selected
 						List<CarrierPlan> copiedPlans = copiedCarrier.getPlans();
 						if (!copiedPlans.isEmpty()) {
-							copiedCarrier.setSelectedPlan(copiedPlans.get(0)); // Simplified - use first plan
+							copiedCarrier.setSelectedPlan(copiedPlans.getFirst()); // Simplified - use first plan
 						}
 					}
 
@@ -163,12 +163,17 @@ public class AllocationUtils {
 
 					// Copy plans
 					for (ReceiverPlan plan : originalReceiver.getPlans()) {
-						// For now, add reference - in full implementation, deep copy the plan
-						copiedReceiver.addPlan(plan);
+						ReceiverPlan newPlan = plan.createCopy();
+						newPlan.setScore(plan.getScore());
+						if (plan.isSelected()){
+							copiedReceiver.setSelectedPlan(newPlan);
+						} else {
+							copiedReceiver.addPlan(newPlan);
+						}
 					}
 
 					// Set selected plan
-					if (originalReceiver.getSelectedPlan() != null && !copiedReceiver.getPlans().isEmpty()) {
+					if (copiedReceiver.getSelectedPlan() == null) {
 						copiedReceiver.setSelectedPlan(copiedReceiver.getPlans().getFirst());
 					}
 
@@ -202,7 +207,7 @@ public class AllocationUtils {
 		return copiedCollaborator;
 	}
 
-	static CarrierPlan copyNoScorePlan(CarrierPlan plan2copy) {
+	public static CarrierPlan copyNoScorePlan(CarrierPlan plan2copy) {
 		List<ScheduledTour> tours = new ArrayList<>();
 		for (ScheduledTour sTour : plan2copy.getScheduledTours()) {
 			double depTime = sTour.getDeparture();
