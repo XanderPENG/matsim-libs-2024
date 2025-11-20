@@ -3,6 +3,7 @@ package org.matsim.contrib.freightcollaboration.allocation;
 import com.google.inject.Inject;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.population.Leg;
+import org.matsim.contrib.freightcollaboration.run.ScoringFunctionFactoryUsecase;
 import org.matsim.core.scoring.ScoringFunction;
 import org.matsim.core.utils.collections.Tuple;
 import org.matsim.freight.carriers.Carrier;
@@ -32,7 +33,8 @@ class CarrierPSimScorer {
 	private void initScoringFunctions(){
 		scoringFunctions = new HashMap<>();
 		for(Integer driverId : driverLegsAndActivities.keySet()) {
-			ScoringFunction scoringFunction = carrierScoringFunctionFactory.createScoringFunction(carrier);
+			// create scoring function for each driver, only considering cost components
+			ScoringFunction scoringFunction = ((ScoringFunctionFactoryUsecase.CarrierScoringFunctionFactoryUsecase) carrierScoringFunctionFactory).createBasicCostScoringFunction(carrier);
 			scoringFunctions.put(driverId, scoringFunction);
 		}
 	}

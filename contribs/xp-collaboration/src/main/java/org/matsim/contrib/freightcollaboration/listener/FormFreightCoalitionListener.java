@@ -10,7 +10,9 @@ import org.matsim.contrib.freightcollaboration.allocation.CollaborationDataStore
 import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfigGroup;
 import org.matsim.contrib.freightcollaboration.controller.FreightCoalitionManager;
 import org.matsim.core.config.Config;
+import org.matsim.core.controler.events.BeforeMobsimEvent;
 import org.matsim.core.controler.events.IterationStartsEvent;
+import org.matsim.core.controler.listener.BeforeMobsimListener;
 import org.matsim.core.controler.listener.IterationStartsListener;
 import org.matsim.freight.carriers.Carrier;
 import org.matsim.freight.carriers.FreightCarriersConfigGroup;
@@ -30,7 +32,7 @@ import static org.matsim.contrib.freightcollaboration.CollaborationTypes.CARRIER
  * The functions are listed below:
  * 	1. Form coalitions
  */
-public class FormFreightCoalitionListener implements IterationStartsListener {
+public class FormFreightCoalitionListener implements BeforeMobsimListener {
 
 	private static final Logger LOGGER = LogManager.getLogger(FormFreightCoalitionListener.class);
 
@@ -47,7 +49,7 @@ public class FormFreightCoalitionListener implements IterationStartsListener {
 	CollaborationDataStore collaborationDataStore;
 
 	@Override
-	public void notifyIterationStarts(IterationStartsEvent event) {
+	public void notifyBeforeMobsim(BeforeMobsimEvent event) {
 		// Form grand coalition at the first iteration
 		if (event.getIteration() == scenario.getConfig().controller().getFirstIteration()){
 			GrandFreightCoalition grandCoalition = formFreightGrandCoalition();
@@ -218,6 +220,4 @@ public class FormFreightCoalitionListener implements IterationStartsListener {
 		}
 		return collaboratingReceivers;
 	}
-
-
 }

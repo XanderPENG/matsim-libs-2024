@@ -138,11 +138,14 @@ public class RunCarrierReceiverShapleyAllocationExample {
 		URL context = ExamplesUtils.getTestScenarioURL("freight-chessboard-9x9");
 		Config config = ConfigUtils.createConfig();
 		config.setContext(context);
-		config.network().setInputFile("/Volumes/External/gitProj/matsim-libs-2024/input/example_octagonal_network.xml");
-		config.controller().setOutputDirectory("output/carrierReceiverShapleyExample/");
-		config.controller().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.overwriteExistingFiles);
+		// macbook file path
+		config.network().setInputFile("/Users/xander/gitProj/matsim-libs-2024/input/example_octagonal_network.xml");
+		// mac mini file path
+		//config.network().setInputFile("/Volumes/External/gitProj/matsim-libs-2024/input/example_octagonal_network.xml");
+		config.controller().setOutputDirectory("output/specificCarrierReceiverShapleyExample/");
+		config.controller().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
 		config.controller().setFirstIteration(0);
-		config.controller().setLastIteration(10);
+		config.controller().setLastIteration(50);
 		return config;
 	}
 
@@ -400,7 +403,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 			// For simplicity, assume one main delivery per ReceiverOrder
 			CarrierShipment shipment = CarrierShipment.Builder.newInstance(
 					shipmentId,
-					Id.createLinkId("i(3,4)"), // from - use a default origin link for now
+					Id.createLinkId("0_to_center"), // from - use a default origin link for now
 					toLink, // to - receiver's link ID
 					1 // size - simplified for now
 				)

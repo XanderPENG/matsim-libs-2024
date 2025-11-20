@@ -13,6 +13,7 @@ import org.matsim.contrib.freightcollaboration.listener.AllocationToScoreListene
 import org.matsim.contrib.freightcollaboration.listener.FormFreightCoalitionListener;
 import org.matsim.contrib.freightcollaboration.listener.FreightCollaborationListener;
 import org.matsim.contrib.freightcollaboration.listener.NotifyCoalitionInfoListener;
+import org.matsim.contrib.freightcollaboration.listener.WriteCollaborationDataListener;
 import org.matsim.contrib.freightcollaboration.utils.AllocationUtils;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controler;
@@ -46,6 +47,7 @@ public class CollaborationModule extends AbstractModule {
 		this.addControlerListenerBinding().to(FreightCollaborationListener.class);
 		// Implement the allocation in the scoring function directly, so this listener is not needed anymore
 //		this.addControlerListenerBinding().to(AllocationToScoreListener.class);
+		this.addControlerListenerBinding().to(WriteCollaborationDataListener.class);
 		// Bind the FreightCoalitionManager as a singleton at the start of the simulation
 		this.bind(FreightCoalitionManager.class).asEagerSingleton();
 		this.bind(FreightCollaborators.class).toInstance(freightCollaborators);
