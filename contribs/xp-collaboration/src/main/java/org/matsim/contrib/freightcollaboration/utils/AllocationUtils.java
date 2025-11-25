@@ -6,18 +6,16 @@ import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.population.HasPlansAndId;
 import org.matsim.contrib.freightcollaboration.FreightCollaborator;
 import org.matsim.contrib.freightcollaboration.FreightCollaboratorFactory;
-import org.matsim.contrib.freightcollaboration.FreightCollaboratorImpl;
 import org.matsim.contrib.freightcollaboration.CollaboratorRole;
 import org.matsim.contrib.freightcollaboration.allocation.AllocationModel;
 import org.matsim.contrib.freightcollaboration.allocation.AllocationModels;
 import org.matsim.contrib.freightcollaboration.allocation.CollaborationDataStore;
-import org.matsim.contrib.freightcollaboration.allocation.ShapleyValueAllocationModel;
+import org.matsim.contrib.freightcollaboration.allocation.AllocationModelShapleyValue;
 import org.matsim.freight.carriers.*;
 import org.matsim.freight.logistics.LSP;
 import org.matsim.freight.receiver.Receiver;
 import org.matsim.freight.receiver.ReceiverPlan;
 import org.matsim.freight.receiver.ReceiverUtils;
-import org.slf4j.LoggerFactory;
 
 import java.util.*;
 
@@ -32,7 +30,7 @@ public class AllocationUtils {
 			case AllocationModels.PROPORTIONAL:
 				// return new ProportionalAllocation();
 			case AllocationModels.SHAPLEY:
-				return new ShapleyValueAllocationModel(collaborationDataStore);
+				return new AllocationModelShapleyValue(collaborationDataStore);
 			case AllocationModels.MARGINAL:
 				// return new MarginalContributionAllocationModel();
 			default:

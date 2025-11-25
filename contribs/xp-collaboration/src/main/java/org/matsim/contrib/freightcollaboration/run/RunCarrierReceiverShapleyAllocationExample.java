@@ -48,7 +48,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 
 	public static void main(String[] args) {
 		// Create basic and freight collaboration config
-		Config config = createExampleConfigWithDefaultNetwork();
+		Config config = createExampleConfigWithDefaultNetwork("0.4a-0.01p-200");
 		config.addModule(createExampleFreightCollaborationConfig());
 
 		Scenario scenario = ScenarioUtils.loadScenario(config);
@@ -85,7 +85,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 		Controler controler = new Controler(scenario);
 
 		// Add proper ReceiverModule to handle receiver simulation
-		ReceiverModule receiverModule = new ReceiverModule(ReceiverUtils.createFixedReceiverCostAllocation(100.0));
+		ReceiverModule receiverModule = new ReceiverModule(ReceiverUtils.createFixedReceiverCostAllocation(200.0));
 		receiverModule.setReplanningType(ReceiverReplanningType.timeWindow);
 
 		// Map Carriers and Receivers as FreightCollaborators
@@ -134,7 +134,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 		controler.run();
 	}
 
-	static Config createExampleConfigWithDefaultNetwork() {
+	static Config createExampleConfigWithDefaultNetwork(String runId) {
 		URL context = ExamplesUtils.getTestScenarioURL("freight-chessboard-9x9");
 		Config config = ConfigUtils.createConfig();
 		config.setContext(context);
@@ -142,10 +142,10 @@ public class RunCarrierReceiverShapleyAllocationExample {
 		config.network().setInputFile("/Users/xander/gitProj/matsim-libs-2024/input/example_octagonal_network.xml");
 		// mac mini file path
 		//config.network().setInputFile("/Volumes/External/gitProj/matsim-libs-2024/input/example_octagonal_network.xml");
-		config.controller().setOutputDirectory("output/specificCarrierReceiverShapleyExample/");
+		config.controller().setOutputDirectory("output/specificCarrierReceiverShapleyExample/" + runId + "/");
 		config.controller().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
 		config.controller().setFirstIteration(0);
-		config.controller().setLastIteration(50);
+		config.controller().setLastIteration(100);
 		return config;
 	}
 

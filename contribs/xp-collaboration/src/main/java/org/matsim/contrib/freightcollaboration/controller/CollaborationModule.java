@@ -9,7 +9,6 @@ import org.matsim.contrib.freightcollaboration.CollaboratorRole;
 import org.matsim.contrib.freightcollaboration.FreightCollaborator;
 import org.matsim.contrib.freightcollaboration.FreightCollaborators;
 import org.matsim.contrib.freightcollaboration.allocation.CollaborationDataStore;
-import org.matsim.contrib.freightcollaboration.listener.AllocationToScoreListener;
 import org.matsim.contrib.freightcollaboration.listener.FormFreightCoalitionListener;
 import org.matsim.contrib.freightcollaboration.listener.FreightCollaborationListener;
 import org.matsim.contrib.freightcollaboration.listener.NotifyCoalitionInfoListener;

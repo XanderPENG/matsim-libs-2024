@@ -6,13 +6,13 @@ import org.matsim.api.core.v01.Id;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
-class ShapleyValueAllocationModelTest {
+class AllocationModelShapleyValueTest {
 
     @Test
     void calculateShapleyValues() {
 		CollaborationDataStore dataStore = null;  // Placeholder, not used in this test
         // Test implementation for calculateShapleyValues method
-        ShapleyValueAllocationModel model = new ShapleyValueAllocationModel(dataStore);
+        AllocationModelShapleyValue model = new AllocationModelShapleyValue(dataStore);
 
         Map<Set<Id<?>>, Double> coalitionAndScores = generateCoalitionsAndPositiveScores();
         Map<Id<?>, Double> shapley = model.calculateShapleyValues(coalitionAndScores);

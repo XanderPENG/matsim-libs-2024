@@ -74,7 +74,7 @@ public class ScoringFunctionFactoryUsecase {
 				// Get linked receivers for this carrier
 				Set<FreightCollaborator<Receiver>> linkedReceivers = LinkReceiverAndCarrier.findLinkedReceivers(carrier, freightCollaborators);
 				// Charge a fixed fee for each linked receiver
-				double feePerReceiver = 100.0; //
+				double feePerReceiver = 200.0; //
 				score = linkedReceivers.size() * feePerReceiver;
 				return score;
 			}
@@ -120,7 +120,7 @@ public class ScoringFunctionFactoryUsecase {
 		public ScoringFunction createScoringFunction(Receiver receiver) {
 			SumScoringFunction sf = new SumScoringFunction();
 			sf.addScoringFunction(new CarrierToReceiverCostAllocation());
-			sf.addScoringFunction(new ReceiverRelaxationPenalty(receiver, (double) 0.001, collaborationDataStore));
+			sf.addScoringFunction(new ReceiverRelaxationPenalty(receiver, (double) 0.01, collaborationDataStore));
 			sf.addScoringFunction(new AllocationFromDistributor(receiver, collaborationDataStore));
 			return sf;
 		}

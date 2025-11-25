@@ -1,28 +1,25 @@
 package org.matsim.contrib.freightcollaboration.allocation;
 
-import com.google.inject.Inject;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Id;
 import org.matsim.contrib.freightcollaboration.CollaborationTypes;
 import org.matsim.contrib.freightcollaboration.CollaboratorRole;
 import org.matsim.contrib.freightcollaboration.MutableFreightCoalition;
-import org.matsim.contrib.freightcollaboration.config.CollaborationParamSet;
-import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfigGroup;
 
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
-public class ShapleyValueAllocationModel implements AllocationModel {
+public class AllocationModelShapleyValue implements AllocationModel {
 
 //	@Inject
 	CollaborationDataStore collaborationDataStore;
 
-	private static final Logger logger = LogManager.getLogger(ShapleyValueAllocationModel.class);
+	private static final Logger logger = LogManager.getLogger(AllocationModelShapleyValue.class);
 
-	public ShapleyValueAllocationModel(CollaborationDataStore collaborationDataStore) {
+	public AllocationModelShapleyValue(CollaborationDataStore collaborationDataStore) {
 		this.collaborationDataStore = collaborationDataStore;
 	}
 
@@ -39,7 +36,7 @@ public class ShapleyValueAllocationModel implements AllocationModel {
 	// TODO: We may incorporate the allocation factor (i.e., how much cost savings could be allocated by the carrier) later if needed
 	public void allocateCostSavings() {
 		//@FIXME: the factor should be read from config
-		double allocationFactor = 0.9;
+		double allocationFactor = 0.4;
 		// Maintain a map to store final allocation values for each collaborator
 		Map<Id<?>, Double> finalAllocations = new HashMap<>();
 
