@@ -1,0 +1,8 @@
+# Follow-up Optimizations (not implemented yet)
+
+- **Score sign & value semantics** – allocation models mix MATSim scores (negative costs) with “cost” terminology; ApproxShapley still relies on raw psim scores. Define a single cost/sign convention and transform value caches accordingly to avoid accidental inversions.
+- **Pseudo-sim cloning** – `AllocationUtils.deepCopyCollaborator` is incomplete (LSP unsupported, carrier plans lose scores/attributes) and may mutate shared state when non-collaborating receivers are reset. Introduce dedicated clone utilities or factories per role to guarantee immutability.
+- **CarrierPSimScorer coupling** – scorer casts the injected `CarrierScoringFunctionFactory` to the example implementation, making alternative factories incompatible. Extract an interface for “basic cost scoring” or supply the scorer via DI.
+- **Coalition score generation** – value caches are stored per iteration only in `CollaborationDataStore` without versioning or persistence; repeated sampling (e.g., for ApproxShapley) can rerun identical psim work. Add caching with keys (coalition, sub-set, iteration) and reuse across iterations when inputs unchanged.
+- **Config surface vs. module wiring** – run examples still manually create receivers, link collaborators, and install modules. Providing a single Guice module that wires ReceiverModule, scoring factories, and coalition creation based on `FreightCollaborationConfigGroup` would reduce boilerplate and misconfiguration risk.
+- **Extensibility beyond carrier–receiver** – many helpers assume `CARRIER_RECEIVER` (e.g., distributor extraction). Add validation and fallbacks for other collaboration types or guard earlier with clear errors and TODO hooks.

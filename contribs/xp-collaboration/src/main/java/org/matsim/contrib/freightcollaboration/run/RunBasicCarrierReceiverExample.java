@@ -60,6 +60,9 @@ public class RunBasicCarrierReceiverExample {
 		// FIXME: The user is not supposed to do this manually, it should be done by the freight collaboration module/config group automatically.
 		ReceiverConfigGroup receiverConfigGroup = ConfigUtils.addOrGetModule(scenario.getConfig(), ReceiverConfigGroup.class);
 		receiverConfigGroup.setReplanningType(ReceiverReplanningType.timeWindow);
+		FreightCollaborationConfigGroup freightConfigGroup = ConfigUtils.addOrGetModule(scenario.getConfig(), FreightCollaborationConfigGroup.class);
+		// Preserve example behaviour (100 currency units per receiver)
+		freightConfigGroup.RECEIVER_FIXED_FEE = 100.0;
 //		config.addModule(receiverConfigGroup);  // This line is not needed, as the module is already added by ConfigUtils.addOrGetModule()
 		// Generate receivers
 		Receivers receivers = generateExampleReceivers();
@@ -82,7 +85,7 @@ public class RunBasicCarrierReceiverExample {
 		Controler controler = new Controler(scenario);
 
 		// Add proper ReceiverModule to handle receiver simulation
-		ReceiverModule receiverModule = new ReceiverModule(ReceiverUtils.createFixedReceiverCostAllocation(100.0));
+		ReceiverModule receiverModule = new ReceiverModule(ReceiverUtils.createFixedReceiverCostAllocation(freightConfigGroup.RECEIVER_FIXED_FEE));
 		receiverModule.setReplanningType(ReceiverReplanningType.timeWindow);
 
 		// Map Carriers and Receivers as FreightCollaborators

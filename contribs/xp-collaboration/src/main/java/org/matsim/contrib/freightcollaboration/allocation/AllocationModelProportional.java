@@ -16,18 +16,20 @@ public class AllocationModelProportional implements AllocationModel {
 
 	private static final Logger logger = LogManager.getLogger(AllocationModelProportional.class);
 	private final CollaborationDataStore collaborationDataStore;
-	private final double allocationFactor = 0.9;
+	private final double allocationFactor;
 
-	public AllocationModelProportional(CollaborationDataStore collaborationDataStore) {
+	public AllocationModelProportional(CollaborationDataStore collaborationDataStore, double allocationFactor) {
 		this.collaborationDataStore = collaborationDataStore;
+		this.allocationFactor = allocationFactor;
 	}
 
 	@Override
 	public void allocate(AllocationValueTypes type) {
-		if (type != AllocationValueTypes.COST_SAVINGS) {
-			throw new UnsupportedOperationException("Proportional allocation currently supports only COST_SAVINGS.");
+		switch (type) {
+			case COST_SAVINGS -> allocateCostSavings();
+			case COST -> allocateCost();
+			default -> throw new UnsupportedOperationException("Unsupported allocation type: " + type);
 		}
-		allocateCostSavings();
 	}
 
 	private void allocateCostSavings() {
@@ -86,6 +88,57 @@ public class AllocationModelProportional implements AllocationModel {
 
 			double reservedSavings = totalSavings * (1 - allocationFactor);
 			finalAllocations.put(distributorId, finalAllocations.getOrDefault(distributorId, 0.0) + reservedSavings);
+		}
+
+		collaborationDataStore.setAllocatedValues(finalAllocations);
+	}
+
+	private void allocateCost() {
+		Map<Id<?>, Double> finalAllocations = new HashMap<>();
+		Map<MutableFreightCoalition, Map<Set<Id<?>>, Double>> simulatedScores = collaborationDataStore.getSimulatedCoalitionScores();
+		if (simulatedScores == null || simulatedScores.isEmpty()) {
+			logger.warn("No simulated coalition scores available for proportional allocation.");
+			return;
+		}
+
+		for (Map.Entry<MutableFreightCoalition, Map<Set<Id<?>>, Double>> entry : simulatedScores.entrySet()) {
+			MutableFreightCoalition coalition = entry.getKey();
+			Map<Set<Id<?>>, Double> coalitionScores = entry.getValue();
+			Id<?> distributorId = extractDistributorId(coalition);
+
+			Set<Id<?>> allPlayers = extractAllPlayers(coalitionScores);
+			if (allPlayers.isEmpty()) {
+				logger.warn("Coalition {} has no collaborating players, skipping proportional allocation.", coalition);
+				continue;
+			}
+
+			Set<Id<?>> fullCoalition = new HashSet<>(allPlayers);
+			Double collaborativeCost = coalitionScores.get(fullCoalition);
+			if (collaborativeCost == null) {
+				logger.warn("No collaborative cost found for coalition {}, skipping.", coalition);
+				continue;
+			}
+
+			Map<Id<?>, Double> proportionalWeights = new HashMap<>();
+			for (Id<?> player : allPlayers) {
+				Set<Id<?>> singleton = Set.of(player);
+				double standaloneCost = coalitionScores.getOrDefault(singleton, collaborativeCost);
+				double weight = Math.max(0.0, standaloneCost);
+				proportionalWeights.put(player, weight);
+			}
+
+			double weightSum = proportionalWeights.values().stream().mapToDouble(Double::doubleValue).sum();
+			double playerBudget = collaborativeCost * allocationFactor;
+			double fallbackShare = playerBudget / allPlayers.size();
+			for (Map.Entry<Id<?>, Double> weightEntry : proportionalWeights.entrySet()) {
+				Id<?> playerId = weightEntry.getKey();
+				double weight = weightEntry.getValue();
+				double allocation = weightSum > 0 ? playerBudget * weight / weightSum : fallbackShare;
+				finalAllocations.put(playerId, finalAllocations.getOrDefault(playerId, 0.0) + allocation);
+			}
+
+			double reservedShare = collaborativeCost * (1 - allocationFactor);
+			finalAllocations.put(distributorId, finalAllocations.getOrDefault(distributorId, 0.0) + reservedShare);
 		}
 
 		collaborationDataStore.setAllocatedValues(finalAllocations);

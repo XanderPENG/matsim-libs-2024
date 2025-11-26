@@ -2,11 +2,13 @@ package org.matsim.contrib.freightcollaboration.run;
 
 import com.google.inject.Inject;
 import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.network.Network;
 import org.matsim.contrib.freightcollaboration.CollaboratorRole;
 import org.matsim.contrib.freightcollaboration.FreightCollaborator;
 import org.matsim.contrib.freightcollaboration.FreightCollaborators;
 import org.matsim.contrib.freightcollaboration.allocation.CollaborationDataStore;
+import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfigGroup;
 import org.matsim.contrib.freightcollaboration.utils.LinkReceiverAndCarrier;
 import org.matsim.core.scoring.ScoringFunction;
 import org.matsim.core.scoring.SumScoringFunction;
@@ -22,6 +24,9 @@ import java.util.Set;
 public class ScoringFunctionFactoryUsecase {
 
 	public static class CarrierScoringFunctionFactoryUsecase implements CarrierScoringFunctionFactory {
+
+		private static final Logger logger = LogManager.getLogger(CarrierScoringFunctionFactoryUsecase.class);
+
 		@Inject
 		private Network network;
 
@@ -31,13 +36,17 @@ public class ScoringFunctionFactoryUsecase {
 		@Inject
 		CollaborationDataStore dataStore;
 
+		@Inject
+		FreightCollaborationConfigGroup freightConfig;
+
 		@Override
 		public ScoringFunction createScoringFunction(Carrier carrier) {
 			SumScoringFunction sf = new SumScoringFunction();
 			sf.addScoringFunction(new CarrierScoringFunctionFactoryImpl.SimpleDriversLegScoring(carrier, network));
 			sf.addScoringFunction(new CarrierScoringFunctionFactoryImpl.SimpleVehicleEmploymentScoring(carrier));
 			sf.addScoringFunction(new CarrierScoringFunctionFactoryImpl.SimpleDriversActivityScoring());
-			sf.addScoringFunction(new SimpleChargingReceiverScoring(carrier, freightCollaborators));
+			double feePerReceiver = freightConfig != null ? freightConfig.CARRIER_CHARGED_FEE : 200.0;
+			sf.addScoringFunction(new SimpleChargingReceiverScoring(carrier, freightCollaborators, feePerReceiver));
 			sf.addScoringFunction(new retainCostSaving(carrier, dataStore));
 			return sf;
 		}
@@ -55,11 +64,13 @@ public class ScoringFunctionFactoryUsecase {
 			private Carrier carrier;
 
 			FreightCollaborators freightCollaborators;
+			private final double feePerReceiver;
 
-			public SimpleChargingReceiverScoring(Carrier carrier, FreightCollaborators freightCollaborators) {
+			public SimpleChargingReceiverScoring(Carrier carrier, FreightCollaborators freightCollaborators, double feePerReceiver) {
 				super();
 				this.carrier = carrier;
 				this.freightCollaborators = freightCollaborators;
+				this.feePerReceiver = feePerReceiver;
 			}
 
 			private double score = 0.0;
@@ -74,7 +85,6 @@ public class ScoringFunctionFactoryUsecase {
 				// Get linked receivers for this carrier
 				Set<FreightCollaborator<Receiver>> linkedReceivers = LinkReceiverAndCarrier.findLinkedReceivers(carrier, freightCollaborators);
 				// Charge a fixed fee for each linked receiver
-				double feePerReceiver = 200.0; //
 				score = linkedReceivers.size() * feePerReceiver;
 				return score;
 			}
@@ -110,17 +120,20 @@ public class ScoringFunctionFactoryUsecase {
 	public static class ReceiverScoringFunctionFactoryUsecase implements ReceiverScoringFunctionFactory {
 
 		private CollaborationDataStore collaborationDataStore;
+		private final FreightCollaborationConfigGroup freightConfig;
 
 		@Inject
-		public ReceiverScoringFunctionFactoryUsecase(CollaborationDataStore collaborationDataStore) {
+		public ReceiverScoringFunctionFactoryUsecase(CollaborationDataStore collaborationDataStore, FreightCollaborationConfigGroup freightConfig) {
 			this.collaborationDataStore = collaborationDataStore;
+			this.freightConfig = freightConfig;
 		}
 
 		@Override
 		public ScoringFunction createScoringFunction(Receiver receiver) {
 			SumScoringFunction sf = new SumScoringFunction();
 			sf.addScoringFunction(new CarrierToReceiverCostAllocation());
-			sf.addScoringFunction(new ReceiverRelaxationPenalty(receiver, (double) 0.01, collaborationDataStore));
+			double penaltyParam = freightConfig != null ? freightConfig.RECEIVER_RELAXATION_PENALTY : 0.01;
+			sf.addScoringFunction(new ReceiverRelaxationPenalty(receiver, penaltyParam, collaborationDataStore));
 			sf.addScoringFunction(new AllocationFromDistributor(receiver, collaborationDataStore));
 			return sf;
 		}

@@ -18,25 +18,23 @@ public class AllocationModelShapleyValue implements AllocationModel {
 	CollaborationDataStore collaborationDataStore;
 
 	private static final Logger logger = LogManager.getLogger(AllocationModelShapleyValue.class);
+	private final double allocationFactor;
 
-	public AllocationModelShapleyValue(CollaborationDataStore collaborationDataStore) {
+	public AllocationModelShapleyValue(CollaborationDataStore collaborationDataStore, double allocationFactor) {
 		this.collaborationDataStore = collaborationDataStore;
+		this.allocationFactor = allocationFactor;
 	}
 
 	@Override
 	public void allocate(AllocationValueTypes type) {
-		// Implementation of Shapley Value allocation logic goes here
-		if (type == AllocationValueTypes.COST_SAVINGS) {
-			allocateCostSavings();
-		} else {
-			throw new UnsupportedOperationException("ShapleyValueAllocationModel currently supports only COST_SAVINGS allocation type.");
+		switch (type) {
+			case COST_SAVINGS -> allocateCostSavings();
+			case COST -> allocateCost();
+			default -> throw new UnsupportedOperationException("Unsupported allocation type: " + type);
 		}
 	}
 
-	// TODO: We may incorporate the allocation factor (i.e., how much cost savings could be allocated by the carrier) later if needed
 	public void allocateCostSavings() {
-		//@FIXME: the factor should be read from config
-		double allocationFactor = 0.9;
 		// Maintain a map to store final allocation values for each collaborator
 		Map<Id<?>, Double> finalAllocations = new HashMap<>();
 
@@ -74,7 +72,7 @@ public class AllocationModelShapleyValue implements AllocationModel {
 			Map<Id<?>, Double> shapleyValues = calculateShapleyValues(costSavings);
 			double totalShapleyValue = shapleyValues.values().stream().mapToDouble(Double::doubleValue).sum();
 			// reserve certain savings by the distributor based on the allocation factor and total cost savings
-			double reservedCostSavings = totalShapleyValue * (1-allocationFactor);
+			double reservedCostSavings = totalShapleyValue * (1 - allocationFactor);
 
 			// record the allocations
 			for (Map.Entry<Id<?>, Double> shapleyEntry : shapleyValues.entrySet()) {
@@ -87,6 +85,36 @@ public class AllocationModelShapleyValue implements AllocationModel {
 		}
 
 		// Update the allocated values in the data store
+		collaborationDataStore.setAllocatedValues(finalAllocations);
+	}
+
+	private void allocateCost() {
+		Map<Id<?>, Double> finalAllocations = new HashMap<>();
+
+		for (Map.Entry<MutableFreightCoalition, Map<Set<Id<?>>, Double>> entry : collaborationDataStore.getSimulatedCoalitionScores().entrySet()) {
+			MutableFreightCoalition coalition = entry.getKey();
+			Map<Set<Id<?>>, Double> coalitionScores = entry.getValue();
+
+			Id<?> distributorId = null;
+			if (coalition.getCollaborationType() == CollaborationTypes.CARRIER_RECEIVER) {
+				distributorId = coalition.getCollaboratorsSetByRole(CollaboratorRole.CARRIER).iterator().next().getId();
+			} else {
+				throw new IllegalStateException("Unsupported collaboration type for Shapley Value allocation: " + coalition.getCollaborationType());
+			}
+
+			Map<Id<?>, Double> shapleyValues = calculateShapleyValues(coalitionScores);
+			double totalCostShare = shapleyValues.values().stream().mapToDouble(Double::doubleValue).sum();
+			double reservedShare = totalCostShare * (1 - allocationFactor);
+
+			for (Map.Entry<Id<?>, Double> shapleyEntry : shapleyValues.entrySet()) {
+				Id<?> collaboratorId = shapleyEntry.getKey();
+				double allocation = shapleyEntry.getValue();
+				finalAllocations.put(collaboratorId, finalAllocations.getOrDefault(collaboratorId, 0.0) + allocationFactor * allocation);
+			}
+
+			finalAllocations.put(distributorId, finalAllocations.getOrDefault(distributorId, 0.0) + reservedShare);
+		}
+
 		collaborationDataStore.setAllocatedValues(finalAllocations);
 	}
 

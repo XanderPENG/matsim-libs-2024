@@ -11,6 +11,9 @@ import org.matsim.api.core.v01.network.Network;
 import org.matsim.contrib.freightcollaboration.CollaborationTypes;
 import org.matsim.contrib.freightcollaboration.CollaboratorRole;
 import org.matsim.contrib.freightcollaboration.FreightCollaborators;
+import org.matsim.contrib.freightcollaboration.allocation.AllocationModelApproxShapleyValue;
+import org.matsim.contrib.freightcollaboration.allocation.AllocationModels;
+import org.matsim.contrib.freightcollaboration.allocation.AllocationValueTypes;
 import org.matsim.contrib.freightcollaboration.config.CollaborationParamSet;
 import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfigGroup;
 import org.matsim.contrib.freightcollaboration.controller.CollaborationModule;
@@ -39,7 +42,10 @@ import org.matsim.freight.receiver.*;
 import org.matsim.freight.receiver.collaboration.CollaborationUtils;
 import org.matsim.vehicles.VehicleType;
 
+import java.net.MalformedURLException;
 import java.net.URL;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 
 import static org.matsim.freight.receiver.run.chessboard.ReceiverChessboardScenario.writeFreightScenario;
@@ -48,7 +54,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 
 	public static void main(String[] args) {
 		// Create basic and freight collaboration config
-		Config config = createExampleConfigWithDefaultNetwork("0.9a-0.01p-200-ApproxShapleyMonteCarlo");
+		Config config = createExampleConfigWithDefaultNetwork("0.9a-0.01p-100-proportional");
 		config.addModule(createExampleFreightCollaborationConfig());
 
 		Scenario scenario = ScenarioUtils.loadScenario(config);
@@ -63,6 +69,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 		// FIXME: The user is not supposed to do this manually, it should be done by the freight collaboration module/config group automatically.
 		ReceiverConfigGroup receiverConfigGroup = ConfigUtils.addOrGetModule(scenario.getConfig(), ReceiverConfigGroup.class);
 		receiverConfigGroup.setReplanningType(ReceiverReplanningType.timeWindow);
+		FreightCollaborationConfigGroup freightConfigGroup = ConfigUtils.addOrGetModule(scenario.getConfig(), FreightCollaborationConfigGroup.class);
 
 		// Generate receivers
 		Receivers receivers = generateExampleReceivers();
@@ -85,7 +92,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 		Controler controler = new Controler(scenario);
 
 		// Add proper ReceiverModule to handle receiver simulation
-		ReceiverModule receiverModule = new ReceiverModule(ReceiverUtils.createFixedReceiverCostAllocation(200.0));
+		ReceiverModule receiverModule = new ReceiverModule(ReceiverUtils.createFixedReceiverCostAllocation(freightConfigGroup.RECEIVER_FIXED_FEE));
 		receiverModule.setReplanningType(ReceiverReplanningType.timeWindow);
 
 		// Map Carriers and Receivers as FreightCollaborators
@@ -124,7 +131,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 			@Override
 			public void install() {
 				bind(CarrierStrategyManager.class).toProvider(new MyCarrierPlanStrategyManagerProvider(types));
-				bind(CarrierScoringFunctionFactory.class).toInstance(new ScoringFunctionFactoryUsecase.CarrierScoringFunctionFactoryUsecase());
+				bind(CarrierScoringFunctionFactory.class).to(ScoringFunctionFactoryUsecase.CarrierScoringFunctionFactoryUsecase.class);
 				bind(ReceiverScoringFunctionFactory.class).to(ScoringFunctionFactoryUsecase.ReceiverScoringFunctionFactoryUsecase.class);
 			}
 		});
@@ -135,17 +142,22 @@ public class RunCarrierReceiverShapleyAllocationExample {
 	}
 
 	static Config createExampleConfigWithDefaultNetwork(String runId) {
-		URL context = ExamplesUtils.getTestScenarioURL("freight-chessboard-9x9");
 		Config config = ConfigUtils.createConfig();
-		config.setContext(context);
-		// macbook file path
-		config.network().setInputFile("/Users/xander/gitProj/matsim-libs-2024/input/example_octagonal_network.xml");
-		// mac mini file path
-		//config.network().setInputFile("/Volumes/External/gitProj/matsim-libs-2024/input/example_octagonal_network.xml");
-		config.controller().setOutputDirectory("output/specificCarrierReceiverShapleyExample/" + runId + "/");
+
+		// Resolve network file relative to project root to avoid machine-specific absolute paths.
+		Path networkPath = Paths.get("input", "example_octagonal_network.xml").toAbsolutePath().normalize();
+		try {
+			config.setContext(networkPath.getParent().toUri().toURL());
+		} catch (MalformedURLException e) {
+			throw new RuntimeException("Failed to set config context for network path: " + networkPath, e);
+		}
+		config.network().setInputFile(networkPath.getFileName().toString());
+
+		// Project-relative output directory
+		config.controller().setOutputDirectory(Paths.get("output", "specificCarrierReceiverShapleyExample", runId).toString() + "/");
 		config.controller().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
 		config.controller().setFirstIteration(0);
-		config.controller().setLastIteration(50);
+		config.controller().setLastIteration(100);
 		return config;
 	}
 
@@ -153,7 +165,15 @@ public class RunCarrierReceiverShapleyAllocationExample {
 		// Create CollaboratorParameterSet
 		CollaborationParamSet collaborationParamSet = new CollaborationParamSet(CollaborationTypes.CARRIER_RECEIVER,
 			Set.of(CollaborationStrategies.RECEIVER_TIME_WINDOW_MUTATION, CollaborationStrategies.COLLABORATION_STATUS_MUTATION));
-		return new FreightCollaborationConfigGroup(Set.of(collaborationParamSet), null);
+		var fccg = new FreightCollaborationConfigGroup(Set.of(collaborationParamSet), null);
+		fccg.RECEIVER_FIXED_FEE = 100.0;
+		fccg.ALLOCATION_MODEL = AllocationModels.PROPORTIONAL;
+		fccg.APPROX_SHAPLEY_METHOD = (AllocationModelApproxShapleyValue.ApproximationMethod.STRATIFIED.name());
+		fccg.ALLOCATION_FACTOR = 0.9;
+		fccg.CARRIER_CHARGED_FEE = 100.0;
+		fccg.RECEIVER_RELAXATION_PENALTY = 0.01;
+		fccg.setAllocationStrategyString(AllocationValueTypes.COST_SAVINGS.name());
+		return fccg;
 	}
 
 	static Carriers generateExampleCarriers() {

@@ -25,16 +25,17 @@ public class AllocationUtils {
 	public static AllocationModel createAllocationModel(AllocationModels allocationModelType,
 														  CollaborationDataStore collaborationDataStore,
 														  FreightPseudoSimulator freightPseudoSimulator,
-														  List<MutableFreightCoalition> coalitions) {
+														  List<MutableFreightCoalition> coalitions,
+														  double allocationFactor) {
 		switch (allocationModelType){
 			case AllocationModels.PROPORTIONAL:
-				return new AllocationModelProportional(collaborationDataStore);
+				return new AllocationModelProportional(collaborationDataStore, allocationFactor);
 			case AllocationModels.SHAPLEY:
-				return new AllocationModelShapleyValue(collaborationDataStore);
+				return new AllocationModelShapleyValue(collaborationDataStore, allocationFactor);
 			case AllocationModels.MARGINAL:
-				return new AllocationModelMarginalContribution(collaborationDataStore);
+				return new AllocationModelMarginalContribution(collaborationDataStore, allocationFactor);
 			case AllocationModels.APPROX_SHAPLEY:
-				return new AllocationModelApproxShapleyValue(collaborationDataStore, freightPseudoSimulator, coalitions);
+				return new AllocationModelApproxShapleyValue(collaborationDataStore, freightPseudoSimulator, coalitions, allocationFactor);
 			default:
 				throw new IllegalArgumentException("Unknown allocation model type: " + allocationModelType);
 		}

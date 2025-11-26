@@ -64,7 +64,11 @@ public class FreightCollaborationEngine {
 		FreightPseudoSimulator freightPsim = new FreightPseudoSimulator(collaborationDataStore, scenario.getNetwork(),
 			freightCollaborators, travelTime, carrierScoringFunctionFactory);
 		AllocationModel allocationModel = AllocationUtils.createAllocationModel(fcg.ALLOCATION_MODEL, collaborationDataStore,
-			freightPsim, existingCoalitions);
+			freightPsim, existingCoalitions, fcg.getAllocationFactor());
+		if (allocationModel instanceof AllocationModelApproxShapleyValue approx) {
+			approx.setApproximationMethod(AllocationModelApproxShapleyValue.ApproximationMethod
+				.valueOf(fcg.getApproxShapleyMethod()));
+		}
 
 		if (existingCoalitions.isEmpty()) {
 			LOGGER.info("No valid coalitions found, skipping the allocation process.");
@@ -95,7 +99,7 @@ public class FreightCollaborationEngine {
 			// add the sub-coalitions scores to the data store
 			collaborationDataStore.addSimulatedCoalitionScores(coalition, subCoalitionsScoreMap);
 		}
-		allocationModel.allocate(AllocationValueTypes.COST_SAVINGS);
+		allocationModel.allocate(fcg.getAllocationStrategy());
 
 		// Something to do with triggering the MATSim scoring module
 		/**

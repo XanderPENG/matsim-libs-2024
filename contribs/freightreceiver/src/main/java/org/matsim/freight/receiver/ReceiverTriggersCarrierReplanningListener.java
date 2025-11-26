@@ -18,6 +18,7 @@
 package org.matsim.freight.receiver;
 
 import com.graphhopper.jsprit.core.algorithm.VehicleRoutingAlgorithm;
+import com.graphhopper.jsprit.core.algorithm.box.SchrimpfFactory;
 import com.graphhopper.jsprit.core.problem.VehicleRoutingProblem;
 import com.graphhopper.jsprit.core.problem.solution.VehicleRoutingProblemSolution;
 import com.graphhopper.jsprit.core.util.Solutions;
@@ -190,7 +191,16 @@ class ReceiverTriggersCarrierReplanningListener implements IterationStartsListen
 
 			//read and create a pre-configured algorithms to solve the vrp
 			URL algoConfigFileName = IOUtils.extendUrl( sc.getConfig().getContext(), "initialPlanAlgorithm.xml");
-			VehicleRoutingAlgorithm vra = VehicleRoutingAlgorithms.readAndCreateAlgorithm(vrp, algoConfigFileName);
+			// Check whether there is this file, if the file is not exist, create a default VRP algorithm
+			VehicleRoutingAlgorithm vra;
+			try {
+				vra = VehicleRoutingAlgorithms.readAndCreateAlgorithm(vrp, algoConfigFileName);
+			}
+			catch (Exception e) {
+				LogManager.getLogger(ReceiverTriggersCarrierReplanningListener.class).warn("The initialPlanAlgorithm.xml file is not found. Using the default algorithm configuration.");
+				vra = new SchrimpfFactory().createAlgorithm(vrp);
+				vra.setMaxIterations(500);
+			}
 
 			//solve the problem
 			Collection<VehicleRoutingProblemSolution> solutions = vra.searchSolutions();
