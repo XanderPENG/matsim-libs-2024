@@ -102,7 +102,10 @@ public class AllocationUtils {
 	 */
 	@SuppressWarnings("unchecked")
 	public static <T extends FreightCollaborator<?>> Map<Id<?>, T> deepCopyCollaboratorsMap(Map<Id<?>, T> originalMap) {
-		LOGGER.info("Deep copy collaborators map");
+		if (LOGGER.isDebugEnabled()) {
+			LOGGER.debug("Deep copy collaborators map");
+		}
+		// Note: this runs in hot loops during sampling; keep the copy lightweight.
 
 		Map<Id<?>, T> copiedMap = new HashMap<>();
 
@@ -135,34 +138,8 @@ public class AllocationUtils {
 				if (originalDelegate instanceof Carrier originalCarrier) {
 					Carrier copiedCarrier = CarriersUtils.createCarrier(originalCarrier.getId());
 
-					// Copy carrier capabilities (vehicles, etc.)
+					// Copy carrier capabilities (vehicles, etc.) – plans/shipments are rebuilt per subset, so skip them to stay fast.
 					copiedCarrier.setCarrierCapabilities(originalCarrier.getCarrierCapabilities());
-
-					// Copy shipments
-					for (CarrierShipment shipment : originalCarrier.getShipments().values()) {
-						CarriersUtils.addShipment(copiedCarrier, shipment);
-					}
-
-					// Copy services
-					for (CarrierService service : originalCarrier.getServices().values()) {
-						CarriersUtils.addService(copiedCarrier, service);
-					}
-
-					// Copy plans
-					for (CarrierPlan plan : originalCarrier.getPlans()) {
-						// Since the carrier plan will not have scores during the PSim, we can set it as 0.0
-						CarrierPlan copiedPlan = copyNoScorePlan(plan);
-						copiedCarrier.addPlan(copiedPlan);
-					}
-
-					// Set selected plan if exists
-					if (originalCarrier.getSelectedPlan() == null) {
-						// Find the corresponding copied plan and set it as selected
-						List<CarrierPlan> copiedPlans = copiedCarrier.getPlans();
-						if (!copiedPlans.isEmpty()) {
-							copiedCarrier.setSelectedPlan(copiedPlans.getFirst()); // Simplified - use first plan
-						}
-					}
 
 					// Copy attributes manually
 					for (String key : originalCarrier.getAttributes().getAsMap().keySet()) {

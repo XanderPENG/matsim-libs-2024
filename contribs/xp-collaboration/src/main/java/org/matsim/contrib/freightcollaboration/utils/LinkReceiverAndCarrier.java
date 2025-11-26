@@ -25,12 +25,12 @@ import java.util.Set;
 public class LinkReceiverAndCarrier {
 
 	/**
-	 * This method aims to re-generate carrierplan based on these changed receiver plans.
-	 * It should be called after receivers have changed their plans (e.g., reset the receivers' plans to original ones during the PSim)
+	 * Re-generate a carrier plan based on the receivers that collaborate in the sampled coalition.
+	 * Uses a lightweight jsprit solve bounded by {@code maxIterations} to keep Shapley sampling fast.
 	 */
 	public static void receiversTriggerCarrierReplan(FreightCollaborator<Carrier> carrierCollaborator,
 													 Set<FreightCollaborator<Receiver>> receiverCollaborators,
-													 Network network, TravelTime tt) {
+													 Network network, TravelTime tt, int maxIterations) {
 		// Clean the carrier's current plan and services/shipments
 		Carrier carrier = carrierCollaborator.getDelegate();
 		carrier.clearPlans();
@@ -77,7 +77,7 @@ public class LinkReceiverAndCarrier {
 		VehicleRoutingProblem vrp = vrpBuilder.setRoutingCost(netBasedCosts).build();
 		// New a VRP algorithm and search for solutions
 		VehicleRoutingAlgorithm vra = new SchrimpfFactory().createAlgorithm(vrp);
-		vra.setMaxIterations(500);
+		vra.setMaxIterations(maxIterations);
 		Collection<VehicleRoutingProblemSolution> solutions = vra.searchSolutions();
 		// Create a new carrierPlan from the best solution
 		CarrierPlan newPlan = MatsimJspritFactory.createPlan(carrier, Solutions.bestOf(solutions));

@@ -50,6 +50,8 @@ public class FreightPseudoSimulator {
 	CarrierScoringFunctionFactory carrierScoringFunctionFactory;
 
 	private static Logger LOGGER = LogManager.getLogger(FreightPseudoSimulator.class);
+	/** Upper bound for jsprit iterations during sampling; keeps Shapley runs lightweight. */
+	private int vrpMaxIterations = 200;
 
 //	FreightPseudoSimulator() {}
 
@@ -65,6 +67,14 @@ public class FreightPseudoSimulator {
 
 	void run() {
 
+	}
+
+	/** Allow callers to trade accuracy for speed during sampling runs. */
+	public void setVrpMaxIterations(int vrpMaxIterations) {
+		if (vrpMaxIterations <= 0) {
+			throw new IllegalArgumentException("vrpMaxIterations must be positive.");
+		}
+		this.vrpMaxIterations = vrpMaxIterations;
 	}
 
 	/** Simulate all possible sub-coalitions of the given players and distributors
@@ -147,8 +157,8 @@ public class FreightPseudoSimulator {
 			receiverCollaborators.addAll(nonCollaboratingReceivers);
 			// need to re-generate the carrier plan based on the new receiver plans/requests
 			LinkReceiverAndCarrier.receiversTriggerCarrierReplan(carrierCollaborator, receiverCollaborators,
-					network, tt
-				);
+					network, tt, vrpMaxIterations
+			);
 			// Then run the carrier PSim
 			var driverLegsAndActivitiesMap = runActivityBasedCarrierSimulation(carrierCollaborator.getDelegate());
 			// calculate the score based on the output legs and activities

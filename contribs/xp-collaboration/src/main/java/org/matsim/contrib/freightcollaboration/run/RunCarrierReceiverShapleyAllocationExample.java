@@ -54,7 +54,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 
 	public static void main(String[] args) {
 		// Create basic and freight collaboration config
-		Config config = createExampleConfigWithDefaultNetwork("0.9a-0.01p-100-approxShapleyStratifiedCheck");
+		Config config = createExampleConfigWithDefaultNetwork("0.9a-0.01p-100-approxShapleyStratified");
 		config.addModule(createExampleFreightCollaborationConfig());
 
 		Scenario scenario = ScenarioUtils.loadScenario(config);

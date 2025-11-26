@@ -27,7 +27,7 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 	private boolean useCostSavings = true;
 	private ApproximationMethod approximationMethod = ApproximationMethod.MONTE_CARLO;
 	private int monteCarloSamples = 20;
-	private double SamplesRatio = 0.4;
+	private double samplesRatio = 0.4;
 	private int stratifiedSamplesPerLevel = 20;
 
 	public AllocationModelApproxShapleyValue(CollaborationDataStore collaborationDataStore,
@@ -46,6 +46,17 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 
 	public void setMonteCarloSamples(int monteCarloSamples) {
 		this.monteCarloSamples = monteCarloSamples;
+	}
+
+	/**
+	 * Scale factor (0–1] applied to the configured sample counts so users can
+	 * quickly dial runtime up/down without changing absolute defaults.
+	 */
+	public void setSamplesRatio(double samplesRatio) {
+		if (samplesRatio <= 0.0 || samplesRatio > 1.0) {
+			throw new IllegalArgumentException("samplesRatio must be in (0, 1].");
+		}
+		this.samplesRatio = samplesRatio;
 	}
 
 	public void setStratifiedSamplesPerLevel(int stratifiedSamplesPerLevel) {
@@ -123,7 +134,8 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 		valueCache.computeIfAbsent(Set.of(), k -> useCostSavings ? 0.0 : baselineRaw);
 		rawValueCache.computeIfAbsent(Set.of(), k -> baselineRaw);
 
-		for (int sample = 0; sample < monteCarloSamples; sample++) {
+		int effectiveSamples = Math.max(1, (int) Math.round(monteCarloSamples * samplesRatio));
+		for (int sample = 0; sample < effectiveSamples; sample++) {
 			Collections.shuffle(playerList, random);
 			Set<Id<?>> currentCoalition = new HashSet<>();
 			double currentValue = evaluateSubCoalition(distributors, players, valueCache, rawValueCache, baselineRaw, currentCoalition);
@@ -136,8 +148,8 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 			}
 		}
 
-		shapleyValues.replaceAll((id, value) -> Math.max(0.0, value / monteCarloSamples));
-		return shapleyValues;
+			shapleyValues.replaceAll((id, value) -> Math.max(0.0, value / effectiveSamples));
+			return shapleyValues;
 	}
 
 	private Map<Id<?>, Double> approximateShapleyStratified(Map<Id<?>, FreightCollaborator<?>> players,
@@ -158,7 +170,8 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 			for (int k = 0; k <= n - 1; k++) {
 				double weight = 1.0 / n; // each subset size contributes equally in expectation
 				long combCount = combination(n - 1, k);
-				int samples = (int) Math.min(combCount, Math.max(1, stratifiedSamplesPerLevel));
+				int baseSamples = Math.max(1, stratifiedSamplesPerLevel);
+				int samples = (int) Math.min(combCount, Math.max(1, Math.round(baseSamples * samplesRatio)));
 				List<Set<Id<?>>> sampledSubsets = sampleSubsetsWithoutReplacement(playerList, playerId, k, samples, random);
 				double marginalSum = 0.0;
 				for (Set<Id<?>> subset : sampledSubsets) {
