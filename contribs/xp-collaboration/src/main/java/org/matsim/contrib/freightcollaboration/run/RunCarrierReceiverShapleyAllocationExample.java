@@ -47,87 +47,112 @@ import java.net.URL;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.stream.IntStream;
 
 import static org.matsim.freight.receiver.run.chessboard.ReceiverChessboardScenario.writeFreightScenario;
 
 public class RunCarrierReceiverShapleyAllocationExample {
 
 	public static void main(String[] args) {
-		// Create basic and freight collaboration config
-		Config config = createExampleConfigWithDefaultNetwork("0.9a-0.01p-100-approxShapleyStratified");
-		config.addModule(createExampleFreightCollaborationConfig());
+		// Design 1: penalties sweep (12), allocation factors (3), methods (5) = 180 runs
+		double[] penaltySweep = {0.0, 0.003, 0.005, 0.01, 0.015, 0.02, 0.025, 0.03, 0.035, 0.04, 0.045, 0.05};
+		double[] allocSweepShort = {0.6, 0.75, 0.9};
 
+		// Design 2: allocation factor sweep (12), single penalty, methods (5) = 60 runs
+		double fixedPenalty = 0.01;
+		double[] allocSweepLong = IntStream.range(0, 12).mapToDouble(i -> 0.4 + 0.05 * i).toArray();
+
+		List<AllocationMethodChoice> methods = List.of(
+			new AllocationMethodChoice("exactShapley", AllocationModels.SHAPLEY, null),
+			new AllocationMethodChoice("marginal", AllocationModels.MARGINAL, null),
+			new AllocationMethodChoice("proportional", AllocationModels.PROPORTIONAL, null),
+			new AllocationMethodChoice("approxShapMC", AllocationModels.APPROX_SHAPLEY, AllocationModelApproxShapleyValue.ApproximationMethod.MONTE_CARLO),
+			new AllocationMethodChoice("approxShapStrat", AllocationModels.APPROX_SHAPLEY, AllocationModelApproxShapleyValue.ApproximationMethod.STRATIFIED)
+		);
+
+		// Run design 1
+		for (double penalty : penaltySweep) {
+			for (double allocFactor : allocSweepShort) {
+				for (AllocationMethodChoice method : methods) {
+					runSingleExperiment("penSweep", allocFactor, penalty, method);
+				}
+			}
+		}
+
+		// Run design 2
+		for (double allocFactor : allocSweepLong) {
+			for (AllocationMethodChoice method : methods) {
+				runSingleExperiment("allocSweep", allocFactor, fixedPenalty, method);
+			}
+		}
+	}
+
+	private static void runSingleExperiment(String tag, double allocationFactor, double receiverPenalty, AllocationMethodChoice methodChoice) {
+		String runId = "%s-af%.2f-p%.3f-%s".formatted(tag, allocationFactor, receiverPenalty, methodChoice.label);
+
+		Config config = createExampleConfigWithDefaultNetwork(runId);
+		FreightCollaborationConfigGroup freightCfg = createExampleFreightCollaborationConfig();
+		freightCfg.ALLOCATION_FACTOR = allocationFactor;
+		freightCfg.RECEIVER_RELAXATION_PENALTY = receiverPenalty;
+		freightCfg.ALLOCATION_MODEL = methodChoice.model;
+		if (methodChoice.model == AllocationModels.APPROX_SHAPLEY && methodChoice.approxMethod != null) {
+			freightCfg.APPROX_SHAPLEY_METHOD = methodChoice.approxMethod.name();
+		}
+		config.addModule(freightCfg);
+
+		runSingleControler(config);
+	}
+
+	private static void runSingleControler(Config config) {
 		Scenario scenario = ScenarioUtils.loadScenario(config);
 
 		// Generate Carriers
 		Carriers carriers = generateExampleCarriers();
-		// Add carriers into scenario - FIXED: Actually add the generated carriers
 		Carriers scenarioCarriers = CarriersUtils.addOrGetCarriers(scenario);
 		for (var carrier : carriers.getCarriers().values()) {
 			scenarioCarriers.addCarrier(carrier);
 		}
-		// FIXME: The user is not supposed to do this manually, it should be done by the freight collaboration module/config group automatically.
 		ReceiverConfigGroup receiverConfigGroup = ConfigUtils.addOrGetModule(scenario.getConfig(), ReceiverConfigGroup.class);
 		receiverConfigGroup.setReplanningType(ReceiverReplanningType.timeWindow);
 		FreightCollaborationConfigGroup freightConfigGroup = ConfigUtils.addOrGetModule(scenario.getConfig(), FreightCollaborationConfigGroup.class);
 
-		// Generate receivers
 		Receivers receivers = generateExampleReceivers();
-		// Add receivers into scenario
 		ReceiverUtils.setReceivers(receivers, scenario);
 
-		// Generate receiver orders and plans and carrier shipments
 		ReceiverOrderGeneration receiverOrderGeneration = new ReceiverOrderGeneration(receivers, carriers);
 		receiverOrderGeneration.generateAllReceiverOrders();
 
-		// Write the freight scenario into output directory
 		writeFreightScenario(scenario);
-		// Ensure that the receivers are linked to the carriers
 		CollaborationUtils.linkReceiverOrdersToCarriers(ReceiverUtils.getReceivers(scenario), CarriersUtils.getCarriers(scenario));
-
-		// Create coalition and add carriers and receivers into the coalition
 		CollaborationUtils.createCoalitionWithCarriersAndAddCollaboratingReceivers(scenario);
 
-		// Create a controler
 		Controler controler = new Controler(scenario);
 
-		// Add proper ReceiverModule to handle receiver simulation
 		ReceiverModule receiverModule = new ReceiverModule(ReceiverUtils.createFixedReceiverCostAllocation(freightConfigGroup.RECEIVER_FIXED_FEE));
 		receiverModule.setReplanningType(ReceiverReplanningType.timeWindow);
 
-		// Map Carriers and Receivers as FreightCollaborators
-		// TODO: This should be done more elegantly, e.g., provide a utility method in @FreightCollaborationUtils.
 		FreightCollaborators freightCollaborators = new FreightCollaborators();
 		for (Carrier carrier : CarriersUtils.getCarriers(scenario).getCarriers().values()) {
-			// Assume all carriers are willing to collaborate in this example
 			var carrierCollaborator = LinkFreightAgentToFreightCollaborator.map(carrier, true);
 			freightCollaborators.addFreightCollaborator(carrierCollaborator);
 		}
 		for (Receiver receiver : ReceiverUtils.getReceivers(scenario).getReceivers().values()) {
-			// FIXME: The collaborationStatus param will not function here, as the receiver's collaboration status is already defined by itself.
 			var receiverCollaborator = LinkFreightAgentToFreightCollaborator.map(receiver, true);
 			freightCollaborators.addFreightCollaborator(receiverCollaborator);
 		}
 
-		// Add collaboration modules
 		CollaboratorModules collaboratorModules = new CollaboratorModules(Map.of(CollaboratorRole.RECEIVER, receiverModule,
 			CollaboratorRole.CARRIER, new CarrierModule()));
 		CollaborationModule collaborationModule = new CollaborationModule(collaboratorModules, freightCollaborators, scenario);
 
-		// Install all collaborator modules
 		collaborationModule.installAllCollaboratorModules(controler);
-
-		// Install the collaboration module itself
 		controler.addOverridingModule(collaborationModule);
-		// Install the scoring function
-		// Get carriers and carrier vehicle types
+
 		CarrierVehicleTypes carrierVehicleTypes = CarrierVehicleTypes.getVehicleTypes(scenarioCarriers);
 		CarrierVehicleTypes types = CarriersUtils.getCarrierVehicleTypes(scenario);
-		// put vehicle types into the scenario carrier vehicle types to ensure consistency
 		types.getVehicleTypes().putAll(carrierVehicleTypes.getVehicleTypes());
 
 		controler.addOverridingModule(new AbstractModule() {
-
 			@Override
 			public void install() {
 				bind(CarrierStrategyManager.class).toProvider(new MyCarrierPlanStrategyManagerProvider(types));
@@ -140,6 +165,9 @@ public class RunCarrierReceiverShapleyAllocationExample {
 		controler.addControlerListener(scoreStats);
 		controler.run();
 	}
+
+	private record AllocationMethodChoice(String label, AllocationModels model,
+										  AllocationModelApproxShapleyValue.ApproximationMethod approxMethod) { }
 
 	static Config createExampleConfigWithDefaultNetwork(String runId) {
 		Config config = ConfigUtils.createConfig();
@@ -156,6 +184,9 @@ public class RunCarrierReceiverShapleyAllocationExample {
 		// Project-relative output directory
 		config.controller().setOutputDirectory(Paths.get("output", "specificCarrierReceiverShapleyExample", runId).toString() + "/");
 		config.controller().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
+		// Set write iteration file interval to 5 to reduce output size and increase speed
+//		config.controller().setWriteEventsInterval(5);
+//		config.controller().setWritePlansInterval(5);
 		config.controller().setFirstIteration(0);
 		config.controller().setLastIteration(100);
 		return config;
