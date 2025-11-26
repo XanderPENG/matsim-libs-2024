@@ -37,7 +37,7 @@ public class FreightCollaborationConfigGroup extends ReflectiveConfigGroup {
 	public String INPUT_NETWORK_FILE;
 
 	// Allocation model set, Proportional allocation by default
-	public AllocationModels ALLOCATION_MODEL = AllocationModels.SHAPLEY;
+	public AllocationModels ALLOCATION_MODEL = AllocationModels.APPROX_SHAPLEY;
 
 //	@StringSetter("collaborationParamSets")
 	public void setCollaborationParamSets(String value) {

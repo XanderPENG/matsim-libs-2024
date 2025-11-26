@@ -48,7 +48,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 
 	public static void main(String[] args) {
 		// Create basic and freight collaboration config
-		Config config = createExampleConfigWithDefaultNetwork("0.4a-0.01p-200");
+		Config config = createExampleConfigWithDefaultNetwork("0.9a-0.01p-200-ApproxShapleyMonteCarlo");
 		config.addModule(createExampleFreightCollaborationConfig());
 
 		Scenario scenario = ScenarioUtils.loadScenario(config);
@@ -145,7 +145,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 		config.controller().setOutputDirectory("output/specificCarrierReceiverShapleyExample/" + runId + "/");
 		config.controller().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
 		config.controller().setFirstIteration(0);
-		config.controller().setLastIteration(100);
+		config.controller().setLastIteration(50);
 		return config;
 	}
 

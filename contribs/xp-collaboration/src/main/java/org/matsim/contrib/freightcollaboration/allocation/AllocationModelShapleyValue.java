@@ -36,7 +36,7 @@ public class AllocationModelShapleyValue implements AllocationModel {
 	// TODO: We may incorporate the allocation factor (i.e., how much cost savings could be allocated by the carrier) later if needed
 	public void allocateCostSavings() {
 		//@FIXME: the factor should be read from config
-		double allocationFactor = 0.4;
+		double allocationFactor = 0.9;
 		// Maintain a map to store final allocation values for each collaborator
 		Map<Id<?>, Double> finalAllocations = new HashMap<>();
 

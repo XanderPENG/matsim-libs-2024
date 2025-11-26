@@ -1,6 +1,5 @@
 package org.matsim.contrib.freightcollaboration.allocation;
 
-import com.google.inject.Inject;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Id;
@@ -8,17 +7,11 @@ import org.matsim.api.core.v01.Scenario;
 import org.matsim.contrib.freightcollaboration.*;
 import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfigGroup;
 import org.matsim.contrib.freightcollaboration.utils.AllocationUtils;
-import org.matsim.core.api.experimental.events.EventsManager;
 import org.matsim.core.config.Config;
 import org.matsim.core.router.util.TravelTime;
 import org.matsim.freight.carriers.controller.CarrierScoringFunctionFactory;
 
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import static org.matsim.contrib.freightcollaboration.CollaborationTypes.CARRIER_CARRIER;
-import static org.matsim.contrib.freightcollaboration.CollaborationTypes.CARRIER_RECEIVER;
+import java.util.*;
 
 public class FreightCollaborationEngine {
 
@@ -68,32 +61,41 @@ public class FreightCollaborationEngine {
 		//     // Perform specific logic for this collaboration type
 		// }
 		FreightCollaborationConfigGroup fcg = (FreightCollaborationConfigGroup) config.getModules().get(FreightCollaborationConfigGroup.GROUP_NAME);
-		AllocationModel allocationModel = AllocationUtils.createAllocationModel(fcg.ALLOCATION_MODEL, collaborationDataStore);
-		if (fcg.ALLOCATION_MODEL == AllocationModels.PROPORTIONAL) {
-			// Do not need to run the freight psim with such allocation model
-			// TODO: only need to specify the distributor and assignee for the model input
-		} else {
-			// Need to run the freight psim to evaluate the new plans and calculate the contributions
+		FreightPseudoSimulator freightPsim = new FreightPseudoSimulator(collaborationDataStore, scenario.getNetwork(),
+			freightCollaborators, travelTime, carrierScoringFunctionFactory);
+		AllocationModel allocationModel = AllocationUtils.createAllocationModel(fcg.ALLOCATION_MODEL, collaborationDataStore,
+			freightPsim, existingCoalitions);
 
-			FreightPseudoSimulator freightPsim = new FreightPseudoSimulator(collaborationDataStore, scenario.getNetwork(),
-				freightCollaborators, travelTime, carrierScoringFunctionFactory); // initialize a new psim instance
-
-			// A for-loop to iterate through all existing coalitions
-			for (MutableFreightCoalition coalition : existingCoalitions) {
-				// Extract the valid collaborators (player and distributor) based on the collaboration type
-				Map<Id<?>, FreightCollaborator<?>> validPlayer = extractValidPlayer(coalition);
-				Map<Id<?>, FreightCollaborator<?>> validDistributor = extractValidDistributor(coalition);
-				Map<Set<Id<?>>, Double> subCoalitionsScoreMap = freightPsim.runAllSubCoalitions(validDistributor, validPlayer);
-				// add the sub-coalitions scores to the data store
-				collaborationDataStore.addSimulatedCoalitionScores(coalition, subCoalitionsScoreMap);
-			}
-			// TODO: the allocation value type should be specified in the config later
-			if (existingCoalitions.isEmpty()) {
-				LOGGER.info("No valid coalitions found, skipping the allocation process.");
-				return;
-			}
-			allocationModel.allocate(AllocationValueTypes.COST_SAVINGS);
+		if (existingCoalitions.isEmpty()) {
+			LOGGER.info("No valid coalitions found, skipping the allocation process.");
+			return;
 		}
+
+		if (fcg.ALLOCATION_MODEL == AllocationModels.APPROX_SHAPLEY) {
+			// ((AllocationModelApproxShapleyValue) allocationModel).setApproximationMethod(AllocationModelApproxShapleyValue.ApproximationMethod.STRATIFIED); ;
+			allocationModel.allocate(AllocationValueTypes.COST_SAVINGS);
+			return;
+		}
+
+		// Need to run the freight psim to evaluate the new plans and calculate the contributions
+		for (MutableFreightCoalition coalition : existingCoalitions) {
+			// Extract the valid collaborators (player and distributor) based on the collaboration type
+			Map<Id<?>, FreightCollaborator<?>> validPlayer = AllocationUtils.extractValidPlayers(coalition);
+			Map<Id<?>, FreightCollaborator<?>> validDistributor = AllocationUtils.extractValidDistributors(coalition);
+			Map<Set<Id<?>>, Double> subCoalitionsScoreMap;
+			if (fcg.ALLOCATION_MODEL == AllocationModels.PROPORTIONAL) {
+				subCoalitionsScoreMap = freightPsim.runSubCoalitions(validDistributor, validPlayer,
+						buildSubCoalitionsForProportional(validPlayer.keySet()));
+			} else if (fcg.ALLOCATION_MODEL == AllocationModels.MARGINAL) {
+				subCoalitionsScoreMap = freightPsim.runSubCoalitions(validDistributor, validPlayer,
+						buildSubCoalitionsForMarginal(validPlayer.keySet()));
+			} else {
+				subCoalitionsScoreMap = freightPsim.runAllSubCoalitions(validDistributor, validPlayer);
+			}
+			// add the sub-coalitions scores to the data store
+			collaborationDataStore.addSimulatedCoalitionScores(coalition, subCoalitionsScoreMap);
+		}
+		allocationModel.allocate(AllocationValueTypes.COST_SAVINGS);
 
 		// Something to do with triggering the MATSim scoring module
 		/**
@@ -108,23 +110,33 @@ public class FreightCollaborationEngine {
 
 	}
 
-	private Map<Id<?>, FreightCollaborator<?>> extractValidPlayer(MutableFreightCoalition existingCoalition) {
-		CollaborationType collaborationType = existingCoalition.getCollaborationType();
-		return switch (collaborationType) {
-			case CARRIER_RECEIVER -> existingCoalition.getCollaboratorsMapByRole(CollaboratorRole.RECEIVER);
-			case CARRIER_CARRIER -> existingCoalition.getCollaboratorsMapByRole(CollaboratorRole.CARRIER);
-			default -> throw new IllegalStateException("Unexpected value: " + collaborationType);
-		};
-
+	/**
+	 * Build sub-coalitions for proportional allocation model,
+	 * it should be the full coalition and empty coalition (to get the baseline score).
+	 * @param players
+	 * @return
+	 */
+	private Collection<Set<Id<?>>> buildSubCoalitionsForProportional(Set<Id<?>> players) {
+		List<Set<Id<?>>> subCoalitions = new ArrayList<>();
+		subCoalitions.add(Set.of());
+		subCoalitions.add(Set.copyOf(players));
+//		for (Id<?> player : players) {
+//			subCoalitions.add(Set.of(player));
+//		}
+		return subCoalitions;
 	}
 
-	private Map<Id<?>, FreightCollaborator<?>> extractValidDistributor(MutableFreightCoalition existingCoalition) {
-		CollaborationType collaborationType = existingCoalition.getCollaborationType();
-		return switch (collaborationType) {
-			case CARRIER_RECEIVER -> existingCoalition.getCollaboratorsMapByRole(CollaboratorRole.CARRIER);
-			case CARRIER_CARRIER -> existingCoalition.getCollaboratorsMapByRole(CollaboratorRole.CARRIER);
-			default -> throw new IllegalStateException("Unexpected value: " + collaborationType);
-		};
+	private Collection<Set<Id<?>>> buildSubCoalitionsForMarginal(Set<Id<?>> players) {
+		List<Set<Id<?>>> subCoalitions = new ArrayList<>();
+		subCoalitions.add(Set.of());
+		Set<Id<?>> fullCoalition = Set.copyOf(players);
+		subCoalitions.add(fullCoalition);
+		for (Id<?> player : players) {
+			Set<Id<?>> withoutPlayer = new HashSet<>(players);
+			withoutPlayer.remove(player);
+			subCoalitions.add(withoutPlayer);
+		}
+		return subCoalitions;
 	}
 
 	private void injectScoringFunctionForValueAllocation(){

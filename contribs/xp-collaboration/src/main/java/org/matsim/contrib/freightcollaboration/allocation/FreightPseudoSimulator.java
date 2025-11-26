@@ -1,6 +1,5 @@
 package org.matsim.contrib.freightcollaboration.allocation;
 
-import com.google.inject.Inject;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Id;
@@ -75,47 +74,46 @@ public class FreightPseudoSimulator {
 		LOGGER.info("Starting Freight Pseudo Simulator");
 		// Generate all possible sub-coalitions of the given players
 		var subCoalitionScoreMap = AllocationUtils.generateSubsets(players);
+		Map<Set<Id<?>>, Double> result = new HashMap<>();
 		// For each sub-coalition, simulate it and record its score
 		for (Set<Id<?>> subCoalition : subCoalitionScoreMap.keySet()) {
-			// if it is the empty set
-			if (subCoalition.isEmpty()) {
-				// No collaboration, set score to 0 (ignore)
-				// FIXME: is it appropriate to set it to 0?
-				Map<Id<?>, FreightCollaborator<?>> copyDistributors = AllocationUtils.deepCopyCollaboratorsMap(distributors);
-				Map<Id<?>, FreightCollaborator<?>> copyPlayers = AllocationUtils.deepCopyCollaboratorsMap(players);
-
-				// identify non-collaborating members
-				Set<Id<?>> nonCollaboratingMembers = players.keySet();
-				// For these non-collaborating members/players, we need to use their original plans from the data store
-				resetNonCollaboratingMembersPlans(nonCollaboratingMembers, copyPlayers);
-
-				// run PSim for this sub-coalition
-				double score = runPSim(copyDistributors, copyPlayers);
-
-				// record the score
-				subCoalitionScoreMap.put(subCoalition, score);
-//			} else if (subCoalition.size() == players.size()) {  // also using psim
-//				// Full coalition, use the existing main-MATSim events
-//				continue;
-			} else { // Partial coalition, simulate it separately
-				// Deep copy the distributors and players maps for this sub-coalition, so that we can modify them safely
-				Map<Id<?>, FreightCollaborator<?>> copyDistributors = AllocationUtils.deepCopyCollaboratorsMap(distributors);
-				Map<Id<?>, FreightCollaborator<?>> copyPlayers = AllocationUtils.deepCopyCollaboratorsMap(players);
-
-				// identify non-collaborating members
-				Set<Id<?>> nonCollaboratingMembers = AllocationUtils.identifyNonCollaboratingMembers(players.keySet(), subCoalition);
-				// For these non-collaborating members/players, we need to use their original plans from the data store
-				resetNonCollaboratingMembersPlans(nonCollaboratingMembers, copyPlayers);
-
-				// run PSim for this sub-coalition
-				double score = runPSim(copyDistributors, copyPlayers);
-
-				// record the score
-				subCoalitionScoreMap.put(subCoalition, score);
-			}
+			result.put(Set.copyOf(subCoalition), simulateSubCoalition(distributors, players, subCoalition));
 		}
 
+		return result;
+	}
+
+	Map<Set<Id<?>>, Double> runSubCoalitions(Map<Id<?>, FreightCollaborator<?>> distributors,
+											 Map<Id<?>, FreightCollaborator<?>> players,
+											 Collection<Set<Id<?>>> subCoalitions) {
+		Map<Set<Id<?>>, Double> subCoalitionScoreMap = new HashMap<>();
+		for (Set<Id<?>> subCoalition : subCoalitions) {
+			subCoalitionScoreMap.put(Set.copyOf(subCoalition), simulateSubCoalition(distributors, players, subCoalition));
+		}
 		return subCoalitionScoreMap;
+	}
+
+	double runSingleSubCoalition(Map<Id<?>, FreightCollaborator<?>> distributors,
+								 Map<Id<?>, FreightCollaborator<?>> players,
+								 Set<Id<?>> subCoalition) {
+		return simulateSubCoalition(distributors, players, subCoalition);
+	}
+
+	private double simulateSubCoalition(Map<Id<?>, FreightCollaborator<?>> distributors,
+									   Map<Id<?>, FreightCollaborator<?>> players,
+									   Set<Id<?>> subCoalition) {
+		// Deep copy the distributors and players maps for this sub-coalition, so that we can modify them safely
+		Map<Id<?>, FreightCollaborator<?>> copyDistributors = AllocationUtils.deepCopyCollaboratorsMap(distributors);
+		Map<Id<?>, FreightCollaborator<?>> copyPlayers = AllocationUtils.deepCopyCollaboratorsMap(players);
+
+		Set<Id<?>> nonCollaboratingMembers;
+		if (subCoalition.isEmpty()) {
+			nonCollaboratingMembers = Set.copyOf(players.keySet());
+		} else {
+			nonCollaboratingMembers = AllocationUtils.identifyNonCollaboratingMembers(players.keySet(), subCoalition);
+		}
+		resetNonCollaboratingMembersPlans(nonCollaboratingMembers, copyPlayers);
+		return runPSim(copyDistributors, copyPlayers);
 	}
 
 

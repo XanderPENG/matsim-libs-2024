@@ -4,4 +4,5 @@ public enum AllocationModels {
 	PROPORTIONAL,
 	SHAPLEY,
 	MARGINAL,
+	APPROX_SHAPLEY
 }

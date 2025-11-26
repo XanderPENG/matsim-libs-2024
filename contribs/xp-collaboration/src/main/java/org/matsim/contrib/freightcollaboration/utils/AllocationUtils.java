@@ -4,13 +4,8 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.population.HasPlansAndId;
-import org.matsim.contrib.freightcollaboration.FreightCollaborator;
-import org.matsim.contrib.freightcollaboration.FreightCollaboratorFactory;
-import org.matsim.contrib.freightcollaboration.CollaboratorRole;
-import org.matsim.contrib.freightcollaboration.allocation.AllocationModel;
-import org.matsim.contrib.freightcollaboration.allocation.AllocationModels;
-import org.matsim.contrib.freightcollaboration.allocation.CollaborationDataStore;
-import org.matsim.contrib.freightcollaboration.allocation.AllocationModelShapleyValue;
+import org.matsim.contrib.freightcollaboration.*;
+import org.matsim.contrib.freightcollaboration.allocation.*;
 import org.matsim.freight.carriers.*;
 import org.matsim.freight.logistics.LSP;
 import org.matsim.freight.receiver.Receiver;
@@ -19,20 +14,27 @@ import org.matsim.freight.receiver.ReceiverUtils;
 
 import java.util.*;
 
+import static org.matsim.contrib.freightcollaboration.CollaborationTypes.CARRIER_CARRIER;
+import static org.matsim.contrib.freightcollaboration.CollaborationTypes.CARRIER_RECEIVER;
+
 public class AllocationUtils {
 
 	private static Logger LOGGER = LogManager.getLogger(AllocationUtils.class);
 
 	// TODO: the CollaborationDataStore should be injected via Guice, fix it later
-	public static AllocationModel createAllocationModel(AllocationModels allocationModelType, CollaborationDataStore collaborationDataStore) {
-		// Placeholder for actual implementation
+	public static AllocationModel createAllocationModel(AllocationModels allocationModelType,
+														  CollaborationDataStore collaborationDataStore,
+														  FreightPseudoSimulator freightPseudoSimulator,
+														  List<MutableFreightCoalition> coalitions) {
 		switch (allocationModelType){
 			case AllocationModels.PROPORTIONAL:
-				// return new ProportionalAllocation();
+				return new AllocationModelProportional(collaborationDataStore);
 			case AllocationModels.SHAPLEY:
 				return new AllocationModelShapleyValue(collaborationDataStore);
 			case AllocationModels.MARGINAL:
-				// return new MarginalContributionAllocationModel();
+				return new AllocationModelMarginalContribution(collaborationDataStore);
+			case AllocationModels.APPROX_SHAPLEY:
+				return new AllocationModelApproxShapleyValue(collaborationDataStore, freightPseudoSimulator, coalitions);
 			default:
 				throw new IllegalArgumentException("Unknown allocation model type: " + allocationModelType);
 		}
@@ -66,6 +68,30 @@ public class AllocationUtils {
 		Set<Id<?>> nonCollaboratingMembers = new HashSet<>(allMembers);
 		nonCollaboratingMembers.removeAll(collaboratingMembers);
 		return nonCollaboratingMembers;
+	}
+
+	/**
+	 * Extract valid players from a coalition based on collaboration type.
+	 */
+	public static Map<Id<?>, FreightCollaborator<?>> extractValidPlayers(MutableFreightCoalition coalition) {
+		CollaborationType collaborationType = coalition.getCollaborationType();
+		return switch (collaborationType) {
+			case CARRIER_RECEIVER -> coalition.getCollaboratorsMapByRole(CollaboratorRole.RECEIVER);
+			case CARRIER_CARRIER -> coalition.getCollaboratorsMapByRole(CollaboratorRole.CARRIER);
+			default -> throw new IllegalStateException("Unexpected value: " + collaborationType);
+		};
+	}
+
+	/**
+	 * Extract valid distributors from a coalition based on collaboration type.
+	 */
+	public static Map<Id<?>, FreightCollaborator<?>> extractValidDistributors(MutableFreightCoalition coalition) {
+		CollaborationType collaborationType = coalition.getCollaborationType();
+		return switch (collaborationType) {
+			case CARRIER_RECEIVER -> coalition.getCollaboratorsMapByRole(CollaboratorRole.CARRIER);
+			case CARRIER_CARRIER -> coalition.getCollaboratorsMapByRole(CollaboratorRole.CARRIER);
+			default -> throw new IllegalStateException("Unexpected value: " + collaborationType);
+		};
 	}
 
 	/**
