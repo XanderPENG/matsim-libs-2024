@@ -54,7 +54,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 
 	public static void main(String[] args) {
 		// Create basic and freight collaboration config
-		Config config = createExampleConfigWithDefaultNetwork("0.9a-0.01p-100-proportional");
+		Config config = createExampleConfigWithDefaultNetwork("0.9a-0.01p-100-approxShapleyStratifiedCheck");
 		config.addModule(createExampleFreightCollaborationConfig());
 
 		Scenario scenario = ScenarioUtils.loadScenario(config);
@@ -167,7 +167,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 			Set.of(CollaborationStrategies.RECEIVER_TIME_WINDOW_MUTATION, CollaborationStrategies.COLLABORATION_STATUS_MUTATION));
 		var fccg = new FreightCollaborationConfigGroup(Set.of(collaborationParamSet), null);
 		fccg.RECEIVER_FIXED_FEE = 100.0;
-		fccg.ALLOCATION_MODEL = AllocationModels.PROPORTIONAL;
+		fccg.ALLOCATION_MODEL = AllocationModels.APPROX_SHAPLEY;
 		fccg.APPROX_SHAPLEY_METHOD = (AllocationModelApproxShapleyValue.ApproximationMethod.STRATIFIED.name());
 		fccg.ALLOCATION_FACTOR = 0.9;
 		fccg.CARRIER_CHARGED_FEE = 100.0;

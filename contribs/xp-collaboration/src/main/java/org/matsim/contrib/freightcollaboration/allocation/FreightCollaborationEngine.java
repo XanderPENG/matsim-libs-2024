@@ -77,7 +77,7 @@ public class FreightCollaborationEngine {
 
 		if (fcg.ALLOCATION_MODEL == AllocationModels.APPROX_SHAPLEY) {
 			// ((AllocationModelApproxShapleyValue) allocationModel).setApproximationMethod(AllocationModelApproxShapleyValue.ApproximationMethod.STRATIFIED); ;
-			allocationModel.allocate(AllocationValueTypes.COST_SAVINGS);
+			allocationModel.allocate(fcg.getAllocationStrategy());
 			return;
 		}
 

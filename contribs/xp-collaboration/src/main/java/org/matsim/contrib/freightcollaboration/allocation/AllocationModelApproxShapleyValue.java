@@ -78,12 +78,19 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 				continue;
 			}
 
-			Map<Set<Id<?>>, Double> valueCache = new HashMap<>();
+			Map<Set<Id<?>>, Double> valueCache = new HashMap<>();       // savings cache (or raw when cost mode)
+			Map<Set<Id<?>>, Double> rawValueCache = new HashMap<>();    // raw psim values cache
+
+			// Compute baseline once per coalition
+			double baselineRaw = freightPseudoSimulator.runSingleSubCoalition(distributors, players, Set.of());
+			rawValueCache.put(Set.of(), baselineRaw);
+			valueCache.put(Set.of(), useCostSavings ? 0.0 : baselineRaw);
+
 			Map<Id<?>, Double> shapleyValues;
 			if (approximationMethod == ApproximationMethod.STRATIFIED) {
-				shapleyValues = approximateShapleyStratified(players, distributors, valueCache);
+				shapleyValues = approximateShapleyStratified(players, distributors, valueCache, rawValueCache, baselineRaw);
 			} else {
-				shapleyValues = approximateShapleyMonteCarlo(players, distributors, valueCache);
+				shapleyValues = approximateShapleyMonteCarlo(players, distributors, valueCache, rawValueCache, baselineRaw);
 			}
 
 			double totalShapleyValue = shapleyValues.values().stream().mapToDouble(Double::doubleValue).sum();
@@ -106,27 +113,23 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 
 	private Map<Id<?>, Double> approximateShapleyMonteCarlo(Map<Id<?>, FreightCollaborator<?>> players,
 											 Map<Id<?>, FreightCollaborator<?>> distributors,
-											 Map<Set<Id<?>>, Double> valueCache) {
+											 Map<Set<Id<?>>, Double> valueCache,
+											 Map<Set<Id<?>>, Double> rawValueCache,
+											 double baselineRaw) {
 		List<Id<?>> playerList = new ArrayList<>(players.keySet());
 		Map<Id<?>, Double> shapleyValues = new HashMap<>();
 		playerList.forEach(id -> shapleyValues.put(id, 0.0));
 
-		// Ensure baseline is present in the cache
-		evaluateSubCoalition(distributors, players, valueCache, Set.of());
-
-//		int upperBoundSamples;
-//		if (SamplesRatio > 0 && SamplesRatio < 1) {
-//			upperBoundSamples = (int) (SamplesRatio * factorial(playerList.size()));
-//			monteCarloSamples = Math.min(monteCarloSamples, upperBoundSamples);
-//		}
+		valueCache.computeIfAbsent(Set.of(), k -> useCostSavings ? 0.0 : baselineRaw);
+		rawValueCache.computeIfAbsent(Set.of(), k -> baselineRaw);
 
 		for (int sample = 0; sample < monteCarloSamples; sample++) {
 			Collections.shuffle(playerList, random);
 			Set<Id<?>> currentCoalition = new HashSet<>();
-			double currentValue = evaluateSubCoalition(distributors, players, valueCache, currentCoalition);
+			double currentValue = evaluateSubCoalition(distributors, players, valueCache, rawValueCache, baselineRaw, currentCoalition);
 			for (Id<?> playerId : playerList) {
 				currentCoalition.add(playerId);
-				double valueWith = evaluateSubCoalition(distributors, players, valueCache, currentCoalition);
+				double valueWith = evaluateSubCoalition(distributors, players, valueCache, rawValueCache, baselineRaw, currentCoalition);
 				double marginalContribution = valueWith - currentValue;
 				shapleyValues.put(playerId, shapleyValues.get(playerId) + marginalContribution);
 				currentValue = valueWith;
@@ -139,29 +142,33 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 
 	private Map<Id<?>, Double> approximateShapleyStratified(Map<Id<?>, FreightCollaborator<?>> players,
 											 Map<Id<?>, FreightCollaborator<?>> distributors,
-											 Map<Set<Id<?>>, Double> valueCache) {
+											 Map<Set<Id<?>>, Double> valueCache,
+											 Map<Set<Id<?>>, Double> rawValueCache,
+											 double baselineRaw) {
 		List<Id<?>> playerList = new ArrayList<>(players.keySet());
 		Map<Id<?>, Double> shapleyValues = new HashMap<>();
 		playerList.forEach(id -> shapleyValues.put(id, 0.0));
 		int n = playerList.size();
 
-		evaluateSubCoalition(distributors, players, valueCache, Set.of());
+		valueCache.computeIfAbsent(Set.of(), k -> useCostSavings ? 0.0 : baselineRaw);
+		rawValueCache.computeIfAbsent(Set.of(), k -> baselineRaw);
 
 		for (Id<?> playerId : playerList) {
 			double shapleyEstimate = 0.0;
 			for (int k = 0; k <= n - 1; k++) {
-				double weight = factorial(k) * factorial(n - k - 1) / (double) factorial(n);
+				double weight = 1.0 / n; // each subset size contributes equally in expectation
+				long combCount = combination(n - 1, k);
+				int samples = (int) Math.min(combCount, Math.max(1, stratifiedSamplesPerLevel));
+				List<Set<Id<?>>> sampledSubsets = sampleSubsetsWithoutReplacement(playerList, playerId, k, samples, random);
 				double marginalSum = 0.0;
-				int samples = Math.max(1, stratifiedSamplesPerLevel);
-				for (int s = 0; s < samples; s++) {
-					Set<Id<?>> subset = drawRandomSubset(playerList, playerId, k);
-					double valueWithout = evaluateSubCoalition(distributors, players, valueCache, subset);
+				for (Set<Id<?>> subset : sampledSubsets) {
+					double valueWithout = evaluateSubCoalition(distributors, players, valueCache, rawValueCache, baselineRaw, subset);
 					Set<Id<?>> withPlayer = new HashSet<>(subset);
 					withPlayer.add(playerId);
-					double valueWith = evaluateSubCoalition(distributors, players, valueCache, withPlayer);
+					double valueWith = evaluateSubCoalition(distributors, players, valueCache, rawValueCache, baselineRaw, withPlayer);
 					marginalSum += valueWith - valueWithout;
 				}
-				double averageMarginal = marginalSum / samples;
+				double averageMarginal = sampledSubsets.isEmpty() ? 0.0 : marginalSum / sampledSubsets.size();
 				shapleyEstimate += weight * averageMarginal;
 			}
 			shapleyValues.put(playerId, shapleyEstimate);
@@ -171,37 +178,76 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 		return shapleyValues;
 	}
 
-	private Set<Id<?>> drawRandomSubset(List<Id<?>> playerList, Id<?> excludedPlayer, int subsetSize) {
+	private List<Set<Id<?>>> sampleSubsetsWithoutReplacement(List<Id<?>> playerList, Id<?> excludedPlayer, int subsetSize, int samples, Random rnd) {
 		List<Id<?>> candidates = new ArrayList<>();
 		for (Id<?> id : playerList) {
 			if (!id.equals(excludedPlayer)) {
 				candidates.add(id);
 			}
 		}
-		Collections.shuffle(candidates, random);
-		int targetSize = Math.min(subsetSize, candidates.size());
-		return new HashSet<>(candidates.subList(0, targetSize));
+		if (subsetSize == 0) {
+			return List.of(Set.of());
+		}
+		long totalComb = combination(candidates.size(), subsetSize);
+		int target = (int) Math.min(samples, totalComb);
+		if (totalComb <= samples && totalComb <= 10000) {
+			return enumerateCombinations(candidates, subsetSize, target);
+		}
+		List<Set<Id<?>>> result = new ArrayList<>();
+		for (int i = 0; i < target; i++) {
+			Collections.shuffle(candidates, rnd);
+			result.add(new HashSet<>(candidates.subList(0, subsetSize)));
+		}
+		return result;
+	}
+
+	private List<Set<Id<?>>> enumerateCombinations(List<Id<?>> elements, int k, int limit) {
+		List<Set<Id<?>>> res = new ArrayList<>();
+		int n = elements.size();
+		int[] idx = new int[k];
+		for (int i = 0; i < k; i++) idx[i] = i;
+		while (res.size() < limit) {
+			Set<Id<?>> comb = new HashSet<>();
+			for (int j = 0; j < k; j++) comb.add(elements.get(idx[j]));
+			res.add(comb);
+			int p = k - 1;
+			while (p >= 0 && idx[p] == p + n - k) p--;
+			if (p < 0) break;
+			idx[p]++;
+			for (int j = p + 1; j < k; j++) idx[j] = idx[j - 1] + 1;
+		}
+		return res;
+	}
+
+	private long combination(int n, int k) {
+		if (k < 0 || k > n) return 0;
+		if (k == 0 || k == n) return 1;
+		k = Math.min(k, n - k);
+		long res = 1;
+		for (int i = 1; i <= k; i++) {
+			res = res * (n - k + i) / i;
+		}
+		return res;
 	}
 
 	private double evaluateSubCoalition(Map<Id<?>, FreightCollaborator<?>> distributors,
 									 Map<Id<?>, FreightCollaborator<?>> players,
 									 Map<Set<Id<?>>, Double> valueCache,
+									 Map<Set<Id<?>>, Double> rawValueCache,
+									 double baselineRaw,
 									 Set<Id<?>> subCoalition) {
 		Set<Id<?>> key = Set.copyOf(subCoalition);
 		return valueCache.computeIfAbsent(key,
 				ignored -> {
-					double rawValue = freightPseudoSimulator.runSingleSubCoalition(distributors, players, key);
-//					if (!useCostSavings || key.isEmpty()) {
-//						return rawValue;
-//					}
-//					double baseline = valueCache.containsKey(Set.of())
-//						? valueCache.get(Set.of())
-//						: freightPseudoSimulator.runSingleSubCoalition(distributors, players, Set.of());
-//					valueCache.putIfAbsent(Set.of(), baseline);
-//					return rawValue - baseline;
-
-					// The logic above seems correct, but the results are not as expected in tests.
-					return rawValue;
+					double rawValue = rawValueCache.computeIfAbsent(key,
+						k -> freightPseudoSimulator.runSingleSubCoalition(distributors, players, k));
+					if (!useCostSavings) {
+						return rawValue;
+					}
+					if (key.isEmpty()) {
+						return 0.0;
+					}
+					return rawValue - baselineRaw;
 				});
 	}
 
@@ -210,14 +256,5 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 			return coalition.getCollaboratorsSetByRole(CollaboratorRole.CARRIER).iterator().next().getId();
 		}
 		throw new IllegalStateException("Unsupported collaboration type for approximate Shapley allocation: " + coalition.getCollaborationType());
-	}
-
-	private long factorial(int n) {
-		if (n <= 1) return 1;
-		long result = 1;
-		for (int i = 2; i <= n; i++) {
-			result *= i;
-		}
-		return result;
 	}
 }
