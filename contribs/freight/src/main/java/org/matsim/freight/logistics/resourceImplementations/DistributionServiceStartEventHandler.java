@@ -73,6 +73,8 @@ import static org.matsim.freight.logistics.LSPConstants.TRANSPORT;
 
   @Override
   public void handleEvent(CarrierServiceStartEvent event) {
+	  // @FIXME: Skipping null check for carrierService for now, but this needs to be fixed properly later. @Xander Peng
+	  if (this.carrierService == null) {return;}
     if (event.getServiceId() == carrierService.getId()
             && event.getCarrierId() == resource.getCarrier().getId()) {
       logTransport(event);
@@ -82,6 +84,8 @@ import static org.matsim.freight.logistics.LSPConstants.TRANSPORT;
 
   @Override
   public void handleEvent(CarrierShipmentDeliveryStartEvent event) {
+	  // @FIXME: Skipping null check for carrierShipment for now, but this needs to be fixed properly later. @Xander Peng
+	  if (this.carrierShipment == null) {return;}
     if (event.getShipmentId() == this.carrierShipment.getId()
             && event.getCarrierId() == resource.getCarrier().getId()) {
       logTransport(event);
