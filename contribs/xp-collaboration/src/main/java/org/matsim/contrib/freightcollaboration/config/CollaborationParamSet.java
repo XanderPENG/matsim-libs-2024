@@ -9,6 +9,7 @@ import org.matsim.core.config.ReflectiveConfigGroup.StringGetter;
 import org.matsim.core.config.ReflectiveConfigGroup.StringSetter;
 
 import java.util.Arrays;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -21,6 +22,8 @@ public class CollaborationParamSet extends ReflectiveConfigGroup implements Mats
 
 	// Changed from Set<String> to Set<CollaborationStrategies>
 	private Set<CollaborationStrategies> COLLABORATION_STRATEGIES;
+
+	private Map<String, Set<String>> ADDITIONAL_PARAMS;
 
 	@Parameter
 	private double COST_SAVINGS_SHARING_THRESHOLD = 0.8;
@@ -85,6 +88,38 @@ public class CollaborationParamSet extends ReflectiveConfigGroup implements Mats
 				.collect(Collectors.toCollection(java.util.LinkedHashSet::new));
 	}
 
+
+	// StringGetter and Setter for ADDITIONAL_PARAMS
+	@StringGetter("ADDITIONAL_PARAMS")
+	public String getAdditionalParamsString() {
+		if (ADDITIONAL_PARAMS == null || ADDITIONAL_PARAMS.isEmpty()) {
+			return "";
+		}
+		return ADDITIONAL_PARAMS.entrySet().stream()
+				.map(entry -> entry.getKey() + "=" + String.join("|", entry.getValue()))
+				.collect(Collectors.joining("; "));
+	}
+
+	@StringSetter("ADDITIONAL_PARAMS")
+	public void setAdditionalParamsString(String params) {
+		if (params == null || params.trim().isEmpty()) {
+			this.ADDITIONAL_PARAMS = Map.of();
+			return;
+		}
+		this.ADDITIONAL_PARAMS = Arrays.stream(params.split(";"))
+				.map(String::trim)
+				.filter(s -> !s.isEmpty())
+				.map(s -> s.split("=", 2))
+				.collect(Collectors.toMap(
+						arr -> arr[0].trim(),
+						arr -> Arrays.stream(arr[1].split("\\|"))
+								.map(String::trim)
+								.filter(v -> !v.isEmpty())
+								.collect(Collectors.toSet())
+				));
+	}
+
+
 	/**
 	 * Get the CollaborationType object.
 	 */
@@ -111,5 +146,13 @@ public class CollaborationParamSet extends ReflectiveConfigGroup implements Mats
 	 */
 	public void setCollaborationStrategies(Set<CollaborationStrategies> collaborationStrategies) {
 		this.COLLABORATION_STRATEGIES = collaborationStrategies;
+	}
+
+	public Map<String, Set<String>> getAdditionalParams() {
+		return ADDITIONAL_PARAMS;
+	}
+
+	public void setAdditionalParams(Map<String, Set<String>> additionalParams) {
+		this.ADDITIONAL_PARAMS = additionalParams;
 	}
 }

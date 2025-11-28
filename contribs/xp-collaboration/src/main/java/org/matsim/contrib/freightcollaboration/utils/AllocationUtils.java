@@ -8,14 +8,16 @@ import org.matsim.contrib.freightcollaboration.*;
 import org.matsim.contrib.freightcollaboration.allocation.*;
 import org.matsim.freight.carriers.*;
 import org.matsim.freight.logistics.LSP;
+import org.matsim.freight.logistics.LSPPlan;
+import org.matsim.freight.logistics.LSPUtils;
+import org.matsim.freight.logistics.LogisticChain;
 import org.matsim.freight.receiver.Receiver;
 import org.matsim.freight.receiver.ReceiverPlan;
 import org.matsim.freight.receiver.ReceiverUtils;
 
 import java.util.*;
 
-import static org.matsim.contrib.freightcollaboration.CollaborationTypes.CARRIER_CARRIER;
-import static org.matsim.contrib.freightcollaboration.CollaborationTypes.CARRIER_RECEIVER;
+import static org.matsim.contrib.freightcollaboration.CollaborationTypes.*;
 
 public class AllocationUtils {
 
@@ -78,6 +80,7 @@ public class AllocationUtils {
 		CollaborationType collaborationType = coalition.getCollaborationType();
 		return switch (collaborationType) {
 			case CARRIER_RECEIVER -> coalition.getCollaboratorsMapByRole(CollaboratorRole.RECEIVER);
+			case LSP_RECEIVER -> coalition.getCollaboratorsMapByRole(CollaboratorRole.RECEIVER);
 			case CARRIER_CARRIER -> coalition.getCollaboratorsMapByRole(CollaboratorRole.CARRIER);
 			default -> throw new IllegalStateException("Unexpected value: " + collaborationType);
 		};
@@ -90,6 +93,7 @@ public class AllocationUtils {
 		CollaborationType collaborationType = coalition.getCollaborationType();
 		return switch (collaborationType) {
 			case CARRIER_RECEIVER -> coalition.getCollaboratorsMapByRole(CollaboratorRole.CARRIER);
+			case LSP_RECEIVER -> coalition.getCollaboratorsMapByRole(CollaboratorRole.LSP);
 			case CARRIER_CARRIER -> coalition.getCollaboratorsMapByRole(CollaboratorRole.CARRIER);
 			default -> throw new IllegalStateException("Unexpected value: " + collaborationType);
 		};
@@ -151,11 +155,25 @@ public class AllocationUtils {
 				}
 			}
 			case LSP -> {
-				if (originalDelegate instanceof LSP) {
-					// For LSP, we cannot use LSPImpl constructor directly as it's not public
-					// This is a limitation - in practice you'd need a proper LSP factory method
-					// For now, throw an exception indicating this case needs special handling
-					throw new UnsupportedOperationException("LSP deep copying not yet fully implemented - requires access to LSP factory methods");
+				if (originalDelegate instanceof LSP originalLsp) {
+					LSPPlan copiedPlan = copyLspPlan(originalLsp.getSelectedPlan());
+					// create minimal scheduler; use a forward scheduler as default fallback
+					var scheduler = org.matsim.freight.logistics.LSPUtils.createForwardLogisticChainScheduler();
+					var builder = org.matsim.freight.logistics.LSPUtils.LSPBuilder.getInstance(originalLsp.getId())
+						.setLogisticChainScheduler(scheduler)
+						.setInitialPlan(copiedPlan);
+					LSP copiedLsp = builder.build();
+					copiedPlan.setLSP(copiedLsp);
+					// copy basic attributes
+					for (String key : originalLsp.getAttributes().getAsMap().keySet()) {
+						Object value = originalLsp.getAttributes().getAttribute(key);
+						copiedLsp.getAttributes().putAttribute(key, value);
+					}
+					// copy plan score to keep comparable baseline
+					if (copiedPlan.getScore() == null && originalLsp.getSelectedPlan().getScore() != null) {
+						copiedPlan.setScore(originalLsp.getSelectedPlan().getScore());
+					}
+					copiedDelegate = copiedLsp;
 				}
 			}
 			case RECEIVER -> {
@@ -209,7 +227,7 @@ public class AllocationUtils {
 		return copiedCollaborator;
 	}
 
-	public static CarrierPlan copyNoScorePlan(CarrierPlan plan2copy) {
+	public static CarrierPlan copyNoScoreCarrierPlan(CarrierPlan plan2copy) {
 		List<ScheduledTour> tours = new ArrayList<>();
 		for (ScheduledTour sTour : plan2copy.getScheduledTours()) {
 			double depTime = sTour.getDeparture();
@@ -227,6 +245,26 @@ public class AllocationUtils {
 		copiedPlan.setScore(initialScoreOfCopiedPlan);
 		return copiedPlan;
 
+	}
+
+
+	public static LSPPlan copyLspPlan(LSPPlan plan2copy) {
+		List<LogisticChain> newPlanChains = new ArrayList<>();
+		for (LogisticChain initialPlanChain : plan2copy.getLogisticChains()) {
+			LogisticChain newPlanChain =
+				LSPUtils.LogisticChainBuilder.newInstance(initialPlanChain.getId()).build();
+			newPlanChain.getLogisticChainElements().addAll(initialPlanChain.getLogisticChainElements());
+			newPlanChain.getLspShipmentIds().addAll(initialPlanChain.getLspShipmentIds());
+			newPlanChains.add(newPlanChain);
+		}
+
+		LSPPlan copiedPlan = LSPUtils.createLSPPlan();
+		copiedPlan.setInitialShipmentAssigner(plan2copy.getInitialShipmentAssigner());
+//		copiedPlan.setLSP(plan2copy.getLSP());
+		copiedPlan.setScore(plan2copy.getScore());
+		copiedPlan.setType(plan2copy.getType());
+		copiedPlan.getLogisticChains().addAll(newPlanChains);
+		return copiedPlan;
 	}
 
 }

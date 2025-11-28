@@ -48,6 +48,8 @@ public class AllocationModelShapleyValue implements AllocationModel {
 			Id<?> distributorId = null;
 			if (coalition.getCollaborationType() == CollaborationTypes.CARRIER_RECEIVER) {
 				distributorId = coalition.getCollaboratorsSetByRole(CollaboratorRole.CARRIER).iterator().next().getId();
+			} else if (coalition.getCollaborationType() == CollaborationTypes.LSP_RECEIVER) {
+				distributorId = coalition.getCollaboratorsSetByRole(CollaboratorRole.LSP).iterator().next().getId();
 			} else {
 				throw new IllegalStateException("Unsupported collaboration type for Shapley Value allocation: " + coalition.getCollaborationType());
 			}

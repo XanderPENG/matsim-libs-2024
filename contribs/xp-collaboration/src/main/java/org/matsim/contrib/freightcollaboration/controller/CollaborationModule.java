@@ -9,10 +9,8 @@ import org.matsim.contrib.freightcollaboration.CollaboratorRole;
 import org.matsim.contrib.freightcollaboration.FreightCollaborator;
 import org.matsim.contrib.freightcollaboration.FreightCollaborators;
 import org.matsim.contrib.freightcollaboration.allocation.CollaborationDataStore;
-import org.matsim.contrib.freightcollaboration.listener.FormFreightCoalitionListener;
-import org.matsim.contrib.freightcollaboration.listener.FreightCollaborationListener;
-import org.matsim.contrib.freightcollaboration.listener.NotifyCoalitionInfoListener;
-import org.matsim.contrib.freightcollaboration.listener.WriteCollaborationDataListener;
+import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfigGroup;
+import org.matsim.contrib.freightcollaboration.listener.*;
 import org.matsim.contrib.freightcollaboration.utils.AllocationUtils;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controler;
@@ -21,6 +19,8 @@ import org.matsim.freight.receiver.ReceiverPlan;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import static org.matsim.contrib.freightcollaboration.CollaborationTypes.LSP_RECEIVER;
 
 /**
  * This module should extend AbstractModule and configure bindings for the freight collaboration framework.
@@ -55,6 +55,8 @@ public class CollaborationModule extends AbstractModule {
 		CollaborationDataStore dataStore = initCollaborationDataStore();
 		dataStore.setScenario(scenario);
 		this.bind(CollaborationDataStore.class).toInstance(dataStore);
+		// Install specific Collaboration type listeners
+		installCollaborationTypeListeners();
 	}
 
 	public void installAllCollaboratorModules(Controler controler) {
@@ -89,7 +91,7 @@ public class CollaborationModule extends AbstractModule {
 						break;
 					case CollaboratorRole.CARRIER:
 						try {
-							selected = AllocationUtils.copyNoScorePlan(collaborator.getTypedSelectedPlan());
+							selected = AllocationUtils.copyNoScoreCarrierPlan(collaborator.getTypedSelectedPlan());
 						} catch (NullPointerException e) {
 							logger.warn("Copy carrier plan into CollaborationDataStore failed for collaborator ID: {}. " +
 								"The selected plan might be null.", collaborator.getId());
@@ -97,8 +99,13 @@ public class CollaborationModule extends AbstractModule {
 						}
 						break;
 					case CollaboratorRole.LSP:
-						// raise exception for now as LSP plan copying is not implemented yet
-						throw new UnsupportedOperationException("LSP plan copying is not implemented yet.");
+						try {
+							selected = AllocationUtils.copyLspPlan(collaborator.getTypedSelectedPlan());
+						} catch (Exception e) {
+							logger.warn("Copy LSP plan into CollaborationDataStore failed for collaborator ID: {}", collaborator.getId(), e);
+							selected = null;
+						}
+						break;
 					default:
 						throw  new UnsupportedOperationException("Unknown role: " + collaborator.getRole());
 				}
@@ -113,4 +120,21 @@ public class CollaborationModule extends AbstractModule {
         }
         return new CollaborationDataStore(originalPlans);
     }
+
+	private void installCollaborationTypeListeners() {
+		// get collaboration types from the config and install corresponding listeners
+		FreightCollaborationConfigGroup fccg = (FreightCollaborationConfigGroup) scenario.getConfig().getModules().get(FreightCollaborationConfigGroup.GROUP_NAME);
+		for (var paramSet : fccg.getCollaborationParamSets()) {
+			switch (paramSet.getCollaborationType()) {
+				case LSP_RECEIVER:
+					// install LSP-Receiver specific listeners
+					this.addControlerListenerBinding().to(LspReceiverPreRerouteListener.class);
+					this.addControlerListenerBinding().to(LspReceiverAfterRerouteListener.class);
+					logger.info("LSP_RECEIVER Pre/after Reroute listener registered.");
+					break;
+				default:
+					throw new IllegalStateException("Unexpected value: " + paramSet.getCollaborationType());
+			}
+		}
+	}
 }

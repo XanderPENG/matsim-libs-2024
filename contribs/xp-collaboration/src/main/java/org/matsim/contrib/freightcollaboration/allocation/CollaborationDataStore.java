@@ -9,6 +9,8 @@ import org.matsim.api.core.v01.population.BasicPlan;
 import org.matsim.contrib.freightcollaboration.CollaboratorRole;
 import org.matsim.contrib.freightcollaboration.MutableFreightCoalition;
 import org.matsim.core.utils.collections.Tuple;
+import org.matsim.freight.carriers.Carrier;
+import org.matsim.freight.carriers.CarrierPlan;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -23,11 +25,13 @@ public class CollaborationDataStore {
 	private Map<MutableFreightCoalition, Map<Set<Id<?>>, Double>> simulatedCoalitionScores;
 	private Map<Id<?>, Double> allocatedValues;
 	private Scenario scenario;
+	private Map<Id<Carrier>, Carrier> LspReceiverCopiedNonDistrCarriers;
 
 	public CollaborationDataStore(Map<CollaboratorRole, Map<Id<?>, ? extends BasicPlan>> originalPlans) {
 		this.originalPlans = originalPlans;
 		resetSimulatedCoalitionScores();
 	}
+
 
 	/**
 	 * Add the psim subcoalitions scores to the data store.
@@ -72,5 +76,13 @@ public class CollaborationDataStore {
 
 	public void setScenario(Scenario scenario) {
 		this.scenario = scenario;
+	}
+
+	public void setLspReceiverCopiedNonDistrCarriers(Map<Id<Carrier>, Carrier> carrierMap) {
+		this.LspReceiverCopiedNonDistrCarriers = carrierMap;
+	}
+
+	public Map<Id<Carrier>, Carrier> getLspReceiverCopiedNonDistrCarriers() {
+		return LspReceiverCopiedNonDistrCarriers;
 	}
 }

@@ -182,7 +182,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 		config.network().setInputFile(networkPath.getFileName().toString());
 
 		// Project-relative output directory
-		config.controller().setOutputDirectory(Paths.get("output", "specificCarrierReceiverShapleyExample", runId).toString() + "/");
+		config.controller().setOutputDirectory(Paths.get("output", "specificCarrierReceiverShapleyExample", runId) + "/");
 		config.controller().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
 		// Set write iteration file interval to 5 to reduce output size and increase speed
 //		config.controller().setWriteEventsInterval(5);

@@ -26,6 +26,7 @@ import java.util.*;
 
 import static org.matsim.contrib.freightcollaboration.CollaborationTypes.CARRIER_CARRIER;
 import static org.matsim.contrib.freightcollaboration.CollaborationTypes.CARRIER_RECEIVER;
+import static org.matsim.contrib.freightcollaboration.CollaborationTypes.LSP_RECEIVER;
 
 /**
  * Functions that need to be executed at the start of each iteration.
@@ -134,6 +135,23 @@ public class FormFreightCoalitionListener implements BeforeMobsimListener {
 						}
 					}
 				}
+				case LSP_RECEIVER -> {
+					Map<Id<LSP>, FreightCollaborator<LSP>> lspCollaborators = freightCollaborators.getFreightCollaboratorsByRole(CollaboratorRole.LSP);
+					if (lspCollaborators.isEmpty()) {
+						LOGGER.warn("No LSP collaborators available for LSP-Receiver coalition formation.");
+						break;
+					}
+					// For now, form one coalition per LSP with all collaborating receivers
+					for (FreightCollaborator<LSP> lspCollaborator : lspCollaborators.values()) {
+						Set<FreightCollaborator<Receiver>> collaboratingReceivers = findCollaboratingReceivers();
+						if (!collaboratingReceivers.isEmpty()) {
+							MutableFreightCoalition mutableCoalition = new MutableFreightCoalition(LSP_RECEIVER);
+							mutableCoalition.addCollaborator(lspCollaborator);
+							collaboratingReceivers.forEach(mutableCoalition::addCollaborator);
+							mutableCoalitions.add(mutableCoalition);
+						}
+					}
+				}
 
 				default -> throw new IllegalStateException("Unexpected value: " + collaborationType);
 			}
@@ -150,6 +168,23 @@ public class FormFreightCoalitionListener implements BeforeMobsimListener {
 					.count();
 			LOGGER.info(" - Role: {}, Number of Collaborators: {}", role, count);
 		}
+	}
+
+	/**
+	 * TODO: In this class there should be a function to find collaborating receivers and change their status accordingly.
+	 * the current code is somewhat right from the logic perspective (check for the collaboration status),
+	 * but not effective now as the status would not change during the simulation.
+	 * @return
+	 */
+	private Set<FreightCollaborator<Receiver>> findCollaboratingReceivers() {
+		Set<FreightCollaborator<Receiver>> collaboratingReceivers = new HashSet<>();
+		Map<Id<Receiver>, FreightCollaborator<Receiver>> receiverCollaborators = freightCollaborators.getFreightCollaboratorsByRole(CollaboratorRole.RECEIVER);
+		for (FreightCollaborator<Receiver> receiverCollaborator : receiverCollaborators.values()) {
+			if (receiverCollaborator.getCollaborationStatus()) {
+				collaboratingReceivers.add(receiverCollaborator);
+			}
+		}
+		return collaboratingReceivers;
 	}
 
 	private void informMutableCoalitionsInfo(List<MutableFreightCoalition> mutableCoalitions){

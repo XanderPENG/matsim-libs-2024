@@ -267,6 +267,8 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 	private Id<?> extractDistributorId(MutableFreightCoalition coalition) {
 		if (coalition.getCollaborationType() == CollaborationTypes.CARRIER_RECEIVER) {
 			return coalition.getCollaboratorsSetByRole(CollaboratorRole.CARRIER).iterator().next().getId();
+		} else if (coalition.getCollaborationType() == CollaborationTypes.LSP_RECEIVER) {
+			return coalition.getCollaboratorsSetByRole(CollaboratorRole.LSP).iterator().next().getId();
 		}
 		throw new IllegalStateException("Unsupported collaboration type for approximate Shapley allocation: " + coalition.getCollaborationType());
 	}

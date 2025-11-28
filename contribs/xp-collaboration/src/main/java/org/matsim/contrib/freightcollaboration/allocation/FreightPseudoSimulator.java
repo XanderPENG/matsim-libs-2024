@@ -123,12 +123,13 @@ public class FreightPseudoSimulator {
 			nonCollaboratingMembers = AllocationUtils.identifyNonCollaboratingMembers(players.keySet(), subCoalition);
 		}
 		resetNonCollaboratingMembersPlans(nonCollaboratingMembers, copyPlayers);
-		return runPSim(copyDistributors, copyPlayers);
+		return runPSim(copyDistributors, copyPlayers, subCoalition);
 	}
 
 
 	@SuppressWarnings("unchecked")
-	private double runPSim(Map<Id<?>, FreightCollaborator<?>> copyDistributors, Map<Id<?>, FreightCollaborator<?>> copyPlayers) {
+	private double runPSim(Map<Id<?>, FreightCollaborator<?>> copyDistributors, Map<Id<?>, FreightCollaborator<?>> copyPlayers,
+						   Set<Id<?>> collaboratingSubset) {
 		var collaboratorRoleOfDistributors = copyDistributors.values().iterator().next().getRole();
 		var collaboratorRoleOfPlayers = copyPlayers.values().iterator().next().getRole();
 		// if it is carrier-receiver collaboration - runCarrierPSim
@@ -166,10 +167,20 @@ public class FreightPseudoSimulator {
 				carrierCollaborator.getDelegate(), carrierScoringFunctionFactory);
 			return carrierPSimScorer.getScore();
 
-		} else if (CollaborationTypes.LSP_RECEIVER.isCompatible(collaboratorRoleOfDistributors, collaboratorRoleOfPlayers)) {
-			// to be implemented
-			throw new IllegalStateException("Unable to simulate LSP-Receiver collaboration yet.");
-		} else if (CollaborationTypes.CARRIER_CARRIER.isCompatible(collaboratorRoleOfDistributors, collaboratorRoleOfPlayers)){
+			}
+		// TODO: The current implementation is rough and needs to be reimplemented properly
+		else if (CollaborationTypes.LSP_RECEIVER.isCompatible(collaboratorRoleOfDistributors, collaboratorRoleOfPlayers)) {
+				var lspCollaborator = (FreightCollaborator<LSP>) copyDistributors.values().iterator().next();
+				@SuppressWarnings("unchecked")
+				var receiverCollaborators = new HashSet<>((Set<FreightCollaborator<Receiver>>) (Set<?>) Set.copyOf(copyPlayers.values()));
+				// keep only receivers in the collaborating subset for savings calculation
+				if (collaboratingSubset != null && !collaboratingSubset.isEmpty()) {
+					receiverCollaborators.removeIf(rc -> !collaboratingSubset.contains(rc.getId()));
+				} else if (collaboratingSubset != null) {
+					receiverCollaborators.clear();
+				}
+				return runLspReceiverPseudoSim(lspCollaborator, receiverCollaborators);
+			} else if (CollaborationTypes.CARRIER_CARRIER.isCompatible(collaboratorRoleOfDistributors, collaboratorRoleOfPlayers)){
 			// to be implemented
 			throw new IllegalStateException("Unable to simulate Carrier-Carrier collaboration yet.");
 		} else {
@@ -341,6 +352,21 @@ public class FreightPseudoSimulator {
 
 	void setTravelTime(TravelTime travelTime) {
 		this.tt = travelTime;
+	}
+
+	/**
+	 * TODO: this should be really implemented as a proper pseudo-simulation between LSP and receivers.
+	 * Lightweight pseudo-simulation for LSP–receiver collaboration.
+	 * Uses a simple cost function: baseline = selected plan score (or fallback), minus a fixed saving per collaborating receiver.
+	 */
+	private double runLspReceiverPseudoSim(FreightCollaborator<LSP> lspCollaborator,
+										   Set<FreightCollaborator<Receiver>> collaboratingReceivers) {
+		LSP lsp = lspCollaborator.getDelegate();
+		double baseScore = lsp.getSelectedPlan() != null && lsp.getSelectedPlan().getScore() != null
+			? lsp.getSelectedPlan().getScore()
+			: -1000.0; // fallback baseline cost
+		double savings = collaboratingReceivers.size() * 100.0;
+		return baseScore - savings;
 	}
 
 
