@@ -83,8 +83,9 @@ import org.matsim.freight.logistics.shipment.LspShipmentUtils;
               logLoadAndTransport(event);
             }
           }
+		  // FIXME: I changed to carrierService.getId() below to shipment, since it is a shipment-based activity. XP Dec'25
           case Tour.ShipmentBasedActivity shipmentBasedActivity -> {
-            if (Objects.equals(shipmentBasedActivity.getShipment().getId().toString(), carrierService.getId().toString())) {
+            if (Objects.equals(shipmentBasedActivity.getShipment().getId().toString(), carrierShipment.getId().toString())) {
               logLoadAndTransport(event);
             }
           }
