@@ -143,6 +143,23 @@ class ReceiverTriggersCarrierReplanningListener implements IterationStartsListen
 			(event.getIteration()+1) % ConfigUtils.addOrGetModule(sc.getConfig(), ReceiverConfigGroup.class).getReceiverReplanningInterval() != 0) {
 			return;
 		}
+
+		// if the carriers already have plans at iter 0, skip replanning, for the sake of LSP-Receiver collaboration. XP, Dec 2025
+		if (event.getIteration() == 0) {
+			Map<Id<Carrier>, Carrier> carriers = CarriersUtils.getCarriers(sc).getCarriers();
+			boolean carriersHavePlans = false;
+			for( Carrier carrier : carriers.values() ){
+				if (carrier.getPlans().size() > 0) {
+					carriersHavePlans = true;
+					break;
+				}
+			}
+			if (carriersHavePlans) {
+				LogManager.getLogger(ReceiverTriggersCarrierReplanningListener.class).info("--> Carriers already have plans at iteration 0; skipping replanning.");
+				return;
+			}
+		}
+
 		LogManager.getLogger(ReceiverTriggersCarrierReplanningListener.class).info("--> Receiver triggering carrier to replan.");
 		// Adds the receiver agents that are part of the current (sub)coalition.
 		CollaborationUtils.setCoalitionFromReceiverAttributes( sc );
