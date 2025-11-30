@@ -2,6 +2,7 @@ package org.matsim.contrib.freightcollaboration.utils;
 
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.Scenario;
+import org.matsim.api.core.v01.network.Link;
 import org.matsim.api.core.v01.network.Network;
 import org.matsim.contrib.freightcollaboration.FreightCollaborator;
 import org.matsim.core.router.util.TravelTime;
@@ -77,8 +78,8 @@ public class LinkReceiverAndLsp {
 		newPlan.setLSP(newLsp);
 		copyAttributes(originalLsp, newLsp);
 
-		// 5) rebuild shipments from the (current) receiver plans and assign them to the cloned LSP
-		List<LspShipment> newShipments = buildShipmentsFromReceivers(receiverCollaborators);
+		// 5) rebuild shipments by cloning originals and applying receiver updates
+		List<LspShipment> newShipments = rebuildShipments(originalLsp, receiverCollaborators);
 		newShipments.forEach(newLsp::assignShipmentToLSP);
 
 		// 6) schedule – this will populate carrier plans on the cloned resources only
@@ -145,7 +146,11 @@ public class LinkReceiverAndLsp {
 							.newInstance(copiedCarrier)
 							.setFromLinkId(resource.getStartLinkId())
 							.setToLinkId(resource.getEndLinkId())
+							// Cannot read original return behaviour; assume return to from-link
+							// TODO: maybe can be set as attribute in the config
+							.setVehicleReturn(ResourceImplementationUtils.VehicleReturn.returnToFromLink)
 							.setMainRunCarrierScheduler(ResourceImplementationUtils.createDefaultMainRunCarrierScheduler(scenario));
+
 					return builder.build();
 				}
 				default -> throw new IllegalArgumentException("Unsupported carrier type for resource " + resource.getId());
@@ -218,32 +223,45 @@ public class LinkReceiverAndLsp {
 		from.getAttributes().getAsMap().forEach(to.getAttributes()::putAttribute);
 	}
 
-	private static List<LspShipment> buildShipmentsFromReceivers(Set<FreightCollaborator<Receiver>> receiverCollaborators){
-		List<LspShipment> shipments = new ArrayList<>();
-		int counter = 0;
-		for (FreightCollaborator<Receiver> receiverCollab : receiverCollaborators){
-			Receiver receiver = receiverCollab.getDelegate();
-			ReceiverPlan plan = receiver.getSelectedPlan();
-			if (plan == null) continue;
-			TimeWindow deliveryTw = plan.getTimeWindows().isEmpty() ? TimeWindow.newInstance(0, 24*3600) : plan.getTimeWindows().getFirst();
-			for (ReceiverOrder order : plan.getReceiverOrders()){
-				int capacity = 0;
-				double serviceTime = 0;
-				for (Order productOrder : order.getReceiverProductOrders()){
-					capacity += (int) Math.max(1, Math.round(productOrder.getDailyOrderQuantity()*productOrder.getProduct().getProductType().getRequiredCapacity()));
-					serviceTime += productOrder.getServiceDuration();
-				}
-				var builder = LspShipmentUtils.LspShipmentBuilder.newInstance(Id.create("lspShipment_" + counter++, LspShipment.class));
-				builder.setFromLinkId(order.getReceiverProductOrders().iterator().next().getProduct().getProductType().getOriginLinkId());
-				builder.setToLinkId(receiver.getLinkId());
-				builder.setCapacityDemand(capacity);
-				builder.setDeliveryServiceTime(serviceTime);
-				builder.setPickupServiceTime(0.0);
-				builder.setStartTimeWindow(TimeWindow.newInstance(0, deliveryTw.getStart()));
-				builder.setEndTimeWindow(deliveryTw);
-				shipments.add(builder.build());
+	private static List<LspShipment> rebuildShipments(LSP originalLsp,
+										Set<FreightCollaborator<Receiver>> receiverCollaborators){
+		// Map by receiver link for deterministic lookup
+		Map<Id<Link>, ReceiverPlan> receiverPlansByLink = new HashMap<>();
+		for (FreightCollaborator<Receiver> rc : receiverCollaborators){
+			ReceiverPlan plan = rc.getDelegate().getSelectedPlan();
+			if (plan != null && rc.getDelegate().getLinkId() != null){
+				receiverPlansByLink.put(rc.getDelegate().getLinkId(), plan);
 			}
 		}
-		return shipments;
+
+		List<LspShipment> cloned = new ArrayList<>();
+		for (LspShipment orig : originalLsp.getLspShipments()){
+			ReceiverPlan plan = receiverPlansByLink.get(orig.getTo());
+			TimeWindow deliveryTw = plan == null || plan.getTimeWindows().isEmpty()
+					? orig.getDeliveryTimeWindow()
+					: plan.getTimeWindows().getFirst();
+
+			double serviceTime = orig.getDeliveryServiceTime();
+			int capacity = orig.getSize();
+			if (plan != null){
+				for (ReceiverOrder ro : plan.getReceiverOrders()){
+					serviceTime = ro.getReceiverProductOrders().stream().mapToDouble(Order::getServiceDuration).sum();
+					capacity = (int) Math.max(1, Math.round(ro.getReceiverProductOrders().stream()
+							.mapToDouble(o -> o.getDailyOrderQuantity()*o.getProduct().getProductType().getRequiredCapacity()).sum()));
+					break; // first matching order for this receiver
+				}
+			}
+
+			var b = LspShipmentUtils.LspShipmentBuilder.newInstance(orig.getId());
+			b.setFromLinkId(orig.getFrom());
+			b.setToLinkId(orig.getTo());
+			b.setStartTimeWindow(orig.getPickupTimeWindow()); // preserve original pickup TW
+			b.setEndTimeWindow(deliveryTw);                  // apply updated delivery TW if changed
+			b.setCapacityDemand(capacity);
+			b.setDeliveryServiceTime(serviceTime);
+			b.setPickupServiceTime(orig.getPickupServiceTime());
+			cloned.add(b.build());
+		}
+		return cloned;
 	}
 }
