@@ -48,6 +48,11 @@ public final class ReceiverConfigGroup extends ReflectiveConfigGroup {
     private ReceiverReplanningType replanningType = ReceiverReplanningType.serviceTime;
     private int receiverReplanningInterval = 1;
 
+	/* I add this switch to control whether receiver replanning should trigger carrier replanning;
+	 *	By default, it is true, so it will not affect the normal receiver package running. XP, Dec'25
+	 */
+	private boolean receiverTriggerCarrierReplanning = true;
+
     @Override
     public Map<String, String> getComments() {
         Map<String, String> comments = super.getComments();
@@ -117,4 +122,12 @@ public final class ReceiverConfigGroup extends ReflectiveConfigGroup {
     public void setReceiverReplanningInterval(int receiverReplanningInterval) {
         this.receiverReplanningInterval = receiverReplanningInterval;
     }
+
+	public boolean isReceiverTriggerCarrierReplanning() {
+		return receiverTriggerCarrierReplanning;
+	}
+
+	public void setReceiverTriggerCarrierReplanning(boolean receiverTriggerCarrierReplanning) {
+		this.receiverTriggerCarrierReplanning = receiverTriggerCarrierReplanning;
+	}
 }

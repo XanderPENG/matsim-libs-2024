@@ -138,26 +138,16 @@ class ReceiverTriggersCarrierReplanningListener implements IterationStartsListen
 
 	@Override
 	public void notifyBeforeMobsim(BeforeMobsimEvent event) {
+
+		// I add this check to see whether receiver replanning should trigger carrier replanning; XP, Dec'25
+		if (!ConfigUtils.addOrGetModule(sc.getConfig(), ReceiverConfigGroup.class).isReceiverTriggerCarrierReplanning()){
+			return;
+		}
+
 		/* Replan the carrier at iteration zero, and one iteration after the receivers have replanned. */
 		if(event.getIteration() > 0 &&
 			(event.getIteration()+1) % ConfigUtils.addOrGetModule(sc.getConfig(), ReceiverConfigGroup.class).getReceiverReplanningInterval() != 0) {
 			return;
-		}
-
-		// if the carriers already have plans at iter 0, skip replanning, for the sake of LSP-Receiver collaboration. XP, Dec 2025
-		if (event.getIteration() == 0) {
-			Map<Id<Carrier>, Carrier> carriers = CarriersUtils.getCarriers(sc).getCarriers();
-			boolean carriersHavePlans = false;
-			for( Carrier carrier : carriers.values() ){
-				if (carrier.getPlans().size() > 0) {
-					carriersHavePlans = true;
-					break;
-				}
-			}
-			if (carriersHavePlans) {
-				LogManager.getLogger(ReceiverTriggersCarrierReplanningListener.class).info("--> Carriers already have plans at iteration 0; skipping replanning.");
-				return;
-			}
 		}
 
 		LogManager.getLogger(ReceiverTriggersCarrierReplanningListener.class).info("--> Receiver triggering carrier to replan.");
