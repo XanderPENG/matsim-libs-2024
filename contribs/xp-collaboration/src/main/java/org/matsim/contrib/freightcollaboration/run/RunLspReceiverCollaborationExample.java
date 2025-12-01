@@ -41,6 +41,7 @@ import org.matsim.freight.logistics.resourceImplementations.CarrierSchedulerUtil
 import org.matsim.freight.logistics.resourceImplementations.ResourceImplementationUtils;
 import org.matsim.freight.logistics.resourceImplementations.TransshipmentHubResource;
 import org.matsim.freight.logistics.shipment.LspShipment;
+import org.matsim.freight.logistics.shipment.LspShipmentPlan;
 import org.matsim.freight.logistics.shipment.LspShipmentUtils;
 import org.matsim.freight.receiver.*;
 import org.matsim.freight.receiver.collaboration.CollaborationUtils;
@@ -157,7 +158,7 @@ public class RunLspReceiverCollaborationExample {
 		config.network().setInputFile(String.valueOf(IOUtils.extendUrl(ExamplesUtils.getTestScenarioURL("freight-chessboard-9x9"), "grid9x9.xml")));
 		config.controller().setOutputDirectory(Paths.get("output", "twoEchelonLspReceiverCollab") +  "/");
 		config.controller().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
-		config.controller().setLastIteration(20);
+		config.controller().setLastIteration(50);
 		config.controller().setFirstIteration(0);
 //		config.controller().setWriteEventsInterval(0);
 //		config.controller().setWritePlansInterval(0);
@@ -383,6 +384,7 @@ public class RunLspReceiverCollaborationExample {
 			scoreLspCarriers();
 			scoreHub();
 			scoreMissingShipments();
+			scoreNonDeliveredShipments();
 			return score;
 		}
 
@@ -431,6 +433,11 @@ public class RunLspReceiverCollaborationExample {
 				score -= 10000 * shipmentCountDifference;
 			}
 		}
+
+		private void scoreNonDeliveredShipments() {
+			score += ScoringFunctionFactoryUsecase.LSPScoringFunctionFactory.scoreNonDeliveredShipments(lsp);
+		}
+
 
 		@Override
 		public void setEmbeddingContainer(LSP pointer) {

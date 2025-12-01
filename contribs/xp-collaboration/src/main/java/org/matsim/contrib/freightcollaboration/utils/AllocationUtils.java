@@ -186,7 +186,7 @@ public class AllocationUtils {
 				if (originalDelegate instanceof Receiver originalReceiver) {
 					// Use ReceiverUtils factory method
 					Receiver copiedReceiver = ReceiverUtils.newInstance(originalReceiver.getId());
-
+					copiedReceiver.setLinkId(originalReceiver.getLinkId());
 					// Copy plans
 					for (ReceiverPlan plan : originalReceiver.getPlans()) {
 						ReceiverPlan newPlan = plan.createCopy();

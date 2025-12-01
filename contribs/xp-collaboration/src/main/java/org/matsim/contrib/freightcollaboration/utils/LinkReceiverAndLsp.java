@@ -8,6 +8,7 @@ import org.matsim.contrib.freightcollaboration.FreightCollaborator;
 import org.matsim.core.router.util.TravelTime;
 import org.matsim.freight.carriers.Carrier;
 import org.matsim.freight.carriers.CarrierCapabilities;
+import org.matsim.freight.carriers.CarriersUtils;
 import org.matsim.freight.carriers.TimeWindow;
 import org.matsim.freight.logistics.*;
 import org.matsim.freight.logistics.resourceImplementations.ResourceImplementationUtils;
@@ -153,6 +154,9 @@ public class LinkReceiverAndLsp {
 		copy.setCarrierCapabilities(caps);
 		// copy simple attributes
 		original.getAttributes().getAsMap().forEach(copy.getAttributes()::putAttribute);
+		if (CarriersUtils.getJspritIterations(copy) <= 10){
+			CarriersUtils.setJspritIterations(copy, 200);
+		}
 		return copy;
 	}
 

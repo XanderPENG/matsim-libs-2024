@@ -8,6 +8,7 @@ import org.matsim.api.core.v01.population.Activity;
 import org.matsim.api.core.v01.population.Leg;
 import org.matsim.api.core.v01.population.Route;
 import org.matsim.contrib.freightcollaboration.*;
+import org.matsim.contrib.freightcollaboration.run.ScoringFunctionFactoryUsecase;
 import org.matsim.contrib.freightcollaboration.utils.AllocationUtils;
 import org.matsim.contrib.freightcollaboration.utils.LinkReceiverAndCarrier;
 import org.matsim.contrib.freightcollaboration.utils.LinkReceiverAndLsp;
@@ -254,6 +255,11 @@ public class FreightPseudoSimulator {
 				throw new IllegalStateException("Carrier " + carrier.getId() + " has no score for the selected plan.");
 			}
 		}
+		/*
+		 * Add penalty for non-delivered shipments
+		 */
+		totalLspScore += ScoringFunctionFactoryUsecase.LSPScoringFunctionFactory.scoreNonDeliveredShipments(lsp);
+
 		return totalLspScore;
 	}
 

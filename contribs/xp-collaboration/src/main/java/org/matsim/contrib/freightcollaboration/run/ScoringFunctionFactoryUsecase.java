@@ -3,6 +3,7 @@ package org.matsim.contrib.freightcollaboration.run;
 import com.google.inject.Inject;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.network.Network;
 import org.matsim.contrib.freightcollaboration.CollaboratorRole;
 import org.matsim.contrib.freightcollaboration.FreightCollaborator;
@@ -16,8 +17,15 @@ import org.matsim.freight.carriers.Carrier;
 import org.matsim.freight.carriers.TimeWindow;
 import org.matsim.freight.carriers.controller.CarrierScoringFunctionFactory;
 import org.matsim.freight.carriers.usecases.chessboard.CarrierScoringFunctionFactoryImpl;
+import org.matsim.freight.logistics.LSP;
+import org.matsim.freight.logistics.LSPCarrierResource;
+import org.matsim.freight.logistics.LSPPlan;
+import org.matsim.freight.logistics.LSPResource;
+import org.matsim.freight.logistics.resourceImplementations.ResourceImplementationUtils;
+import org.matsim.freight.logistics.shipment.LspShipmentPlan;
 import org.matsim.freight.receiver.*;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -251,6 +259,49 @@ public class ScoringFunctionFactoryUsecase {
 			}
 		}
 
+	}
+
+	public static class LSPScoringFunctionFactory{
+
+		private static final Logger logger = LogManager.getLogger(LSPScoringFunctionFactory.class);
+
+		public static double scoreNonDeliveredShipments(LSP lsp) {
+			double score = 0.0;
+
+			int undeliveredShipmentCount = 0;
+			// Get all carrier types for this LSP
+			Set<String> lspCarrierTypes = new HashSet<>();
+			lsp.getResources().forEach(resource -> {
+				if (resource instanceof LSPCarrierResource carrierResource) {
+					ResourceImplementationUtils.CARRIER_TYPE type = (ResourceImplementationUtils.CARRIER_TYPE) carrierResource.getCarrier().getAttributes().getAttribute("carrierType");
+					lspCarrierTypes.add(type.name());
+
+				}
+			});
+
+			LSPPlan lspPlan = lsp.getSelectedPlan();
+			var lspShipmentPlans = lspPlan.getShipmentPlans();
+			for (LspShipmentPlan lspShipmentPlan : lspShipmentPlans) {
+				// Get all resource ids used in this shipment plan
+				Set<String> shipmentPlanResourceNames= new HashSet<>();
+				lspShipmentPlan.getPlanElements().values().forEach(planElement -> {
+					shipmentPlanResourceNames.add(planElement.getResourceId().toString());
+				});
+				// Check if all carrier types are covered
+				if (!shipmentPlanResourceNames.containsAll(lspCarrierTypes)){
+					// This indicates that this shipment was not fully delivered/handled
+					undeliveredShipmentCount++;
+				}
+			}
+
+			if (undeliveredShipmentCount > 0) {
+				logger.error(
+					"LspPlan contains undelivered shipments, "
+						+ "probably due to time window violations.");
+				score -= 5000 * undeliveredShipmentCount;
+			}
+			return score;
+		}
 	}
 
 }
