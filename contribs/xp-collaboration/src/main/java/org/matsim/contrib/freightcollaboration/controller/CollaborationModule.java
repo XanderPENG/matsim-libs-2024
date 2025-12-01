@@ -56,7 +56,7 @@ public class CollaborationModule extends AbstractModule {
 		dataStore.setScenario(scenario);
 		this.bind(CollaborationDataStore.class).toInstance(dataStore);
 		// Install specific Collaboration type listeners
-		installCollaborationTypeListeners();
+//		installCollaborationTypeListeners();
 	}
 
 	public void installAllCollaboratorModules(Controler controler) {

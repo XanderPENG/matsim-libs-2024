@@ -10,6 +10,7 @@ import org.matsim.api.core.v01.population.Route;
 import org.matsim.contrib.freightcollaboration.*;
 import org.matsim.contrib.freightcollaboration.utils.AllocationUtils;
 import org.matsim.contrib.freightcollaboration.utils.LinkReceiverAndCarrier;
+import org.matsim.contrib.freightcollaboration.utils.LinkReceiverAndLsp;
 import org.matsim.core.population.PopulationUtils;
 import org.matsim.core.population.routes.NetworkRoute;
 import org.matsim.core.router.util.TravelTime;
@@ -25,7 +26,9 @@ import org.matsim.freight.carriers.events.CarrierEventCreatorUtils;
 import org.matsim.freight.carriers.events.CarrierTourEndEvent;
 import org.matsim.freight.carriers.events.CarrierTourStartEvent;
 import org.matsim.freight.logistics.LSP;
+import org.matsim.freight.logistics.LSPCarrierResource;
 import org.matsim.freight.logistics.LSPPlan;
+import org.matsim.freight.logistics.LSPScorerFactory;
 import org.matsim.freight.receiver.Receiver;
 import org.matsim.freight.receiver.ReceiverPlan;
 import org.matsim.vehicles.Vehicle;
@@ -163,6 +166,7 @@ public class FreightPseudoSimulator {
 			// Then run the carrier PSim
 			var driverLegsAndActivitiesMap = runActivityBasedCarrierSimulation(carrierCollaborator.getDelegate());
 			// calculate the score based on the output legs and activities
+			// TODO: inject the carrierScoringFunctionFactory properly
 			CarrierPSimScorer carrierPSimScorer = new CarrierPSimScorer(driverLegsAndActivitiesMap,
 				carrierCollaborator.getDelegate(), carrierScoringFunctionFactory);
 			return carrierPSimScorer.getScore();
@@ -171,15 +175,42 @@ public class FreightPseudoSimulator {
 		// TODO: The current implementation is rough and needs to be reimplemented properly
 		else if (CollaborationTypes.LSP_RECEIVER.isCompatible(collaboratorRoleOfDistributors, collaboratorRoleOfPlayers)) {
 				var lspCollaborator = (FreightCollaborator<LSP>) copyDistributors.values().iterator().next();
-				@SuppressWarnings("unchecked")
+				Set<Id<Carrier>> lspCarriersId = new HashSet<>();
+				// Get all carriers of this lsp as the receivers are only connected to carriers
+				lspCollaborator.getDelegate().getResources().forEach(resource -> {
+					if (resource instanceof LSPCarrierResource carrierResource) {
+						// Get the carrier
+						Carrier carrier = carrierResource.getCarrier();
+						lspCarriersId.add(carrier.getId());
+					}
+				});
+				// DEEP Copy receivers
 				var receiverCollaborators = new HashSet<>((Set<FreightCollaborator<Receiver>>) (Set<?>) Set.copyOf(copyPlayers.values()));
-				// keep only receivers in the collaborating subset for savings calculation
-				if (collaboratingSubset != null && !collaboratingSubset.isEmpty()) {
-					receiverCollaborators.removeIf(rc -> !collaboratingSubset.contains(rc.getId()));
-				} else if (collaboratingSubset != null) {
-					receiverCollaborators.clear();
-				}
-				return runLspReceiverPseudoSim(lspCollaborator, receiverCollaborators);
+				Set<FreightCollaborator<Receiver>> nonCollaboratingReceivers = new HashSet<>();
+				@SuppressWarnings("unchecked")
+				Map<Id<?>, FreightCollaborator<Receiver>> globalReceivers = (Map<Id<?>, FreightCollaborator<Receiver>>) (Map<?, ?>) freightCollaborators.getFreightCollaboratorsByRole(CollaboratorRole.RECEIVER);
+				var allReceivers = AllocationUtils.deepCopyCollaboratorsMap(globalReceivers);
+				allReceivers.values().forEach(receiverCollaborator -> {
+					// if this receiver is not in the collaborating players for this lsp, check whether it is a non-collaborating receiver for this lsp
+					if (!copyPlayers.containsKey(receiverCollaborator.getId())) {
+						ReceiverPlan receiverPlan = receiverCollaborator.getTypedSelectedPlan();
+						// check whether this receiver has orders for this carrier
+						boolean hasOrdersForThisLsp = receiverPlan.getReceiverOrders().stream()
+							.anyMatch(order -> lspCarriersId.contains(order.getCarrierId()));
+						if (hasOrdersForThisLsp) {
+							//FIXME: this is a non-collaborating receiver for this carrier, its plan should (or not?) be reset to the original one
+							receiverCollaborator.getDelegate().setSelectedPlan((ReceiverPlan) collaborationDataStore.getOriginalPlans().get(CollaboratorRole.RECEIVER).get(receiverCollaborator.getId()));
+							nonCollaboratingReceivers.add(receiverCollaborator);
+						}
+					}
+				});
+				// merge the non-collaborating receivers and the collaborating ones
+				receiverCollaborators.addAll(nonCollaboratingReceivers);
+				//Re-generate the LSP/carrier plan based on the new receiver plans/requests
+				LSP newlyPlannedLsp = LinkReceiverAndLsp.receiversTriggerLspReplan(lspCollaborator,
+					receiverCollaborators, network, tt, vrpMaxIterations, collaborationDataStore.getScenario());
+				// Then run the LSP-receiver activity-based pseudo-simulation and scoring
+				return runLspPseudoSimAndScoring(newlyPlannedLsp);
 			} else if (CollaborationTypes.CARRIER_CARRIER.isCompatible(collaboratorRoleOfDistributors, collaboratorRoleOfPlayers)){
 			// to be implemented
 			throw new IllegalStateException("Unable to simulate Carrier-Carrier collaboration yet.");
@@ -190,61 +221,40 @@ public class FreightPseudoSimulator {
 	}
 
 	/**
-	 * Run the pseudo-simulation for the given carrier, which has already updated its plan.
-	 * This psim will generate the carrier-related events based on the carrier plan and the given travel time.
+	 * This method implements the LSP pseudo-simulation and scoring.
+	 * Generally, LSP does not need to handle activities, legs, events...
+	 * The only thing need to do "psim" is the affiliated carriers' tours,
+	 * hence, we can just use the existing carrier's logic to process it.
+	 *
+	 * TODO: Currently, it seems that we do not need the LspScoringFunctionFact as only the carrier scores will change,
+	 * However, it should be kept here for future extension since the hub cost could change due to collaboration.
 	 */
-	@Deprecated(since = "Use the runActivityBasedCarrierSimulation method")
-	void runCarrierPSim(Carrier carrier, TravelTime tt) {
-		CarrierPlan selectedPlan = carrier.getSelectedPlan();
-		// create a map to store the driver (fake) and their corresponding events
-		Map<Integer, List<AbstractCarrierEvent>> driverAndTourMap = new HashMap<>();
-		// for-loop to process each tour in the carrier plan
-		int driverIdCounter = 1;
-		List<AbstractCarrierEvent> driverEvents = new ArrayList<>();
-		for (ScheduledTour tour: selectedPlan.getScheduledTours()) {
-			double timeCursor = tour.getDeparture(); // start time of the tour
-
-			// First, generate the CarrierTourStartEvent
-			CarrierTourStartEvent tourStartEvent = new CarrierTourStartEvent(
-					tour.getDeparture(),  // start time
-					carrier.getId(),  // carrier id
-					//FIXME: not sure which link id is appropriate here, theoretically they should be the same?
-					tour.getTour().getStartLinkId() != null ? tour.getTour().getStartLinkId() : tour.getTour().getEndLinkId(),
-					tour.getVehicle().getId(), // vehicle id
-					tour.getTour().getId() // tour id
-			);
-			// add the event to the driver's event list
-			driverEvents.add(tourStartEvent);
-
-			// Get the TourElements list and for-loop through them to generate other events
-			for (var el : tour.getTour().getTourElements()) {
-				switch (el) {
-					case Tour.Leg leg -> {
-						// handle leg: leg.getRoute(), leg.getExpectedDepartureTime(), leg.getExpectedTransportTime()
-						// use tt to estimate times if needed
-					}
-					case Tour.Pickup pickup -> {
-						// handle pickup activity: pickup.getShipment(), pickup.getLocation(), pickup.getTimeWindow()
-					}
-					case Tour.Delivery delivery -> {
-						// handle delivery activity
-					}
-					case Tour.ServiceActivity service -> {
-						// handle service activity
-					}
-					case Tour.TourActivity act -> {
-						// generic activity path if needed
-					}
-					default ->
-						// unknown element type safeguard
-						throw new IllegalStateException("Unknown tour element: " + el.getClass());
-				}
+	private double runLspPseudoSimAndScoring(LSP lsp){
+		Set<Carrier> affiliatedCarriers = new HashSet<>();
+		lsp.getResources().forEach(r ->
+			{
+			if (r instanceof LSPCarrierResource lspCarrierResource) {
+				affiliatedCarriers.add(lspCarrierResource.getCarrier());
+				// Run the @RunActivityBasedCarrierSimulation for each affiliated carrier
+				var driverLegsAndActivitiesMap = runActivityBasedCarrierSimulation(lspCarrierResource.getCarrier());
+				// Score each affiliated carrier
+				CarrierPSimScorer carrierPSimScorer = new CarrierPSimScorer(driverLegsAndActivitiesMap,
+					lspCarrierResource.getCarrier(), carrierScoringFunctionFactory);
+				// Set the score back to the carrier plan
+				lspCarrierResource.getCarrier().getSelectedPlan().setScore(carrierPSimScorer.getScore());
 			}
-			// After processing all tour elements, add the end event
-
-			driverIdCounter++;
-
+		});
+		double totalLspScore = 0.0;
+		// Sum up all affiliated carriers' scores as the LSP score
+		for (Carrier carrier : affiliatedCarriers) {
+			Double carrierPlanScore = carrier.getSelectedPlan().getScore();
+			if (carrierPlanScore != null) {
+				totalLspScore += carrierPlanScore;
+			} else {
+				throw new IllegalStateException("Carrier " + carrier.getId() + " has no score for the selected plan.");
+			}
 		}
+		return totalLspScore;
 	}
 
 	/**
@@ -353,21 +363,5 @@ public class FreightPseudoSimulator {
 	void setTravelTime(TravelTime travelTime) {
 		this.tt = travelTime;
 	}
-
-	/**
-	 * TODO: this should be really implemented as a proper pseudo-simulation between LSP and receivers.
-	 * Lightweight pseudo-simulation for LSP–receiver collaboration.
-	 * Uses a simple cost function: baseline = selected plan score (or fallback), minus a fixed saving per collaborating receiver.
-	 */
-	private double runLspReceiverPseudoSim(FreightCollaborator<LSP> lspCollaborator,
-										   Set<FreightCollaborator<Receiver>> collaboratingReceivers) {
-		LSP lsp = lspCollaborator.getDelegate();
-		double baseScore = lsp.getSelectedPlan() != null && lsp.getSelectedPlan().getScore() != null
-			? lsp.getSelectedPlan().getScore()
-			: -1000.0; // fallback baseline cost
-		double savings = collaboratingReceivers.size() * 100.0;
-		return baseScore - savings;
-	}
-
 
 }

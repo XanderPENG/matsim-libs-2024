@@ -1,14 +1,10 @@
 package org.matsim.contrib.freightcollaboration.run;
 
-import com.google.inject.Provider;
-import jakarta.inject.Inject;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.Scenario;
-import org.matsim.api.core.v01.TransportMode;
 import org.matsim.api.core.v01.network.Link;
-import org.matsim.api.core.v01.network.Network;
 import org.matsim.contrib.freightcollaboration.CollaborationTypes;
 import org.matsim.contrib.freightcollaboration.CollaboratorRole;
 import org.matsim.contrib.freightcollaboration.FreightCollaborator;
@@ -19,8 +15,6 @@ import org.matsim.contrib.freightcollaboration.config.CollaborationParamSet;
 import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfigGroup;
 import org.matsim.contrib.freightcollaboration.controller.CollaborationModule;
 import org.matsim.contrib.freightcollaboration.controller.CollaboratorModules;
-import org.matsim.contrib.freightcollaboration.controller.FreightCoalitionManager;
-import org.matsim.contrib.freightcollaboration.listener.FormFreightCoalitionListener;
 import org.matsim.contrib.freightcollaboration.utils.LinkFreightAgentToFreightCollaborator;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
@@ -28,35 +22,30 @@ import org.matsim.core.config.groups.ScoringConfigGroup;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controler;
 import org.matsim.core.controler.OutputDirectoryHierarchy;
-import org.matsim.core.replanning.selectors.*;
-import org.matsim.core.router.util.LeastCostPathCalculator;
-import org.matsim.core.router.util.LeastCostPathCalculatorFactory;
-import org.matsim.core.router.util.TravelDisutility;
-import org.matsim.core.router.util.TravelTime;
+import org.matsim.core.replanning.GenericPlanStrategyImpl;
+import org.matsim.core.replanning.selectors.BestPlanSelector;
+import org.matsim.core.replanning.selectors.ExpBetaPlanChanger;
+import org.matsim.core.replanning.selectors.ExpBetaPlanSelector;
+import org.matsim.core.replanning.selectors.GenericWorstPlanForRemovalSelector;
 import org.matsim.core.scenario.ScenarioUtils;
-import org.matsim.core.scoring.ScoringFunction;
-import org.matsim.core.scoring.SumScoringFunction;
 import org.matsim.core.utils.io.IOUtils;
 import org.matsim.examples.ExamplesUtils;
 import org.matsim.freight.carriers.*;
-import org.matsim.freight.carriers.CarriersUtils;
-import org.matsim.freight.carriers.controller.*;
+import org.matsim.freight.carriers.controller.CarrierControllerUtils;
+import org.matsim.freight.carriers.controller.CarrierModule;
+import org.matsim.freight.carriers.controller.CarrierScoringFunctionFactory;
+import org.matsim.freight.carriers.controller.CarrierStrategyManager;
 import org.matsim.freight.carriers.usecases.analysis.CarrierScoreStats;
-import org.matsim.freight.carriers.usecases.chessboard.CarrierScoringFunctionFactoryImpl;
-import org.matsim.freight.carriers.usecases.chessboard.CarrierTravelDisutilities;
 import org.matsim.freight.logistics.*;
-import org.matsim.freight.logistics.LogisticChainElement;
 import org.matsim.freight.logistics.resourceImplementations.CarrierSchedulerUtils;
 import org.matsim.freight.logistics.resourceImplementations.ResourceImplementationUtils;
 import org.matsim.freight.logistics.resourceImplementations.TransshipmentHubResource;
 import org.matsim.freight.logistics.shipment.LspShipment;
 import org.matsim.freight.logistics.shipment.LspShipmentUtils;
 import org.matsim.freight.receiver.*;
-import org.matsim.vehicles.VehicleType;
 import org.matsim.freight.receiver.collaboration.CollaborationUtils;
-import org.matsim.core.replanning.GenericPlanStrategyImpl;
+import org.matsim.vehicles.VehicleType;
 
-import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 
@@ -175,11 +164,16 @@ public class RunLspReceiverCollaborationExample {
 		FreightCarriersConfigGroup freightConfig = ConfigUtils.addOrGetModule(config, FreightCarriersConfigGroup.class);
 		freightConfig.setTimeWindowHandling(FreightCarriersConfigGroup.TimeWindowHandling.ignore);
 
+		// configure freight receivers
+		ReceiverConfigGroup freightReceiversConfigGroup = ConfigUtils.addOrGetModule(config, ReceiverConfigGroup.class);
+		freightReceiversConfigGroup.setReceiverReplanningInterval(2000);
+		freightReceiversConfigGroup.setReplanningType(ReceiverReplanningType.timeWindow);
+
 		CollaborationParamSet paramSet = new CollaborationParamSet(CollaborationTypes.LSP_RECEIVER,
 			Set.of(org.matsim.contrib.freightcollaboration.strategy.CollaborationStrategies.COLLABORATION_STATUS_MUTATION));
 		paramSet.setAdditionalParams( Map.of("MAIN_RUN_CARRIER_IDS", Set.of("mainRunCarrier")));
 		FreightCollaborationConfigGroup fccg = new FreightCollaborationConfigGroup(Set.of(paramSet), null);
-		fccg.ALLOCATION_MODEL = AllocationModels.APPROX_SHAPLEY;
+		fccg.ALLOCATION_MODEL = AllocationModels.SHAPLEY;
 		fccg.APPROX_SHAPLEY_METHOD = AllocationModelApproxShapleyValue.ApproximationMethod.MONTE_CARLO.name();
 		fccg.ALLOCATION_FACTOR = 0.8;
 		fccg.RECEIVER_RELAXATION_PENALTY = 0.01;
@@ -191,7 +185,7 @@ public class RunLspReceiverCollaborationExample {
 	private static LSP createTwoEchelonLsp(Scenario scenario, Receivers receivers) {
 		// Carriers for 1st echelon and distribution carrier (2nd echelon)
 		Carrier mainRunCarrier = buildSimpleCarrier("mainRunCarrier", "j(0,1)R");
-		CarrierSchedulerUtils.setVrpLogic(mainRunCarrier, LSPUtils.LogicOfVrp.shipmentBased);
+		CarrierSchedulerUtils.setVrpLogic(mainRunCarrier, LSPUtils.LogicOfVrp.serviceBased);
 
 		Carrier distributionCarrier = buildSimpleCarrier("distributionCarrier", "j(5,3)");
 		CarrierSchedulerUtils.setVrpLogic(distributionCarrier, LSPUtils.LogicOfVrp.shipmentBased);
@@ -337,7 +331,7 @@ public class RunLspReceiverCollaborationExample {
 
 			// create orders (one product per receiver)
 			ProductType pType = ReceiverUtils.createAndGetProductType(receivers, Id.create("product_" + entry.getKey(), ProductType.class),
-				Id.createLinkId("j(5,3)"));
+				Id.createLinkId("j(0,1)R"));
 			pType.setRequiredCapacity(10);
 
 			// Create receiver product
