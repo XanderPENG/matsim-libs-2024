@@ -13,8 +13,7 @@ import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfig
 import org.matsim.contrib.freightcollaboration.utils.LinkReceiverAndCarrier;
 import org.matsim.core.scoring.ScoringFunction;
 import org.matsim.core.scoring.SumScoringFunction;
-import org.matsim.freight.carriers.Carrier;
-import org.matsim.freight.carriers.TimeWindow;
+import org.matsim.freight.carriers.*;
 import org.matsim.freight.carriers.controller.CarrierScoringFunctionFactory;
 import org.matsim.freight.carriers.usecases.chessboard.CarrierScoringFunctionFactoryImpl;
 import org.matsim.freight.logistics.LSP;
@@ -301,6 +300,122 @@ public class ScoringFunctionFactoryUsecase {
 				score -= 5000 * undeliveredShipmentCount;
 			}
 			return score;
+		}
+	}
+
+	public static class CarrierScoringFunctionFactoryForLspReceiverCollab implements CarrierScoringFunctionFactory {
+
+		private static final Logger logger = LogManager.getLogger(CarrierScoringFunctionFactoryForLspReceiverCollab.class);
+
+		@Inject
+		private Network network;
+
+		@Inject
+		FreightCollaborators freightCollaborators;
+
+		@Inject
+		CollaborationDataStore dataStore;
+
+		@Inject
+		FreightCollaborationConfigGroup freightConfig;
+
+		@Override
+		public ScoringFunction createScoringFunction(Carrier carrier) {
+			SumScoringFunction sf = new SumScoringFunction();
+			sf.addScoringFunction(new CarrierScoringFunctionFactoryImpl.SimpleDriversLegScoring(carrier, network));
+			sf.addScoringFunction(new CarrierScoringFunctionFactoryImpl.SimpleVehicleEmploymentScoring(carrier));
+			sf.addScoringFunction(new CarrierScoringFunctionFactoryImpl.SimpleDriversActivityScoring());
+			double feePerReceiver = freightConfig != null ? freightConfig.CARRIER_CHARGED_FEE : 200.0;
+			sf.addScoringFunction(new SimpleChargingReceiverScoring(carrier, freightCollaborators, feePerReceiver));
+			sf.addScoringFunction(new missingDeliveryPenalty(carrier, 500.0));
+			return sf;
+		}
+
+		public ScoringFunction createBasicCostScoringFunction(Carrier carrier) {
+			SumScoringFunction sf = new SumScoringFunction();
+			sf.addScoringFunction(new CarrierScoringFunctionFactoryImpl.SimpleDriversLegScoring(carrier, network));
+			sf.addScoringFunction(new CarrierScoringFunctionFactoryImpl.SimpleVehicleEmploymentScoring(carrier));
+			sf.addScoringFunction(new CarrierScoringFunctionFactoryImpl.SimpleDriversActivityScoring());
+			return sf;
+		}
+
+		public static class SimpleChargingReceiverScoring implements SumScoringFunction.BasicScoring {
+
+			private Carrier carrier;
+
+			FreightCollaborators freightCollaborators;
+			private final double feePerReceiver;
+
+			public SimpleChargingReceiverScoring(Carrier carrier, FreightCollaborators freightCollaborators, double feePerReceiver) {
+				super();
+				this.carrier = carrier;
+				this.freightCollaborators = freightCollaborators;
+				this.feePerReceiver = feePerReceiver;
+			}
+
+			private double score = 0.0;
+
+			@Override
+			public void finish() {
+				// Nothing to do here
+			}
+
+			@Override
+			public double getScore() {
+				// Get linked receivers for this carrier
+				Set<FreightCollaborator<Receiver>> linkedReceivers = LinkReceiverAndCarrier.findLinkedReceivers(carrier, freightCollaborators);
+				// Charge a fixed fee for each linked receiver
+				score = linkedReceivers.size() * feePerReceiver;
+				return score;
+			}
+		}
+
+		public static class missingDeliveryPenalty implements SumScoringFunction.BasicScoring {
+
+			private Carrier carrier;
+			private final double penaltyPerMissingDelivery;
+
+			public missingDeliveryPenalty(Carrier carrier, double penaltyPerMissingDelivery) {
+				super();
+				this.carrier = carrier;
+				this.penaltyPerMissingDelivery = penaltyPerMissingDelivery;
+			}
+
+			@Override
+			public void finish() {
+				// Nothing to do here
+			}
+
+			@Override
+			public double getScore() {
+				// Here you would implement the logic to determine the number of missing deliveries
+				int numberOfMissingDeliveries = 0; // Placeholder for actual logic
+				// Get all the shipment IDs for this carrier
+				Set<Id<CarrierShipment>> shipmentIds = carrier.getShipments().keySet();
+				// Check the selected plan and each tour to see which shipments were delivered
+				CarrierPlan selectedPlan = carrier.getSelectedPlan();
+				Set<Id<CarrierShipment>> deliveredShipmentIds = new HashSet<>();
+				// For-loop through all tours and tour elements to find delivered shipments
+				selectedPlan.getScheduledTours().forEach(tour -> {
+					tour.getTour().getTourElements().forEach(tourElement -> {
+						if (tourElement instanceof Tour.TourActivity){
+							Tour.TourActivity activity = (Tour.TourActivity) tourElement;
+							if (activity.getActivityType() == CarrierConstants.DELIVERY){
+								Tour.Delivery deliveryActivity = (Tour.Delivery) activity;
+								Id<CarrierShipment> deliveredShipmentId = deliveryActivity.getShipment().getId();
+								deliveredShipmentIds.add(deliveredShipmentId);
+							}
+						}
+					});
+				});
+				// Determine the number of missing deliveries
+				for (Id<CarrierShipment> shipmentId : shipmentIds) {
+					if (!deliveredShipmentIds.contains(shipmentId)) {
+						numberOfMissingDeliveries++;
+					}
+				}
+				return -numberOfMissingDeliveries * penaltyPerMissingDelivery;
+			}
 		}
 	}
 

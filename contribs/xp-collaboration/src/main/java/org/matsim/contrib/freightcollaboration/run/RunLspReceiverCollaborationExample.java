@@ -142,7 +142,7 @@ public class RunLspReceiverCollaborationExample {
 				});
 
 				// bind carrier and receiver score factory
-				bind(CarrierScoringFunctionFactory.class).to(ScoringFunctionFactoryUsecase.CarrierScoringFunctionFactoryUsecase.class);
+				bind(CarrierScoringFunctionFactory.class).to(ScoringFunctionFactoryUsecase.CarrierScoringFunctionFactoryForLspReceiverCollab.class);
 				bind(ReceiverScoringFunctionFactory.class).to(ScoringFunctionFactoryUsecase.ReceiverScoringFunctionFactoryUsecase.class);
 			}
 		});
@@ -179,8 +179,8 @@ public class RunLspReceiverCollaborationExample {
 		FreightCollaborationConfigGroup fccg = new FreightCollaborationConfigGroup(Set.of(paramSet), null);
 		fccg.ALLOCATION_MODEL = AllocationModels.SHAPLEY;
 		fccg.APPROX_SHAPLEY_METHOD = AllocationModelApproxShapleyValue.ApproximationMethod.MONTE_CARLO.name();
-		fccg.ALLOCATION_FACTOR = 0.9;
-		fccg.RECEIVER_RELAXATION_PENALTY = 0.005;
+		fccg.ALLOCATION_FACTOR = 0.5;
+		fccg.RECEIVER_RELAXATION_PENALTY = 0.01;
 		fccg.setAllocationStrategyString(org.matsim.contrib.freightcollaboration.allocation.AllocationValueTypes.COST_SAVINGS.name());
 		config.addModule(fccg);
 		return config;
@@ -243,7 +243,7 @@ public class RunLspReceiverCollaborationExample {
 			.addLogisticChainElement(hubElement)
 			.addLogisticChainElement(distribElement)
 			.build();
-		lspShipments.forEach(sh -> chain.getLspShipmentIds().add(sh.getId()));
+//		lspShipments.forEach(sh -> chain.getLspShipmentIds().add(sh.getId()));
 
 		// Plan and LSP - create scheduler with resources list
 		List<LSPResource> resourcesList = List.of(mainRunCarrierResource, hub, distributionResource);
@@ -271,7 +271,7 @@ public class RunLspReceiverCollaborationExample {
 	private static Carrier buildSimpleCarrier(String id, String depotLink) {
 		Carrier carrier = CarriersUtils.createCarrier(Id.create(id, Carrier.class));
 		VehicleType type = CarrierVehicleType.Builder.newInstance(Id.create(id + "_type", VehicleType.class))
-			.setCapacity(5000)
+			.setCapacity(3000)
 			.setFixCost(100)
 			.setCostPerDistanceUnit(5.22E-3)
 			.setCostPerTimeUnit(0.109)
@@ -341,7 +341,7 @@ public class RunLspReceiverCollaborationExample {
 			// Create receiver product
 			ReceiverProduct receiverProduct = ReceiverProduct.Builder.newInstance()
 				.setProductType(pType)
-				.setReorderingPolicy(ReceiverUtils.createSSReorderPolicy(100, 300.0))
+				.setReorderingPolicy(ReceiverUtils.createSSReorderPolicy(100, 500.0))
 				.build();
 			receiver.addProduct(receiverProduct);
 
@@ -358,7 +358,7 @@ public class RunLspReceiverCollaborationExample {
 			// Build receiver plan with builder pattern
 			ReceiverPlan plan = ReceiverPlan.Builder.newInstance(receiver, true)
 				.addReceiverOrder(receiverOrder)
-				.addTimeWindow(TimeWindow.newInstance(6*3600, 7 * 3600))
+				.addTimeWindow(TimeWindow.newInstance(8*3600, 9 * 3600))
 //				.setScore(0.0)
 				.build();
 
