@@ -27,12 +27,14 @@ import org.apache.logging.log4j.Logger;
 import org.locationtech.jts.util.Assert;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.Scenario;
+import org.matsim.api.core.v01.network.Link;
 import org.matsim.freight.carriers.*;
 import org.matsim.freight.carriers.CarrierCapabilities.FleetSize;
 import org.matsim.freight.carriers.Tour.Leg;
 import org.matsim.freight.carriers.Tour.TourElement;
 import org.matsim.freight.logistics.*;
 import org.matsim.freight.logistics.shipment.LspShipment;
+import org.matsim.freight.logistics.shipment.LspShipmentPlan;
 import org.matsim.freight.logistics.shipment.LspShipmentPlanElement;
 import org.matsim.freight.logistics.shipment.LspShipmentUtils;
 import org.matsim.vehicles.VehicleType;
@@ -203,18 +205,59 @@ import org.matsim.vehicles.VehicleType;
    * @return a CarrierShipment
    */
   private CarrierShipment convertToCarrierShipment(LspShipment lspShipment) {
-    Id<CarrierShipment> serviceId = Id.create(lspShipment.getId().toString(), CarrierShipment.class);
-    CarrierShipment carrierShipment = CarrierShipment.Builder.newInstance(serviceId, lspShipment.getFrom(), lspShipment.getTo(), lspShipment.getSize())
-            //TODO TimeWindows are not set. This seems to be a problem. KMT'Aug'24
-            //If added here, we also need to decide what happens, if the vehicles StartTime (plus TT) is > TimeWindowEnd ....
-            .setDeliveryDuration(lspShipment.getDeliveryServiceTime())
-            .build();
-    //ensure that the ids of the lspShipment and the carrierShipment are the same. This is needed for updating the LSPShipmentPlan
-    if (! Objects.equals(lspShipment.getId().toString(), carrierShipment.getId().toString())) {
-      log.error("Id of LspShipment: {} and CarrierService: {} do not match", lspShipment.getId().toString(), carrierShipment.getId().toString(),
-              new IllegalStateException("Id of LspShipment and CarrierService do not match"));
-    }
-    return carrierShipment;
+	  Id<CarrierShipment> carrierShipmentId = Id.create(lspShipment.getId().toString(), CarrierShipment.class);
+	  LspShipmentPlan lspShipmentPlan = LSPUtils.findLspShipmentPlan(this.lspPlan, lspShipment.getId());
+
+	  CarrierShipment carrierShipment;
+
+	  if (lspShipmentPlan != null && !lspShipmentPlan.getPlanElements().isEmpty()) {
+		  // This should be the case, if there was a hub before.
+		  LspShipmentPlanElement latestEntry = lspShipmentPlan.getMostRecentEntry();
+		  Id<LSPResource> ressourceIdOfLatestEntry = latestEntry.getResourceId();
+		  Id<Link> fromLinkId = null;
+		  // Since this is a shipment, the carrier would want to pick it up at its overall origin.  However, the shipment may already be at an intermediate hub.
+		  // "getMostRecentEntry()" (see above) works since we are in the process of constructing the plan.  Possible, latestEntry might already
+		  // directly contain the necessary information.
+		  for (LSPResource resource : this.lspPlan.getLSP().getResources()) {
+			  if (resource instanceof TransshipmentHubResource hubResource) {
+				  if (hubResource.getId().equals(ressourceIdOfLatestEntry)) {
+					  fromLinkId = hubResource.getEndLinkId();
+				  }
+			  }
+		  }
+
+		  if (fromLinkId == null) { // Not coming from a hub... use from location of the shipment. This is the case when we have a direct Carrier only for the distribution.
+			  log.info("shipment {}: Did not find a hub resource for the latest entry of the LSPShipmentPlan. Using from location of the shipment instead.", lspShipment.getId());
+			  fromLinkId = lspShipment.getFrom();
+		  }
+
+		  assert fromLinkId != null;
+		  carrierShipment = CarrierShipment.Builder.newInstance(carrierShipmentId, fromLinkId, lspShipment.getTo(), lspShipment.getSize())
+			  .setPickupStartingTimeWindow(TimeWindow.newInstance(latestEntry.getEndTime(), Double.MAX_VALUE)) //Can be picked up at hub once its handling there is done.
+			  .setDeliveryStartingTimeWindow(lspShipment.getDeliveryTimeWindow())
+			  //If added here, we also need to decide what happens, if the vehicles StartTime (plus TT) is > TimeWindowEnd ....
+			  .setPickupDuration(lspShipment.getPickupServiceTime())
+			  .setDeliveryDuration(lspShipment.getDeliveryServiceTime())
+			  .build();
+	  } else {
+		  //This is the case, if only a directCarrier is build for the LSP.
+		  Id<Link> fromLinkId = lspShipment.getFrom();
+		  carrierShipment = CarrierShipment.Builder.newInstance(carrierShipmentId, fromLinkId, lspShipment.getTo(), lspShipment.getSize())
+			  .setPickupStartingTimeWindow(lspShipment.getPickupTimeWindow())
+			  .setDeliveryStartingTimeWindow(lspShipment.getDeliveryTimeWindow())
+			  //If added here, we also need to decide what happens, if the vehicles StartTime (plus TT) is > TimeWindowEnd ....
+			  .setPickupDuration(lspShipment.getPickupServiceTime())
+			  .setDeliveryDuration(lspShipment.getDeliveryServiceTime())
+			  .build();
+	  }
+
+
+	  //ensure that the ids of the lspShipment and the carrierShipment are the same. This is needed for updating the LSPShipmentPlan
+	  if (!Objects.equals(lspShipment.getId().toString(), carrierShipment.getId().toString())) {
+		  log.error("Id of LspShipment: {} and CarrierShipment: {} do not match", lspShipment.getId().toString(), carrierShipment.getId().toString(),
+			  new IllegalStateException("Id of LspShipment and CarrierShipment do not match"));
+	  }
+	  return carrierShipment;
   }
 
 
