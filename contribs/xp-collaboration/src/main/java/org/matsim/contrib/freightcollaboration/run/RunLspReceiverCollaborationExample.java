@@ -87,6 +87,7 @@ public class RunLspReceiverCollaborationExample {
 		freightCollaborators.addFreightCollaborator(lspCollaborator);
 		for (Receiver receiver : receivers.getReceivers().values()) {
 			FreightCollaborator<Receiver> rc = LinkFreightAgentToFreightCollaborator.map(receiver, true);
+			rc.addOriginalConnectedStakeholders(Map.of(CollaboratorRole.LSP, Set.of(lsp.getId())));
 			freightCollaborators.addFreightCollaborator(rc);
 		}
 
@@ -139,8 +140,9 @@ public class RunLspReceiverCollaborationExample {
 					return strategyManager;
 				});
 
-				// bind carrier score factory
+				// bind carrier and receiver score factory
 				bind(CarrierScoringFunctionFactory.class).to(ScoringFunctionFactoryUsecase.CarrierScoringFunctionFactoryUsecase.class);
+				bind(ReceiverScoringFunctionFactory.class).to(ScoringFunctionFactoryUsecase.ReceiverScoringFunctionFactoryUsecase.class);
 			}
 		});
 		CarrierScoreStats scoreStats = new CarrierScoreStats(CarriersUtils.getCarriers(controler.getScenario()), controler.getScenario().getConfig().controller().getOutputDirectory() + "/carrier_scores", true);
@@ -155,7 +157,7 @@ public class RunLspReceiverCollaborationExample {
 		config.network().setInputFile(String.valueOf(IOUtils.extendUrl(ExamplesUtils.getTestScenarioURL("freight-chessboard-9x9"), "grid9x9.xml")));
 		config.controller().setOutputDirectory(Paths.get("output", "twoEchelonLspReceiverCollab") +  "/");
 		config.controller().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
-		config.controller().setLastIteration(10);
+		config.controller().setLastIteration(20);
 		config.controller().setFirstIteration(0);
 //		config.controller().setWriteEventsInterval(0);
 //		config.controller().setWritePlansInterval(0);
@@ -166,7 +168,8 @@ public class RunLspReceiverCollaborationExample {
 
 		// configure freight receivers
 		ReceiverConfigGroup freightReceiversConfigGroup = ConfigUtils.addOrGetModule(config, ReceiverConfigGroup.class);
-		freightReceiversConfigGroup.setReceiverReplanningInterval(2000);
+		freightReceiversConfigGroup.setReceiverTriggerCarrierReplanning(false);
+		freightReceiversConfigGroup.setReceiverReplanningInterval(1);
 		freightReceiversConfigGroup.setReplanningType(ReceiverReplanningType.timeWindow);
 
 		CollaborationParamSet paramSet = new CollaborationParamSet(CollaborationTypes.LSP_RECEIVER,
@@ -175,8 +178,8 @@ public class RunLspReceiverCollaborationExample {
 		FreightCollaborationConfigGroup fccg = new FreightCollaborationConfigGroup(Set.of(paramSet), null);
 		fccg.ALLOCATION_MODEL = AllocationModels.SHAPLEY;
 		fccg.APPROX_SHAPLEY_METHOD = AllocationModelApproxShapleyValue.ApproximationMethod.MONTE_CARLO.name();
-		fccg.ALLOCATION_FACTOR = 0.8;
-		fccg.RECEIVER_RELAXATION_PENALTY = 0.01;
+		fccg.ALLOCATION_FACTOR = 0.9;
+		fccg.RECEIVER_RELAXATION_PENALTY = 0.005;
 		fccg.setAllocationStrategyString(org.matsim.contrib.freightcollaboration.allocation.AllocationValueTypes.COST_SAVINGS.name());
 		config.addModule(fccg);
 		return config;
@@ -302,7 +305,7 @@ public class RunLspReceiverCollaborationExample {
 				builder.setCapacityDemand((int) Math.max(1, Math.round(order.getReceiverProductOrders().stream()
 					.mapToDouble(o -> o.getDailyOrderQuantity() * o.getProduct().getProductType().getRequiredCapacity()).sum())));
 				builder.setStartTimeWindow(TimeWindow.newInstance(0, 12 * 3600));
-				builder.setEndTimeWindow(TimeWindow.newInstance(6 * 3600, 8 * 3600));
+				builder.setEndTimeWindow(plan.getTimeWindows().getFirst()); // use receiver time window
 				builder.setDeliveryServiceTime(order.getReceiverProductOrders().stream()
 					.mapToDouble(Order::getServiceDuration).sum());
 				shipments.add(builder.build());
@@ -354,7 +357,7 @@ public class RunLspReceiverCollaborationExample {
 			// Build receiver plan with builder pattern
 			ReceiverPlan plan = ReceiverPlan.Builder.newInstance(receiver, true)
 				.addReceiverOrder(receiverOrder)
-				.addTimeWindow(TimeWindow.newInstance(6*3600, 8 * 3600))
+				.addTimeWindow(TimeWindow.newInstance(6*3600, 7 * 3600))
 //				.setScore(0.0)
 				.build();
 

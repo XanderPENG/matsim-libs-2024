@@ -5,6 +5,8 @@ import org.matsim.api.core.v01.population.BasicPlan;
 import org.matsim.api.core.v01.population.HasPlansAndId;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public interface FreightCollaborator<T extends HasPlansAndId<?, ?>> {
 
@@ -50,4 +52,12 @@ public interface FreightCollaborator<T extends HasPlansAndId<?, ?>> {
 	void enableCollaboration();
 
 	void disableCollaboration();
+
+	void setCollaborationPartners(Set<Id<?>> partnerIds);
+
+	Set<Id<?>> getCollaborationPartners();
+
+	void addOriginalConnectedStakeholders(Map<CollaboratorRole ,Set<Id<?>>> stakeholders);
+
+	Map<CollaboratorRole,Set<Id<?>>> getOriginalConnectedStakeholders();
 }

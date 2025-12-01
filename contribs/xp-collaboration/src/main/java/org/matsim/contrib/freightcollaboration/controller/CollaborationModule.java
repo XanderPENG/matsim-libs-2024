@@ -56,7 +56,7 @@ public class CollaborationModule extends AbstractModule {
 		dataStore.setScenario(scenario);
 		this.bind(CollaborationDataStore.class).toInstance(dataStore);
 		// Install specific Collaboration type listeners
-//		installCollaborationTypeListeners();
+		installCollaborationTypeListeners();
 	}
 
 	public void installAllCollaboratorModules(Controler controler) {
@@ -128,9 +128,10 @@ public class CollaborationModule extends AbstractModule {
 			switch (paramSet.getCollaborationType()) {
 				case LSP_RECEIVER:
 					// install LSP-Receiver specific listeners
-					this.addControlerListenerBinding().to(LspReceiverPreRerouteListener.class);
-					this.addControlerListenerBinding().to(LspReceiverAfterRerouteListener.class);
-					logger.info("LSP_RECEIVER Pre/after Reroute listener registered.");
+//					this.addControlerListenerBinding().to(LspReceiverPreRerouteListener.class);
+//					this.addControlerListenerBinding().to(LspReceiverAfterRerouteListener.class);
+//					logger.info("LSP_RECEIVER Pre/after Reroute listener registered.");
+					this.addControlerListenerBinding().to(ReRouteListener.class);
 					break;
 				default:
 					throw new IllegalStateException("Unexpected value: " + paramSet.getCollaborationType());

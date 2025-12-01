@@ -156,24 +156,30 @@ public class AllocationUtils {
 			}
 			case LSP -> {
 				if (originalDelegate instanceof LSP originalLsp) {
-					LSPPlan copiedPlan = copyLspPlan(originalLsp.getSelectedPlan());
-					// create minimal scheduler; use a forward scheduler as default fallback
-					var scheduler = org.matsim.freight.logistics.LSPUtils.createForwardLogisticChainScheduler();
-					var builder = org.matsim.freight.logistics.LSPUtils.LSPBuilder.getInstance(originalLsp.getId())
-						.setLogisticChainScheduler(scheduler)
-						.setInitialPlan(copiedPlan);
-					LSP copiedLsp = builder.build();
-					copiedPlan.setLSP(copiedLsp);
-					// copy basic attributes
-					for (String key : originalLsp.getAttributes().getAsMap().keySet()) {
-						Object value = originalLsp.getAttributes().getAttribute(key);
-						copiedLsp.getAttributes().putAttribute(key, value);
-					}
-					// copy plan score to keep comparable baseline
-					if (copiedPlan.getScore() == null && originalLsp.getSelectedPlan().getScore() != null) {
-						copiedPlan.setScore(originalLsp.getSelectedPlan().getScore());
-					}
-					copiedDelegate = copiedLsp;
+					/* FIXME: It seems there is no need/way to deep copy an LSP, as the replanning process will rebuild the plans from scratch.
+					    or create a new LSP which will not affect the original one.
+					 */
+
+					return originalCollaborator; // Return the original collaborator without copying
+
+//					LSPPlan copiedPlan = copyLspPlan(originalLsp.getSelectedPlan());
+//					// create minimal scheduler; use a forward scheduler as default fallback
+//					var scheduler = org.matsim.freight.logistics.LSPUtils.createForwardLogisticChainScheduler();
+//					var builder = org.matsim.freight.logistics.LSPUtils.LSPBuilder.getInstance(originalLsp.getId())
+//						.setLogisticChainScheduler(scheduler)
+//						.setInitialPlan(copiedPlan);
+//					LSP copiedLsp = builder.build();
+//					copiedPlan.setLSP(copiedLsp);
+//					// copy basic attributes
+//					for (String key : originalLsp.getAttributes().getAsMap().keySet()) {
+//						Object value = originalLsp.getAttributes().getAttribute(key);
+//						copiedLsp.getAttributes().putAttribute(key, value);
+//					}
+//					// copy plan score to keep comparable baseline
+//					if (copiedPlan.getScore() == null && originalLsp.getSelectedPlan().getScore() != null) {
+//						copiedPlan.setScore(originalLsp.getSelectedPlan().getScore());
+//					}
+//					copiedDelegate = copiedLsp;
 				}
 			}
 			case RECEIVER -> {

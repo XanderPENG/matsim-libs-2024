@@ -9,6 +9,8 @@ import org.matsim.contrib.freightcollaboration.*;
 import org.matsim.contrib.freightcollaboration.allocation.CollaborationDataStore;
 import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfigGroup;
 import org.matsim.contrib.freightcollaboration.controller.FreightCoalitionManager;
+import org.matsim.contrib.freightcollaboration.utils.CoalitionUtils;
+import org.matsim.contrib.freightcollaboration.utils.LinkReceiverAndLsp;
 import org.matsim.core.config.Config;
 import org.matsim.core.controler.events.BeforeMobsimEvent;
 import org.matsim.core.controler.events.IterationStartsEvent;
@@ -136,21 +138,34 @@ public class FormFreightCoalitionListener implements BeforeMobsimListener {
 					}
 				}
 				case LSP_RECEIVER -> {
+					// Mark collaborated receivers / update their collaboration status
+					CoalitionUtils.markCollaboratedReceiver(freightCollaborators, collaborationDataStore);
+
 					Map<Id<LSP>, FreightCollaborator<LSP>> lspCollaborators = freightCollaborators.getFreightCollaboratorsByRole(CollaboratorRole.LSP);
 					if (lspCollaborators.isEmpty()) {
-						LOGGER.warn("No LSP collaborators available for LSP-Receiver coalition formation.");
-						break;
+						throw new IllegalStateException("No LSP found");
 					}
-					// For now, form one coalition per LSP with all collaborating receivers
+
+					// Firstly, find all collaborating receivers in the scenario
+					Map<Id<Receiver>, FreightCollaborator<Receiver>> allCollaboratingReceivers = CoalitionUtils.getCollaboratedReceivers(freightCollaborators);
+
+					// for-loop to find linked collaborating receivers for each LSP
 					for (FreightCollaborator<LSP> lspCollaborator : lspCollaborators.values()) {
-						Set<FreightCollaborator<Receiver>> collaboratingReceivers = findCollaboratingReceivers();
-						if (!collaboratingReceivers.isEmpty()) {
+						Map<Id<Receiver>, FreightCollaborator<Receiver>>  linkedCollaboratingReceivers  = LinkReceiverAndLsp.findLinkedCollaboratedReceiversWithLsp(lspCollaborator, allCollaboratingReceivers);
+						// if there is any linked collaborating receiver, form a mutable coalition
+						if (!linkedCollaboratingReceivers.isEmpty()) {
 							MutableFreightCoalition mutableCoalition = new MutableFreightCoalition(LSP_RECEIVER);
+							// add the LSP collaborator
 							mutableCoalition.addCollaborator(lspCollaborator);
-							collaboratingReceivers.forEach(mutableCoalition::addCollaborator);
+							// add all linked collaborating receivers
+							for (FreightCollaborator<Receiver> receiverCollaborator : linkedCollaboratingReceivers.values()) {
+								mutableCoalition.addCollaborator(receiverCollaborator);
+							}
+							// add the formed mutable coalition to the list
 							mutableCoalitions.add(mutableCoalition);
 						}
 					}
+
 				}
 
 				default -> throw new IllegalStateException("Unexpected value: " + collaborationType);
@@ -168,23 +183,6 @@ public class FormFreightCoalitionListener implements BeforeMobsimListener {
 					.count();
 			LOGGER.info(" - Role: {}, Number of Collaborators: {}", role, count);
 		}
-	}
-
-	/**
-	 * TODO: In this class there should be a function to find collaborating receivers and change their status accordingly.
-	 * the current code is somewhat right from the logic perspective (check for the collaboration status),
-	 * but not effective now as the status would not change during the simulation.
-	 * @return
-	 */
-	private Set<FreightCollaborator<Receiver>> findCollaboratingReceivers() {
-		Set<FreightCollaborator<Receiver>> collaboratingReceivers = new HashSet<>();
-		Map<Id<Receiver>, FreightCollaborator<Receiver>> receiverCollaborators = freightCollaborators.getFreightCollaboratorsByRole(CollaboratorRole.RECEIVER);
-		for (FreightCollaborator<Receiver> receiverCollaborator : receiverCollaborators.values()) {
-			if (receiverCollaborator.getCollaborationStatus()) {
-				collaboratingReceivers.add(receiverCollaborator);
-			}
-		}
-		return collaboratingReceivers;
 	}
 
 	private void informMutableCoalitionsInfo(List<MutableFreightCoalition> mutableCoalitions){
@@ -255,4 +253,13 @@ public class FormFreightCoalitionListener implements BeforeMobsimListener {
 		}
 		return collaboratingReceivers;
 	}
+
+	/**
+	 * Since this listener need to be called after rerouting, it should be put at later order.
+	 */
+	@Override
+	public double priority() {
+		return -10;
+	}
+
 }

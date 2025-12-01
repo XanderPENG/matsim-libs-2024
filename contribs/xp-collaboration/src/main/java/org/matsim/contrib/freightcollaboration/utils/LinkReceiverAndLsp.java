@@ -9,14 +9,7 @@ import org.matsim.core.router.util.TravelTime;
 import org.matsim.freight.carriers.Carrier;
 import org.matsim.freight.carriers.CarrierCapabilities;
 import org.matsim.freight.carriers.TimeWindow;
-import org.matsim.freight.logistics.LSP;
-import org.matsim.freight.logistics.LSPPlan;
-import org.matsim.freight.logistics.LSPResource;
-import org.matsim.freight.logistics.LSPUtils;
-import org.matsim.freight.logistics.LogisticChain;
-import org.matsim.freight.logistics.LogisticChainElement;
-import org.matsim.freight.logistics.LogisticChainScheduler;
-import org.matsim.freight.logistics.InitialShipmentAssigner;
+import org.matsim.freight.logistics.*;
 import org.matsim.freight.logistics.resourceImplementations.ResourceImplementationUtils;
 import org.matsim.freight.logistics.resourceImplementations.ResourceImplementationUtils.CARRIER_TYPE;
 import org.matsim.freight.logistics.shipment.LspShipment;
@@ -26,13 +19,7 @@ import org.matsim.freight.receiver.ReceiverOrder;
 import org.matsim.freight.receiver.ReceiverPlan;
 import org.matsim.freight.receiver.Order;
 
-import java.util.Set;
-import java.util.Map;
-import java.util.HashMap;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Collection;
-import java.util.Objects;
+import java.util.*;
 
 public class LinkReceiverAndLsp {
 	/**
@@ -263,5 +250,35 @@ public class LinkReceiverAndLsp {
 			cloned.add(b.build());
 		}
 		return cloned;
+	}
+
+
+	/**
+	 * Find the collaborated receivers that are linked with the given LSP via its affiliated carriers.
+	 * @param lspFreightCollaborator
+	 * @param collaboratedReceiversMap: the all identified collaborated receivers in the scenario
+	 * @return
+	 */
+	public static Map<Id<Receiver>, FreightCollaborator<Receiver>> findLinkedCollaboratedReceiversWithLsp(FreightCollaborator<LSP> lspFreightCollaborator,
+														 Map<Id<Receiver>, FreightCollaborator<Receiver>> collaboratedReceiversMap){
+		LSP lsp = lspFreightCollaborator.getDelegate();
+		// Get the affiliated Carrier Ids of this LSP
+		Set<Id<Carrier>> affiliatedCarrierIds = new HashSet<>();
+		for (LSPResource resource: lsp.getResources()){
+			if (resource instanceof LSPCarrierResource carrierResource){
+				affiliatedCarrierIds.add(carrierResource.getCarrier().getId());
+			}
+		}
+		// for-loop all the scenario collaborated receivers to find the linked ones
+		Map<Id<Receiver>, FreightCollaborator<Receiver>> linkedReceiversMap = new HashMap<>();
+		for (FreightCollaborator<Receiver> receiverCollaborator: collaboratedReceiversMap.values()) {
+			var collaboratedCarrierIds = receiverCollaborator.getCollaborationPartners();
+			collaboratedCarrierIds.forEach(id -> {
+				if (affiliatedCarrierIds.contains(id)){
+					linkedReceiversMap.put(receiverCollaborator.getDelegate().getId(), receiverCollaborator);
+				}
+			});
+		}
+		return linkedReceiversMap;
 	}
 }

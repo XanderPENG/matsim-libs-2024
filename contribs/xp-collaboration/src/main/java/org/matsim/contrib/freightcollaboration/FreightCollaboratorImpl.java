@@ -1,16 +1,23 @@
 package org.matsim.contrib.freightcollaboration;
 
+import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.population.BasicPlan;
 import org.matsim.api.core.v01.population.HasPlansAndId;
 import org.matsim.freight.carriers.Carrier;
 import org.matsim.freight.logistics.LSP;
 import org.matsim.freight.receiver.Receiver;
 
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+
 public class FreightCollaboratorImpl<T extends HasPlansAndId<?, ?>> implements FreightCollaborator<T> {
 
 	private final T delegate;
 	private final CollaboratorRole role;
 	private boolean collaborationEnabled = true;
+	private Set<Id<?>> collaborationPartners = Set.of();
+	private final Map<CollaboratorRole, Set<Id<?>>> originalConnectedStakeholders = new HashMap<>();
 
 	public FreightCollaboratorImpl(T delegate, CollaboratorRole role) {
 		this.delegate = delegate;
@@ -60,5 +67,25 @@ public class FreightCollaboratorImpl<T extends HasPlansAndId<?, ?>> implements F
 	@Override
 	public void disableCollaboration() {
 		this.collaborationEnabled = false;
+	}
+
+	@Override
+	public void setCollaborationPartners(Set<Id<?>> partnerIds) {
+		this.collaborationPartners = partnerIds;
+	}
+
+	@Override
+	public Set<Id<?>> getCollaborationPartners() {
+		return this.collaborationPartners;
+	}
+
+	@Override
+	public void addOriginalConnectedStakeholders(Map<CollaboratorRole, Set<Id<?>>> stakeholders) {
+		this.originalConnectedStakeholders.putAll(stakeholders);
+	}
+
+	@Override
+	public Map<CollaboratorRole, Set<Id<?>>> getOriginalConnectedStakeholders() {
+		return this.originalConnectedStakeholders;
 	}
 }
