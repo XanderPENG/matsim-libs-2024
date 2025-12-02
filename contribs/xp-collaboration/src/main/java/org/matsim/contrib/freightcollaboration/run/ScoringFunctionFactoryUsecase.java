@@ -297,7 +297,7 @@ public class ScoringFunctionFactoryUsecase {
 				logger.error(
 					"LspPlan contains undelivered shipments, "
 						+ "probably due to time window violations.");
-				score -= 5000 * undeliveredShipmentCount;
+				score -= 500 * undeliveredShipmentCount;
 			}
 			return score;
 		}

@@ -430,7 +430,7 @@ public class RunLspReceiverCollaborationExample {
 				logger.error(
 					"LspPlan contains less shipments than LSP, "
 						+ "shipments probably lost during replanning.");
-				score -= 10000 * shipmentCountDifference;
+				score -= 500 * shipmentCountDifference;
 			}
 		}
 
