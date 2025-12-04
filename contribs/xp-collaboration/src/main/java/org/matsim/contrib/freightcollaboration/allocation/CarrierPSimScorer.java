@@ -35,7 +35,7 @@ class CarrierPSimScorer {
 		for(Integer driverId : driverLegsAndActivities.keySet()) {
 			// create scoring function for each driver, only considering cost components
 			// TODO: make this more general if other scoring functions are needed
-			ScoringFunction scoringFunction = ((ScoringFunctionFactoryUsecase.CarrierScoringFunctionFactoryForLspReceiverCollab) carrierScoringFunctionFactory).createBasicCostScoringFunction(carrier);
+			ScoringFunction scoringFunction = ((ScoringFunctionFactoryUsecase.CarrierScoringFunctionFactoryUsecase) carrierScoringFunctionFactory).createBasicCostScoringFunction(carrier);
 			scoringFunctions.put(driverId, scoringFunction);
 		}
 	}

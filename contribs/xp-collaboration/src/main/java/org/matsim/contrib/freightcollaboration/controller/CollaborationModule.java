@@ -20,6 +20,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.matsim.contrib.freightcollaboration.CollaborationTypes.CARRIER_RECEIVER;
 import static org.matsim.contrib.freightcollaboration.CollaborationTypes.LSP_RECEIVER;
 
 /**
@@ -133,6 +134,8 @@ public class CollaborationModule extends AbstractModule {
 //					logger.info("LSP_RECEIVER Pre/after Reroute listener registered.");
 					this.addControlerListenerBinding().to(ReRouteListener.class);
 					break;
+				case CARRIER_RECEIVER:
+					return;
 				default:
 					throw new IllegalStateException("Unexpected value: " + paramSet.getCollaborationType());
 			}

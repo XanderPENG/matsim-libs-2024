@@ -54,6 +54,10 @@ import static org.matsim.freight.receiver.run.chessboard.ReceiverChessboardScena
 public class RunCarrierReceiverShapleyAllocationExample {
 
 	public static void main(String[] args) {
+
+		// 10 instances for two experimental designs
+		List<Integer> instances = IntStream.range(0, 10).boxed().toList();
+
 		// Design 1: penalties sweep (12), allocation factors (3), methods (5) = 180 runs
 		double[] penaltySweep = {0.0, 0.003, 0.005, 0.01, 0.015, 0.02, 0.025, 0.03, 0.035, 0.04, 0.045, 0.05};
 		double[] allocSweepShort = {0.6, 0.75, 0.9};
@@ -70,27 +74,33 @@ public class RunCarrierReceiverShapleyAllocationExample {
 			new AllocationMethodChoice("approxShapStrat", AllocationModels.APPROX_SHAPLEY, AllocationModelApproxShapleyValue.ApproximationMethod.STRATIFIED)
 		);
 
+
 		// Run design 1
-		for (double penalty : penaltySweep) {
-			for (double allocFactor : allocSweepShort) {
-				for (AllocationMethodChoice method : methods) {
-					runSingleExperiment("penSweep", allocFactor, penalty, method);
+		for (int instance : instances) {
+			for (double penalty : penaltySweep) {
+				for (double allocFactor : allocSweepShort) {
+					for (AllocationMethodChoice method : methods) {
+						runSingleExperiment("penSweep", allocFactor, penalty, method, instance);
+					}
 				}
 			}
 		}
 
 		// Run design 2
-		for (double allocFactor : allocSweepLong) {
-			for (AllocationMethodChoice method : methods) {
-				runSingleExperiment("allocSweep", allocFactor, fixedPenalty, method);
+		for (int instance : instances) {
+			for (double allocFactor : allocSweepLong) {
+				for (AllocationMethodChoice method : methods) {
+					runSingleExperiment("allocSweep", allocFactor, fixedPenalty, method, instance);
+				}
 			}
 		}
 	}
 
-	private static void runSingleExperiment(String tag, double allocationFactor, double receiverPenalty, AllocationMethodChoice methodChoice) {
-		String runId = "%s-af%.2f-p%.3f-%s".formatted(tag, allocationFactor, receiverPenalty, methodChoice.label);
+	private static void runSingleExperiment(String tag, double allocationFactor, double receiverPenalty, AllocationMethodChoice methodChoice, int instance) {
+		String runId = "%s-af%.2f-p%.3f-%s-i%02d".formatted(tag, allocationFactor, receiverPenalty, methodChoice.label, instance);
 
 		Config config = createExampleConfigWithDefaultNetwork(runId);
+		config.global().setRandomSeed(4711 + instance); // ensure different seeds across instances
 		FreightCollaborationConfigGroup freightCfg = createExampleFreightCollaborationConfig();
 		freightCfg.ALLOCATION_FACTOR = allocationFactor;
 		freightCfg.RECEIVER_RELAXATION_PENALTY = receiverPenalty;
@@ -188,7 +198,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 //		config.controller().setWriteEventsInterval(5);
 //		config.controller().setWritePlansInterval(5);
 		config.controller().setFirstIteration(0);
-		config.controller().setLastIteration(100);
+		config.controller().setLastIteration(80);
 		return config;
 	}
 
