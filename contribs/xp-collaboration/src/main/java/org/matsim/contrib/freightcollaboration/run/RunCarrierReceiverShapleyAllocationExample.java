@@ -56,7 +56,7 @@ public class RunCarrierReceiverShapleyAllocationExample {
 	public static void main(String[] args) {
 
 		// 10 instances for two experimental designs
-		List<Integer> instances = IntStream.range(0, 10).boxed().toList();
+		List<Integer> instances = IntStream.range(0, 5).boxed().toList();
 
 		// Design 1: penalties sweep (12), allocation factors (3), methods (5) = 180 runs
 		double[] penaltySweep = {0.0, 0.003, 0.005, 0.01, 0.015, 0.02, 0.025, 0.03, 0.035, 0.04, 0.045, 0.05};
@@ -75,16 +75,16 @@ public class RunCarrierReceiverShapleyAllocationExample {
 		);
 
 
-		// Run design 1
-		for (int instance : instances) {
-			for (double penalty : penaltySweep) {
-				for (double allocFactor : allocSweepShort) {
-					for (AllocationMethodChoice method : methods) {
-						runSingleExperiment("penSweep", allocFactor, penalty, method, instance);
-					}
-				}
-			}
-		}
+//		// Run design 1
+//		for (int instance : instances) {
+//			for (double penalty : penaltySweep) {
+//				for (double allocFactor : allocSweepShort) {
+//					for (AllocationMethodChoice method : methods) {
+//						runSingleExperiment("penSweep", allocFactor, penalty, method, instance);
+//					}
+//				}
+//			}
+//		}
 
 		// Run design 2
 		for (int instance : instances) {

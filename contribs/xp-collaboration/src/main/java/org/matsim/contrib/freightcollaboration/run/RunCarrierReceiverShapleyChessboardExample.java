@@ -2,6 +2,7 @@ package org.matsim.contrib.freightcollaboration.run;
 
 import com.google.inject.Provider;
 import jakarta.inject.Inject;
+import org.matsim.api.core.v01.Coord;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.Scenario;
 import org.matsim.api.core.v01.TransportMode;
@@ -32,6 +33,7 @@ import org.matsim.core.router.util.LeastCostPathCalculatorFactory;
 import org.matsim.core.router.util.TravelDisutility;
 import org.matsim.core.router.util.TravelTime;
 import org.matsim.core.scenario.ScenarioUtils;
+import org.matsim.core.utils.collections.Tuple;
 import org.matsim.examples.ExamplesUtils;
 import org.matsim.freight.carriers.*;
 import org.matsim.freight.carriers.controller.*;
@@ -42,6 +44,8 @@ import org.matsim.freight.receiver.collaboration.CollaborationUtils;
 import org.matsim.vehicles.VehicleType;
 
 import java.net.URL;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.*;
 import java.util.stream.IntStream;
 
@@ -69,16 +73,38 @@ public class RunCarrierReceiverShapleyChessboardExample {
 		}
 	}
 
+	/*
+		Three spatial distributions of generated customer locations:
+			1. Fully random: randomly generated customer locations within the area
+			2. clustered: generate 10 customers within a 3*3 (3 single links) sub-square (also within the area)
+			3. Hierarchy dispersed: generate 1, 3, 6 customers for each ring with a fixed center location (i(5,4) or i(5,5)R)
+		The feasible area for generating customer is fixed, within the square of:
+			upper left: j(2,7)R
+			bottem left: i(3,2)
+			bottem right: i(7,2)
+			upper right: j(7,2)
+	 */
+	private enum CustomerDistributionScenario {
+		FULLY_RANDOM,
+		CLUSTERED,
+		DISPERSED;
+	}
+
+
 	public static void main(String[] args) {
 
-		List<Integer> instances = IntStream.range(0, 10).boxed().toList();
+		final Duration workWindow = Duration.ofHours(3);
+		final Duration breakWindow = Duration.ofMinutes(15);
+		Instant windowStart = Instant.now();
+
+		List<Integer> instances = IntStream.range(0, 5).boxed().toList();
 
 		// Design 1: finer penalty sweep
 		double[] penaltySweep = {0.0, 0.003, 0.005, 0.01, 0.015, 0.02, 0.025, 0.03, 0.035, 0.04, 0.045, 0.05};
-		double[] allocSweepShort = {0.6, 0.75, 0.9};
-
+//		double[] allocSweepShort = {0.6, 0.75, 0.9};
+		double[] allocSweepShort = {0.8};
 		// Design 2: finer allocation factor sweep
-		double fixedPenalty = 0.01;
+		double fixedPenalty = 0.005;
 		double[] allocSweepLong = IntStream.range(0, 12).mapToDouble(i -> 0.4 + 0.05 * i).toArray();
 
 		List<AllocationMethodChoice> methods = List.of(
@@ -89,27 +115,42 @@ public class RunCarrierReceiverShapleyChessboardExample {
 			new AllocationMethodChoice("approxShapStrat", AllocationModels.APPROX_SHAPLEY, AllocationModelApproxShapleyValue.ApproximationMethod.STRATIFIED)
 		);
 
+		// Two depot scenarios
 		for (DepotScenario depotScenario : DepotScenario.values()) {
-			for (int instance : instances) {
-				for (double penalty : penaltySweep) {
-					for (double allocFactor : allocSweepShort) {
-						for (AllocationMethodChoice method : methods) {
-							runSingleExperiment("penSweep", allocFactor, penalty, method, instance, depotScenario);
+			// Three customer distribution scenarios
+			for (CustomerDistributionScenario customerDistributionScenario : CustomerDistributionScenario.values()) {
+				// Several instances/individual MATSim runs
+				for (int instance : instances) {
+					// Design 1: penalty sweep
+					for (double penalty : penaltySweep) {
+						for (double allocFactor : allocSweepShort) {
+							for (AllocationMethodChoice method : methods) {
+								// Check if we need a break
+								if (Duration.between(windowStart, Instant.now()).compareTo(workWindow) >= 0) {
+									System.out.println("Cooldown: sleeping for " + breakWindow + " after " + workWindow + " of work.");
+									safeSleep(breakWindow);
+									windowStart = Instant.now();
+								}
+
+								runSingleExperiment("penSweep", allocFactor, penalty, method, instance, depotScenario,
+									customerDistributionScenario);
+							}
 						}
 					}
-				}
-				for (double allocFactor : allocSweepLong) {
-					for (AllocationMethodChoice method : methods) {
-						runSingleExperiment("allocSweep", allocFactor, fixedPenalty, method, instance, depotScenario);
-					}
+					//				for (double allocFactor : allocSweepLong) {
+					//					for (AllocationMethodChoice method : methods) {
+					//						runSingleExperiment("allocSweep", allocFactor, fixedPenalty, method, instance, depotScenario);
+					//					}
+					//				}
 				}
 			}
 		}
 	}
 
 	private static void runSingleExperiment(String tag, double allocationFactor, double receiverPenalty, AllocationMethodChoice methodChoice,
-											 int instance, DepotScenario depotScenario) {
-		String runId = "%s-%s-af%.2f-p%.3f-%s-i%02d".formatted(depotScenario.label, tag, allocationFactor, receiverPenalty, methodChoice.label, instance);
+											 int instance, DepotScenario depotScenario, CustomerDistributionScenario customerDistributionScenario) {
+		String runId = "%s-%s-%s-af%.2f-p%.3f-%s-i%02d".formatted(depotScenario.label, customerDistributionScenario.name(),
+			tag, allocationFactor, receiverPenalty, methodChoice.label, instance);
 
 		Config config = createChessboardConfig(runId);
 		config.global().setRandomSeed(4711 + instance); // identical seed across depot scenarios for comparability
@@ -122,10 +163,11 @@ public class RunCarrierReceiverShapleyChessboardExample {
 		}
 		config.addModule(freightCfg);
 
-		runSingleControler(config, depotScenario, instance);
+		runSingleControler(config, depotScenario, customerDistributionScenario, instance);
 	}
 
-	private static void runSingleControler(Config config, DepotScenario depotScenario, int instance) {
+	private static void runSingleControler(Config config, DepotScenario depotScenario, CustomerDistributionScenario customerDistributionScenario,
+										   int instance) {
 		Scenario scenario = ScenarioUtils.loadScenario(config);
 
 		Carriers carriers = generateExampleCarriers(depotScenario.depotLinkId);
@@ -138,7 +180,7 @@ public class RunCarrierReceiverShapleyChessboardExample {
 		receiverConfigGroup.setReplanningType(ReceiverReplanningType.timeWindow);
 		FreightCollaborationConfigGroup freightConfigGroup = ConfigUtils.addOrGetModule(scenario.getConfig(), FreightCollaborationConfigGroup.class);
 
-		Receivers receivers = generateRandomReceivers(scenario.getNetwork(), 10, instance);
+		Receivers receivers = generateRandomReceivers(scenario.getNetwork(), 10, customerDistributionScenario, instance);
 		ReceiverUtils.setReceivers(receivers, scenario);
 
 		ReceiverOrderGeneration receiverOrderGeneration = new ReceiverOrderGeneration(receivers, carriers,
@@ -192,6 +234,15 @@ public class RunCarrierReceiverShapleyChessboardExample {
 	private record AllocationMethodChoice(String label, AllocationModels model,
 										 AllocationModelApproxShapleyValue.ApproximationMethod approxMethod) { }
 
+	private static void safeSleep(Duration duration) {
+		try {
+			Thread.sleep(duration.toMillis());
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new RuntimeException("Interrupted during cooldown sleep", e);
+		}
+	}
+
 	static Config createChessboardConfig(String runId) {
 		URL context = ExamplesUtils.getTestScenarioURL("freight-chessboard-9x9");
 		Config config = ConfigUtils.createConfig();
@@ -200,7 +251,10 @@ public class RunCarrierReceiverShapleyChessboardExample {
 		config.controller().setOutputDirectory("output/chessboardCarrierReceiverCollab/" + runId + "/");
 		config.controller().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
 		config.controller().setFirstIteration(0);
-		config.controller().setLastIteration(80);
+		config.controller().setLastIteration(50);
+		// set writing output every 5 iterations
+		config.controller().setWriteEventsInterval(10);
+		config.controller().setWritePlansInterval(10);
 		return config;
 	}
 
@@ -261,30 +315,238 @@ public class RunCarrierReceiverShapleyChessboardExample {
 		return carriers;
 	}
 
-	static Receivers generateRandomReceivers(Network network, int count, int seed) {
+	static Receivers generateRandomReceivers(Network network, int count,
+											 CustomerDistributionScenario customerDistributionScenario,
+											 int seed) {
 		Receivers receivers = ReceiverUtils.createReceivers();
-		List<Id<Link>> candidateLinks = new ArrayList<>(network.getLinks().size());
-		network.getLinks().values().stream()
-			.filter(l -> l.getAllowedModes().contains(TransportMode.car))
-			.forEach(l -> candidateLinks.add(l.getId()));
-		candidateLinks.sort(Comparator.comparing(Id::toString)); // deterministic base order
+		Set<Id<Link>> candidateLinks;
 
-		if (candidateLinks.size() < count) {
-			throw new IllegalStateException("Not enough links in network to place receivers");
+		switch (customerDistributionScenario) {
+			case CustomerDistributionScenario.FULLY_RANDOM ->
+				candidateLinks = generateFullyRandomReceiversWithinArea(network, count, seed);
+			case CustomerDistributionScenario.CLUSTERED ->
+				candidateLinks = generateClusteredReceiversWithinArea(network, count, seed);
+			case CustomerDistributionScenario.DISPERSED ->
+				candidateLinks = generateHierarchyDispersedReceiversWithinArea(network, count, seed);
+			default ->
+				throw new IllegalStateException("Unexpected value: " + customerDistributionScenario);
 		}
 
-		Collections.shuffle(candidateLinks, new Random(13_579 + seed));
-
-		for (int i = 0; i < count; i++) {
-			Id<Link> location = candidateLinks.get(i);
-			Receiver receiver = ReceiverUtils.newInstance(Id.create("receiver_%02d".formatted(i), Receiver.class));
+		int receiverId = 0;
+		for (Id<Link> location: candidateLinks) {
+			Receiver receiver = ReceiverUtils.newInstance(Id.create("receiver_%02d".formatted(receiverId), Receiver.class));
 			receiver.setLinkId(location);
 			receiver.getAttributes().putAttribute(CollaborationUtils.ATTR_GRANDCOALITION_MEMBER, true);
 			receiver.getAttributes().putAttribute(CollaborationUtils.ATTR_COLLABORATION_STATUS, true);
 			receivers.addReceiver(receiver);
+			receiverId++;
 		}
 
 		return receivers;
+	}
+
+	static Set<Id<Link>> generateFullyRandomReceiversWithinArea(Network network, int count, int seed){
+		Set<Id<Link>> receiverLinks =  new HashSet<>();
+		List<Link> candidates = getCarLinksWithinArea(network);
+		if (candidates.size() < count) {
+			throw new IllegalStateException("Not enough links in area to place receivers: " + candidates.size());
+		}
+		Collections.shuffle(candidates, new Random(13_579 + seed));
+		for (int i = 0; i < count; i++) {
+			receiverLinks.add(candidates.get(i).getId());
+		}
+		return receiverLinks;
+	}
+
+	static Set<Id<Link>> generateClusteredReceiversWithinArea(Network network, int count, int seed){
+		Set<Id<Link>> receiverLinks =  new HashSet<>();
+		Random random = new Random(23_911 + seed);
+		double squareSize = 3000.0;
+		double minStart = AREA_MIN;
+		double maxStart = AREA_MAX - squareSize;
+		List<Double> starts = new ArrayList<>();
+		for (double v = minStart; v <= maxStart + EPS; v += LINK_LENGTH) {
+			starts.add(v);
+		}
+		double startX = starts.get(random.nextInt(starts.size()));
+		double startY = starts.get(random.nextInt(starts.size()));
+		double maxX = startX + squareSize;
+		double maxY = startY + squareSize;
+
+		List<Link> candidates = new ArrayList<>();
+		for (Link link : getCarLinksWithinArea(network)) {
+			Coord mid = midpoint(link);
+			if (mid.getX() + EPS >= startX && mid.getX() - EPS <= maxX &&
+				mid.getY() + EPS >= startY && mid.getY() - EPS <= maxY) {
+				candidates.add(link);
+			}
+		}
+		if (candidates.size() < count) {
+			throw new IllegalStateException("Not enough links in clustered square to place receivers: " + candidates.size());
+		}
+		candidates.sort(Comparator.comparing(l -> l.getId().toString()));
+		Collections.shuffle(candidates, random);
+		for (int i = 0; i < count; i++) {
+			receiverLinks.add(candidates.get(i).getId());
+		}
+		return receiverLinks;
+	}
+
+	static  Set<Id<Link>> generateHierarchyDispersedReceiversWithinArea(Network network, int count, int seed){
+		Set<Id<Link>> receiverLinks =  new HashSet<>();
+		if (count != 10) {
+			throw new IllegalStateException("Hierarchy dispersed scenario expects exactly 10 receivers, got " + count);
+		}
+		Random random = new Random(41_317 + seed);
+		Link centerLink = chooseCenterLink(network, random);
+		receiverLinks.add(centerLink.getId());
+
+		Coord center = midpoint(centerLink);
+		List<Link> areaLinks = getCarLinksWithinArea(network);
+
+		addBalancedEdgeLinks(receiverLinks, areaLinks,
+			center.getX() - 1500.0, center.getX() + 1500.0,
+			center.getY() - 1000.0, center.getY() + 1000.0,
+			3, random);
+
+		addBalancedEdgeLinks(receiverLinks, areaLinks,
+			center.getX() - 2500.0, center.getX() + 2500.0,
+			center.getY() - 2000.0, center.getY() + 2000.0,
+			6, random);
+
+		return receiverLinks;
+	}
+
+	private static final double AREA_MIN = 2000.0;
+	private static final double AREA_MAX = 7000.0;
+	private static final double LINK_LENGTH = 1000.0;
+	private static final double EPS = 1e-6;
+
+	private enum RectangleEdge {
+		TOP,
+		BOTTOM,
+		LEFT,
+		RIGHT
+	}
+
+	private static List<Link> getCarLinksWithinArea(Network network) {
+		List<Link> links = new ArrayList<>();
+		for (Link link : network.getLinks().values()) {
+			if (!link.getAllowedModes().contains(TransportMode.car)) {
+				continue;
+			}
+			if (isWithinArea(midpoint(link))) {
+				links.add(link);
+			}
+		}
+		links.sort(Comparator.comparing(l -> l.getId().toString()));
+		return links;
+	}
+
+	private static boolean isWithinArea(Coord coord) {
+		return coord.getX() + EPS >= AREA_MIN && coord.getX() - EPS <= AREA_MAX &&
+			coord.getY() + EPS >= AREA_MIN && coord.getY() - EPS <= AREA_MAX;
+	}
+
+	private static Coord midpoint(Link link) {
+		Coord from = link.getFromNode().getCoord();
+		Coord to = link.getToNode().getCoord();
+		return new Coord((from.getX() + to.getX()) / 2.0, (from.getY() + to.getY()) / 2.0);
+	}
+
+	private static Link chooseCenterLink(Network network, Random random) {
+		Link centerA = network.getLinks().get(Id.createLinkId("i(5,4)"));
+		Link centerB = network.getLinks().get(Id.createLinkId("i(5,5)R"));
+		if (centerA == null && centerB == null) {
+			throw new IllegalStateException("Center link not found: i(5,4) or i(5,5)R");
+		}
+		if (centerA == null) {
+			return centerB;
+		}
+		if (centerB == null) {
+			return centerA;
+		}
+		return random.nextBoolean() ? centerA : centerB;
+	}
+
+	private static void addBalancedEdgeLinks(Set<Id<Link>> receiverLinks, List<Link> areaLinks,
+											double minX, double maxX, double minY, double maxY,
+											int count, Random random) {
+		Map<RectangleEdge, List<Link>> edgeLinks = new EnumMap<>(RectangleEdge.class);
+		for (RectangleEdge edge : RectangleEdge.values()) {
+			edgeLinks.put(edge, new ArrayList<>());
+		}
+
+		for (Link link : areaLinks) {
+			Coord mid = midpoint(link);
+			if (mid.getX() + EPS < minX || mid.getX() - EPS > maxX ||
+				mid.getY() + EPS < minY || mid.getY() - EPS > maxY) {
+				continue;
+			}
+			if (Math.abs(mid.getX() - minX) < EPS) {
+				edgeLinks.get(RectangleEdge.LEFT).add(link);
+			} else if (Math.abs(mid.getX() - maxX) < EPS) {
+				edgeLinks.get(RectangleEdge.RIGHT).add(link);
+			} else if (Math.abs(mid.getY() - minY) < EPS) {
+				edgeLinks.get(RectangleEdge.BOTTOM).add(link);
+			} else if (Math.abs(mid.getY() - maxY) < EPS) {
+				edgeLinks.get(RectangleEdge.TOP).add(link);
+			}
+		}
+
+		List<RectangleEdge> edges = new ArrayList<>(List.of(RectangleEdge.values()));
+		Collections.shuffle(edges, random);
+		int base = count / edges.size();
+		int remainder = count % edges.size();
+		Map<RectangleEdge, Integer> targets = new EnumMap<>(RectangleEdge.class);
+		for (int i = 0; i < edges.size(); i++) {
+			targets.put(edges.get(i), base + (i < remainder ? 1 : 0));
+		}
+
+		int remaining = count;
+		for (RectangleEdge edge : edges) {
+			List<Link> candidates = edgeLinks.get(edge);
+			candidates.sort(Comparator.comparing(l -> l.getId().toString()));
+			Collections.shuffle(candidates, random);
+			int target = targets.get(edge);
+			for (Link link : candidates) {
+				if (receiverLinks.contains(link.getId())) {
+					continue;
+				}
+				receiverLinks.add(link.getId());
+				target--;
+				remaining--;
+				if (target == 0 || remaining == 0) {
+					break;
+				}
+			}
+			if (remaining == 0) {
+				return;
+			}
+		}
+
+		if (remaining > 0) {
+			List<Link> allCandidates = new ArrayList<>();
+			for (List<Link> list : edgeLinks.values()) {
+				allCandidates.addAll(list);
+			}
+			allCandidates.sort(Comparator.comparing(l -> l.getId().toString()));
+			Collections.shuffle(allCandidates, random);
+			for (Link link : allCandidates) {
+				if (receiverLinks.contains(link.getId())) {
+					continue;
+				}
+				receiverLinks.add(link.getId());
+				remaining--;
+				if (remaining == 0) {
+					break;
+				}
+			}
+		}
+
+		if (remaining > 0) {
+			throw new IllegalStateException("Not enough edge links to place receivers: missing " + remaining);
+		}
 	}
 
 	public static class ReceiverOrderGeneration {
@@ -401,4 +663,5 @@ public class RunCarrierReceiverShapleyChessboardExample {
 			return strategyManager;
 		}
 	}
+
 }
