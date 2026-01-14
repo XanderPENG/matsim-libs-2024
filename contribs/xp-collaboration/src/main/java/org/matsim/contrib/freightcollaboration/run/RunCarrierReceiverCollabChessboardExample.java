@@ -61,9 +61,9 @@ import static org.matsim.freight.receiver.run.chessboard.ReceiverChessboardScena
  * - Two carrier depot scenarios are evaluated: center and left-corner.
  * - Research designs, allocation methods, and 10 instances are identical to the original example.
  */
-public class RunCarrierReceiverShapleyChessboardExample {
+public class RunCarrierReceiverCollabChessboardExample {
 	// Logger
-	private static Logger logger = LogManager.getLogger(RunCarrierReceiverShapleyChessboardExample.class);
+	private static Logger logger = LogManager.getLogger(RunCarrierReceiverCollabChessboardExample.class);
 	private enum DepotScenario {
 		CENTER("center", "i(5,5)R"),
 		LEFT_CORNER("left", "i(1,0)");
@@ -152,7 +152,7 @@ public class RunCarrierReceiverShapleyChessboardExample {
 	}
 
 	private static void runSingleExperiment(String tag, double allocationFactor, double receiverPenalty, AllocationMethodChoice methodChoice,
-											 int instance, DepotScenario depotScenario, CustomerDistributionScenario customerDistributionScenario) {
+											int instance, DepotScenario depotScenario, CustomerDistributionScenario customerDistributionScenario) {
 		String runId = "%s-%s-%s-af%.2f-p%.3f-%s-i%02d".formatted(depotScenario.label, customerDistributionScenario.name(),
 			tag, allocationFactor, receiverPenalty, methodChoice.label, instance);
 
@@ -165,13 +165,13 @@ public class RunCarrierReceiverShapleyChessboardExample {
 			return;
 		} else {
 			logger.info("Running experiment with runId: " + runId);
-			Scanner scanner = new Scanner(System.in);
-			String answer = scanner.nextLine();
-
-			if (answer != null && answer.trim().equalsIgnoreCase("No")) {
-				logger.info("User chose to exit. Terminating.");
-				System.exit(0);
-			}
+//			Scanner scanner = new Scanner(System.in);
+//			String answer = scanner.nextLine();
+//
+//			if (answer != null && answer.trim().equalsIgnoreCase("No")) {
+//				logger.info("User chose to exit. Terminating.");
+//				System.exit(0);
+//			}
 		}
 
 		config.global().setRandomSeed(4711 + instance); // identical seed across depot scenarios for comparability
@@ -253,7 +253,7 @@ public class RunCarrierReceiverShapleyChessboardExample {
 	}
 
 	private record AllocationMethodChoice(String label, AllocationModels model,
-										 AllocationModelApproxShapleyValue.ApproximationMethod approxMethod) { }
+										  AllocationModelApproxShapleyValue.ApproximationMethod approxMethod) { }
 
 	private static void safeSleep(Duration duration) {
 		try {
@@ -314,15 +314,15 @@ public class RunCarrierReceiverShapleyChessboardExample {
 
 		Carrier carrier1 = CarriersUtils.createCarrier(Id.create("carrier1", Carrier.class));
 		CarrierVehicle lightVan = CarrierVehicle.Builder.newInstance(
-			Id.createVehicleId("lightVan1"),
-			Id.createLinkId(depotLinkId),
-			lightVanType)
+				Id.createVehicleId("lightVan1"),
+				Id.createLinkId(depotLinkId),
+				lightVanType)
 			.setEarliestStart(5 * 60 * 60)
 			.build();
 		CarrierVehicle heavyVan = CarrierVehicle.Builder.newInstance(
-			Id.createVehicleId("heavyVan1"),
-			Id.createLinkId(depotLinkId),
-			heavyVanType)
+				Id.createVehicleId("heavyVan1"),
+				Id.createLinkId(depotLinkId),
+				heavyVanType)
 			.setEarliestStart(5 * 60 * 60)
 			.build();
 		CarrierCapabilities carrierCapabilities1 = CarrierCapabilities.Builder.newInstance()
@@ -491,8 +491,8 @@ public class RunCarrierReceiverShapleyChessboardExample {
 	}
 
 	private static void addBalancedEdgeLinks(Set<Id<Link>> receiverLinks, List<Link> areaLinks,
-											double minX, double maxX, double minY, double maxY,
-											int count, Random random) {
+											 double minX, double maxX, double minY, double maxY,
+											 int count, Random random) {
 		Map<RectangleEdge, List<Link>> edgeLinks = new EnumMap<>(RectangleEdge.class);
 		for (RectangleEdge edge : RectangleEdge.values()) {
 			edgeLinks.put(edge, new ArrayList<>());
@@ -686,3 +686,4 @@ public class RunCarrierReceiverShapleyChessboardExample {
 	}
 
 }
+
