@@ -103,8 +103,10 @@ public class RunCarrierReceiverCollabChessboardExample {
 
 		List<Integer> instances = IntStream.range(0, 5).boxed().toList();
 
-		// Design 1: finer penalty sweep
-		double[] penaltySweep = {0.0, 0.003, 0.005, 0.01, 0.015, 0.02, 0.025, 0.03, 0.035, 0.04, 0.045, 0.05};
+		/* Design 1 - finer penalty sweep: 0, 1, 2, 3, 5, 10, 20, 50, 100 euro/hr
+		 * which equals to approx. 0.0003, 0.0006, 0.0008, 0.0014, 0.0028, 0.0056, 0.014, 0.028 euro/sec
+		 */
+		double[] penaltySweep = {0, 0.0003, 0.0006, 0.0008, 0.0014, 0.0028, 0.0056, 0.014, 0.028};
 //		double[] allocSweepShort = {0.6, 0.75, 0.9};
 		double[] allocSweepShort = {0.8};
 		// Design 2: finer allocation factor sweep
@@ -119,12 +121,12 @@ public class RunCarrierReceiverCollabChessboardExample {
 			new AllocationMethodChoice("approxShapStrat", AllocationModels.APPROX_SHAPLEY, AllocationModelApproxShapleyValue.ApproximationMethod.STRATIFIED)
 		);
 
-		// Two depot scenarios
-		for (DepotScenario depotScenario : DepotScenario.values()) {
+		// Several instances/individual MATSim runs
+		for (int instance : instances) {
 			// Three customer distribution scenarios
 			for (CustomerDistributionScenario customerDistributionScenario : CustomerDistributionScenario.values()) {
-				// Several instances/individual MATSim runs
-				for (int instance : instances) {
+				// Two depot scenarios
+				for (DepotScenario depotScenario : DepotScenario.values()) {
 					// Design 1: penalty sweep
 					for (double penalty : penaltySweep) {
 						for (double allocFactor : allocSweepShort) {
@@ -153,7 +155,7 @@ public class RunCarrierReceiverCollabChessboardExample {
 
 	private static void runSingleExperiment(String tag, double allocationFactor, double receiverPenalty, AllocationMethodChoice methodChoice,
 											int instance, DepotScenario depotScenario, CustomerDistributionScenario customerDistributionScenario) {
-		String runId = "%s-%s-%s-af%.2f-p%.3f-%s-i%02d".formatted(depotScenario.label, customerDistributionScenario.name(),
+		String runId = "%s-%s-%s-af%.2f-p%.4f-%s-i%02d".formatted(depotScenario.label, customerDistributionScenario.name(),
 			tag, allocationFactor, receiverPenalty, methodChoice.label, instance);
 
 		Config config = createChessboardConfig(runId);
