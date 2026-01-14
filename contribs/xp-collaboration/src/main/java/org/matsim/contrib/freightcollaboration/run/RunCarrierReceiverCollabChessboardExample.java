@@ -278,6 +278,10 @@ public class RunCarrierReceiverCollabChessboardExample {
 		// set writing output every 5 iterations
 		config.controller().setWriteEventsInterval(10);
 		config.controller().setWritePlansInterval(10);
+		// num of threads
+		logger.info("available processors: {}", Runtime.getRuntime().availableProcessors());
+		config.global().setNumberOfThreads(4);
+		config.qsim().setNumberOfThreads(1);
 		return config;
 	}
 
@@ -302,7 +306,7 @@ public class RunCarrierReceiverCollabChessboardExample {
 			.setCapacity(3000)
 			.setFixCost(100)
 			.setCostPerDistanceUnit(4.22E-3)
-			.setCostPerTimeUnit(0.089)
+			.setCostPerTimeUnit(0.005)  // change to 0.005 euro/sec = 18 euro/hr?
 			.build();
 		lightVanType.setNetworkMode("car");
 
@@ -310,7 +314,7 @@ public class RunCarrierReceiverCollabChessboardExample {
 			.setCapacity(5000)
 			.setFixCost(150)
 			.setCostPerDistanceUnit(5.22E-3)
-			.setCostPerTimeUnit(0.109)
+			.setCostPerTimeUnit(0.006)  // change to 0.006 euro/sec = 21.6 euro/hr?
 			.build();
 		heavyVanType.setNetworkMode("car");
 
