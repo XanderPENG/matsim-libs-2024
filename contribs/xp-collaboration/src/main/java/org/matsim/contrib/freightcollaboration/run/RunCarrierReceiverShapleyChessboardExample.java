@@ -2,6 +2,8 @@ package org.matsim.contrib.freightcollaboration.run;
 
 import com.google.inject.Provider;
 import jakarta.inject.Inject;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Coord;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.Scenario;
@@ -43,6 +45,7 @@ import org.matsim.freight.receiver.*;
 import org.matsim.freight.receiver.collaboration.CollaborationUtils;
 import org.matsim.vehicles.VehicleType;
 
+import java.io.File;
 import java.net.URL;
 import java.time.Duration;
 import java.time.Instant;
@@ -59,7 +62,8 @@ import static org.matsim.freight.receiver.run.chessboard.ReceiverChessboardScena
  * - Research designs, allocation methods, and 10 instances are identical to the original example.
  */
 public class RunCarrierReceiverShapleyChessboardExample {
-
+	// Logger
+	private static Logger logger = LogManager.getLogger(RunCarrierReceiverShapleyChessboardExample.class);
 	private enum DepotScenario {
 		CENTER("center", "i(5,5)R"),
 		LEFT_CORNER("left", "i(1,0)");
@@ -153,6 +157,23 @@ public class RunCarrierReceiverShapleyChessboardExample {
 			tag, allocationFactor, receiverPenalty, methodChoice.label, instance);
 
 		Config config = createChessboardConfig(runId);
+		// Get the output directory and check if it already exists
+		String outputDir = config.controller().getOutputDirectory();
+		// If it exists, skip this experiment
+		if (new File(outputDir).exists()) {
+			logger.warn("Output directory " + outputDir + " already exists. Skipping this experiment.");
+			return;
+		} else {
+			logger.info("Running experiment with runId: " + runId);
+			Scanner scanner = new Scanner(System.in);
+			String answer = scanner.nextLine();
+
+			if (answer != null && answer.trim().equalsIgnoreCase("No")) {
+				logger.info("User chose to exit. Terminating.");
+				System.exit(0);
+			}
+		}
+
 		config.global().setRandomSeed(4711 + instance); // identical seed across depot scenarios for comparability
 		FreightCollaborationConfigGroup freightCfg = createExampleFreightCollaborationConfig();
 		freightCfg.ALLOCATION_FACTOR = allocationFactor;
