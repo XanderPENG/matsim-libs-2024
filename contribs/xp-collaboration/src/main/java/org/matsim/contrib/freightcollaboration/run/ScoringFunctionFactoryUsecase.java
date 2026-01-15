@@ -5,6 +5,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.network.Network;
+import org.matsim.api.core.v01.population.Activity;
 import org.matsim.contrib.freightcollaboration.CollaboratorRole;
 import org.matsim.contrib.freightcollaboration.FreightCollaborator;
 import org.matsim.contrib.freightcollaboration.FreightCollaborators;
@@ -15,6 +16,7 @@ import org.matsim.core.scoring.ScoringFunction;
 import org.matsim.core.scoring.SumScoringFunction;
 import org.matsim.freight.carriers.*;
 import org.matsim.freight.carriers.controller.CarrierScoringFunctionFactory;
+import org.matsim.freight.carriers.controller.FreightActivity;
 import org.matsim.freight.carriers.usecases.chessboard.CarrierScoringFunctionFactoryImpl;
 import org.matsim.freight.logistics.LSP;
 import org.matsim.freight.logistics.LSPCarrierResource;
@@ -51,7 +53,8 @@ public class ScoringFunctionFactoryUsecase {
 			SumScoringFunction sf = new SumScoringFunction();
 			sf.addScoringFunction(new CarrierScoringFunctionFactoryImpl.SimpleDriversLegScoring(carrier, network));
 			sf.addScoringFunction(new CarrierScoringFunctionFactoryImpl.SimpleVehicleEmploymentScoring(carrier));
-			sf.addScoringFunction(new CarrierScoringFunctionFactoryImpl.SimpleDriversActivityScoring());
+			// TODO: consider using a more advanced activity scoring that considering non-linear penalty for missed time windows
+			sf.addScoringFunction(new SimpleDriversActivityScoring());
 			double feePerReceiver = freightConfig != null ? freightConfig.CARRIER_CHARGED_FEE : 200.0;
 			sf.addScoringFunction(new SimpleChargingReceiverScoring(carrier, freightCollaborators, feePerReceiver));
 			sf.addScoringFunction(new retainCostSaving(carrier, dataStore));
@@ -62,8 +65,57 @@ public class ScoringFunctionFactoryUsecase {
 			SumScoringFunction sf = new SumScoringFunction();
 			sf.addScoringFunction(new CarrierScoringFunctionFactoryImpl.SimpleDriversLegScoring(carrier, network));
 			sf.addScoringFunction(new CarrierScoringFunctionFactoryImpl.SimpleVehicleEmploymentScoring(carrier));
-			sf.addScoringFunction(new CarrierScoringFunctionFactoryImpl.SimpleDriversActivityScoring());
+			sf.addScoringFunction(new SimpleDriversActivityScoring());
 			return sf;
+		}
+
+		public static class SimpleDriversActivityScoring implements SumScoringFunction.BasicScoring, SumScoringFunction.ActivityScoring {
+
+			private double score;
+			private final double timeParameter = 0.008;
+			private final double missedTimeWindowPenalty = 0.0278;  // 100euro per hour
+
+			public SimpleDriversActivityScoring() {
+				super();
+			}
+
+			@Override
+			public void finish() {
+			}
+
+			@Override
+			public double getScore() {
+				return score;
+			}
+
+			@Override
+			public void handleFirstActivity(Activity act) {
+				handleActivity(act);
+			}
+
+			@Override
+			public void handleActivity(Activity act) {
+				if(act instanceof FreightActivity) {
+					double actStartTime = act.getStartTime().seconds();
+
+					TimeWindow tw = ((FreightActivity) act).getTimeWindow();
+					if(actStartTime > tw.getEnd()){
+						double penalty_score = (-1)*(actStartTime - tw.getEnd())*missedTimeWindowPenalty;
+						if (!(penalty_score <= 0.0)) throw new AssertionError("penalty score must be negative");
+						score += penalty_score;
+
+					}
+					double actTimeCosts = (act.getEndTime().seconds() -actStartTime)*timeParameter;
+					if (!(actTimeCosts >= 0.0)) throw new AssertionError("actTimeCosts must be positive");
+					score += actTimeCosts*(-1);
+				}
+			}
+
+			@Override
+			public void handleLastActivity(Activity act) {
+				handleActivity(act);
+			}
+
 		}
 
 		public static class SimpleChargingReceiverScoring implements SumScoringFunction.BasicScoring {

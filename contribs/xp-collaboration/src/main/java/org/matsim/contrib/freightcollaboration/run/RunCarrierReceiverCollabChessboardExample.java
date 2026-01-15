@@ -114,11 +114,12 @@ public class RunCarrierReceiverCollabChessboardExample {
 		double[] allocSweepLong = IntStream.range(0, 12).mapToDouble(i -> 0.4 + 0.05 * i).toArray();
 
 		List<AllocationMethodChoice> methods = List.of(
-			new AllocationMethodChoice("exactShapley", AllocationModels.SHAPLEY, null),
-			new AllocationMethodChoice("marginal", AllocationModels.MARGINAL, null),
-			new AllocationMethodChoice("proportional", AllocationModels.PROPORTIONAL, null),
-			new AllocationMethodChoice("approxShapMC", AllocationModels.APPROX_SHAPLEY, AllocationModelApproxShapleyValue.ApproximationMethod.MONTE_CARLO),
-			new AllocationMethodChoice("approxShapStrat", AllocationModels.APPROX_SHAPLEY, AllocationModelApproxShapleyValue.ApproximationMethod.STRATIFIED)
+			new AllocationMethodChoice("exactShapley", AllocationModels.SHAPLEY, null)
+			// NOTE: Other methods commented out to reduce computation time, only exact Shapley is run for test case
+//			new AllocationMethodChoice("marginal", AllocationModels.MARGINAL, null),
+//			new AllocationMethodChoice("proportional", AllocationModels.PROPORTIONAL, null),
+//			new AllocationMethodChoice("approxShapMC", AllocationModels.APPROX_SHAPLEY, AllocationModelApproxShapleyValue.ApproximationMethod.MONTE_CARLO),
+//			new AllocationMethodChoice("approxShapStrat", AllocationModels.APPROX_SHAPLEY, AllocationModelApproxShapleyValue.ApproximationMethod.STRATIFIED)
 		);
 
 		// Several instances/individual MATSim runs
@@ -305,16 +306,16 @@ public class RunCarrierReceiverCollabChessboardExample {
 		VehicleType lightVanType = CarrierVehicleType.Builder.newInstance(Id.create("light", VehicleType.class))
 			.setCapacity(3000)
 			.setFixCost(100)
-			.setCostPerDistanceUnit(4.22E-3)
-			.setCostPerTimeUnit(0.005)  // change to 0.005 euro/sec = 18 euro/hr?
+			.setCostPerDistanceUnit(8.5E-4)
+			.setCostPerTimeUnit(0.0125)  // change to 0.005 euro/sec = 18 euro/hr?
 			.build();
 		lightVanType.setNetworkMode("car");
 
 		VehicleType heavyVanType = CarrierVehicleType.Builder.newInstance(Id.create("heavy", VehicleType.class))
 			.setCapacity(5000)
 			.setFixCost(150)
-			.setCostPerDistanceUnit(5.22E-3)
-			.setCostPerTimeUnit(0.006)  // change to 0.006 euro/sec = 21.6 euro/hr?
+			.setCostPerDistanceUnit(1.22E-3)
+			.setCostPerTimeUnit(0.0167)  // change to 0.006 euro/sec = 21.6 euro/hr?
 			.build();
 		heavyVanType.setNetworkMode("car");
 
