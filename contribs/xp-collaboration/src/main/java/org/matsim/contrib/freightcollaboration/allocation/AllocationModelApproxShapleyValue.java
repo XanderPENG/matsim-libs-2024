@@ -29,6 +29,8 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 	private int monteCarloSamples = 20;
 	private double samplesRatio = 0.4;
 	private int stratifiedSamplesPerLevel = 20;
+	/** Hard cap on unique sub-coalitions evaluated per coalition when using stratified sampling. */
+	private int maxStratifiedEvaluations = 400;
 
 	public AllocationModelApproxShapleyValue(CollaborationDataStore collaborationDataStore,
 											 FreightPseudoSimulator freightPseudoSimulator,
@@ -65,6 +67,14 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 
 	public void setRandomSeed(long seed) {
 		random.setSeed(seed);
+	}
+
+	/** Limit the total pseudo-sim evaluations performed by the stratified sampler (per coalition). */
+	public void setMaxStratifiedEvaluations(int maxStratifiedEvaluations) {
+		if (maxStratifiedEvaluations <= 0) {
+			throw new IllegalArgumentException("maxStratifiedEvaluations must be positive.");
+		}
+		this.maxStratifiedEvaluations = maxStratifiedEvaluations;
 	}
 
 	@Override
@@ -165,14 +175,86 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 		valueCache.computeIfAbsent(Set.of(), k -> useCostSavings ? 0.0 : baselineRaw);
 		rawValueCache.computeIfAbsent(Set.of(), k -> baselineRaw);
 
+		// Adaptively compute samples per level based on n and maxStratifiedEvaluations
+		int adaptiveSamplesPerLevel = computeAdaptiveSamplesPerLevel(n);
+		long totalExactCoalitions = (long) Math.pow(2, n);
+
+		logger.info("Stratified Shapley: n={}, adaptiveSamplesPerLevel={}, maxEvaluations={}, exactCoalitions={}",
+					n, adaptiveSamplesPerLevel, maxStratifiedEvaluations, totalExactCoalitions);
+
+		// Phase 1: sample once, remember the subsets per player/stratum, and collect the
+		// unique coalitions that actually need simulation. This avoids repeated psim runs
+		// during the Shapley accumulation.
+		Map<Id<?>, Map<Integer, List<Set<Id<?>>>>> sampledByPlayer = new HashMap<>();
+		Set<Set<Id<?>>> subsetsToEvaluate = new HashSet<>();
+
 		for (Id<?> playerId : playerList) {
-			double shapleyEstimate = 0.0;
+			Map<Integer, List<Set<Id<?>>>> perK = new HashMap<>();
 			for (int k = 0; k <= n - 1; k++) {
-				double weight = 1.0 / n; // each subset size contributes equally in expectation
 				long combCount = combination(n - 1, k);
-				int baseSamples = Math.max(1, stratifiedSamplesPerLevel);
+				int baseSamples = Math.max(1, adaptiveSamplesPerLevel);
 				int samples = (int) Math.min(combCount, Math.max(1, Math.round(baseSamples * samplesRatio)));
 				List<Set<Id<?>>> sampledSubsets = sampleSubsetsWithoutReplacement(playerList, playerId, k, samples, random);
+				perK.put(k, sampledSubsets);
+				subsetsToEvaluate.addAll(sampledSubsets);
+				for (Set<Id<?>> subset : sampledSubsets) {
+					Set<Id<?>> withPlayer = new HashSet<>(subset);
+					withPlayer.add(playerId);
+					subsetsToEvaluate.add(withPlayer);
+				}
+			}
+			sampledByPlayer.put(playerId, perK);
+		}
+
+		// Optional pruning: if the union of sampled coalitions is still too large, shrink
+		// every per-stratum sample list proportionally so total evaluations stay under the cap.
+		int coalitionsBeforePruning = subsetsToEvaluate.size();
+		if (subsetsToEvaluate.size() > maxStratifiedEvaluations) {
+			logger.info("Pruning coalitions: before={}, cap={}", subsetsToEvaluate.size(), maxStratifiedEvaluations);
+			double keepRatio = (double) maxStratifiedEvaluations / subsetsToEvaluate.size();
+			sampledByPlayer.replaceAll((pid, perK) -> {
+				Map<Integer, List<Set<Id<?>>>> pruned = new HashMap<>();
+				perK.forEach((k, list) -> {
+					int keep = Math.max(1, (int) Math.ceil(list.size() * keepRatio));
+					Collections.shuffle(list, random);
+					pruned.put(k, new ArrayList<>(list.subList(0, keep)));
+				});
+				return pruned;
+			});
+			// rebuild the evaluation set from pruned lists
+			subsetsToEvaluate.clear();
+			for (Map.Entry<Id<?>, Map<Integer, List<Set<Id<?>>>>> entry : sampledByPlayer.entrySet()) {
+				Id<?> pid = entry.getKey();
+				for (List<Set<Id<?>>> subsets : entry.getValue().values()) {
+					for (Set<Id<?>> subset : subsets) {
+						subsetsToEvaluate.add(subset);
+						Set<Id<?>> withPlayer = new HashSet<>(subset);
+						withPlayer.add(pid);
+						subsetsToEvaluate.add(withPlayer);
+					}
+				}
+			}
+			logger.info("After pruning: {} coalitions (reduced by {}%)",
+						subsetsToEvaluate.size(),
+						String.format("%.1f", 100.0 * (1 - (double)subsetsToEvaluate.size() / coalitionsBeforePruning)));
+		}
+
+		logger.info("Total unique coalitions to evaluate: {} (exact would be: {})",
+					subsetsToEvaluate.size(), totalExactCoalitions);
+
+		// Phase 2: evaluate every unique coalition only once; cached results are reused
+		// in the accumulation below.
+		for (Set<Id<?>> subset : subsetsToEvaluate) {
+			evaluateSubCoalition(distributors, players, valueCache, rawValueCache, baselineRaw, subset);
+		}
+
+		// Phase 3: accumulate Shapley estimates from the cached values.
+		for (Id<?> playerId : playerList) {
+			double shapleyEstimate = 0.0;
+			Map<Integer, List<Set<Id<?>>>> perK = sampledByPlayer.get(playerId);
+			for (int k = 0; k <= n - 1; k++) {
+				double weight = 1.0 / n; // each subset size contributes equally in expectation
+				List<Set<Id<?>>> sampledSubsets = perK.get(k);
 				double marginalSum = 0.0;
 				for (Set<Id<?>> subset : sampledSubsets) {
 					double valueWithout = evaluateSubCoalition(distributors, players, valueCache, rawValueCache, baselineRaw, subset);
@@ -191,6 +273,53 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 		return shapleyValues;
 	}
 
+	/**
+	 * Adaptively compute the number of samples per level based on n and maxStratifiedEvaluations.
+	 * The goal is to avoid over-sampling for small n while maintaining good approximation for large n.
+	 *
+	 * Strategy:
+	 * - For small n (≤12): Use aggressive reduction to avoid generating more coalitions than exact method
+	 * - For medium n (13-20): Scale samples based on target evaluation budget
+	 * - For large n (>20): Use user-configured stratifiedSamplesPerLevel
+	 *
+	 * @param n Number of players
+	 * @return Adaptive samples per level
+	 */
+	private int computeAdaptiveSamplesPerLevel(int n) {
+		// For very small n, exact computation is more efficient
+		if (n <= 8) {
+			return 2;  // Minimal sampling, exact would be better
+		}
+
+		// For small n (9-12), use conservative sampling
+		if (n <= 12) {
+			// Target: ~200-400 total coalitions for n=10-12
+			// Rough formula: totalCoalitions ≈ n * n * 2 * samples / deduplicationFactor
+			// With deduplicationFactor ≈ 3 for small n:
+			// samples ≈ maxStratifiedEvaluations * 3 / (n * n * 2)
+			double targetSamples = (maxStratifiedEvaluations * 2.5) / (n * n * 2.0);
+			return Math.max(2, Math.min((int) Math.ceil(targetSamples), stratifiedSamplesPerLevel));
+		}
+
+		// For medium n (13-20), scale based on budget
+		if (n <= 20) {
+			// Gradually increase samples as n grows
+			// For n=15: aim for ~60% of maxStratifiedEvaluations
+			// For n=20: aim for ~80% of maxStratifiedEvaluations
+			double targetRatio = 0.5 + (n - 13) * 0.04;  // 0.5 at n=13, 0.78 at n=20
+			double targetSamples = (maxStratifiedEvaluations * targetRatio) / (n * n * 2.0);
+			return Math.max(3, Math.min((int) Math.ceil(targetSamples), stratifiedSamplesPerLevel));
+		}
+
+		// For large n (>20), use configured value or scale based on extreme growth
+		if (n <= 25) {
+			return stratifiedSamplesPerLevel;
+		}
+
+		// For very large n, might need even more samples for accuracy
+		return Math.min(stratifiedSamplesPerLevel * 2, 50);
+	}
+
 	private List<Set<Id<?>>> sampleSubsetsWithoutReplacement(List<Id<?>> playerList, Id<?> excludedPlayer, int subsetSize, int samples, Random rnd) {
 		List<Id<?>> candidates = new ArrayList<>();
 		for (Id<?> id : playerList) {
@@ -206,12 +335,15 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 		if (totalComb <= samples && totalComb <= 10000) {
 			return enumerateCombinations(candidates, subsetSize, target);
 		}
-		List<Set<Id<?>>> result = new ArrayList<>();
-		for (int i = 0; i < target; i++) {
+		Set<Set<Id<?>>> result = new HashSet<>();
+		int attempts = 0;
+		int maxAttempts = target * 10; // safeguard against degenerate loops
+		while (result.size() < target && attempts < maxAttempts) {
 			Collections.shuffle(candidates, rnd);
 			result.add(new HashSet<>(candidates.subList(0, subsetSize)));
+			attempts++;
 		}
-		return result;
+		return new ArrayList<>(result);
 	}
 
 	private List<Set<Id<?>>> enumerateCombinations(List<Id<?>> elements, int k, int limit) {
