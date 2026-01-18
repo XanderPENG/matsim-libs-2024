@@ -126,12 +126,11 @@ public class RunLeuvenCarrierReceiverCollabExample {
 		double allocSweepShort = 0.8;
 
 		List<AllocationMethod> methods = List.of(
-			AllocationMethod.SHAPLEY
-			// NOTE: Other methods commented out to reduce computation time, only exact Shapley is run for test case
-//			new AllocationMethodChoice("marginal", AllocationModels.MARGINAL, null),
-//			new AllocationMethodChoice("proportional", AllocationModels.PROPORTIONAL, null),
-//			new AllocationMethodChoice("approxShapMC", AllocationModels.APPROX_SHAPLEY, AllocationModelApproxShapleyValue.ApproximationMethod.MONTE_CARLO),
-//			new AllocationMethodChoice("approxShapStrat", AllocationModels.APPROX_SHAPLEY, AllocationModelApproxShapleyValue.ApproximationMethod.STRATIFIED)
+//			AllocationMethod.SHAPLEY,
+			AllocationMethod.MARGINAL,
+			AllocationMethod.PROPORTIONAL,
+			AllocationMethod.APPROX_SHAPLEY_MC,
+			AllocationMethod.APPROX_SHAPLEY_STRATIFIED
 		);
 
 		for (ReceiverSpatialDistribution distribution : ReceiverSpatialDistribution.values()) {
