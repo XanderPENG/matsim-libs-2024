@@ -55,7 +55,7 @@ public class FreightPseudoSimulator {
 
 	private static Logger LOGGER = LogManager.getLogger(FreightPseudoSimulator.class);
 	/** Upper bound for jsprit iterations during sampling; keeps Shapley runs lightweight. */
-	private int vrpMaxIterations = 200;
+	private int vrpMaxIterations = 100;
 
 //	FreightPseudoSimulator() {}
 

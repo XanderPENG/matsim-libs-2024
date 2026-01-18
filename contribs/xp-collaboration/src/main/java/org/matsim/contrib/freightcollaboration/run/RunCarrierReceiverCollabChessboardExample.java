@@ -658,7 +658,7 @@ public class RunCarrierReceiverCollabChessboardExample {
 		}
 	}
 
-	private static class MyCarrierPlanStrategyManagerProvider implements Provider<CarrierStrategyManager> {
+	public static class MyCarrierPlanStrategyManagerProvider implements Provider<CarrierStrategyManager> {
 		private final CarrierVehicleTypes types;
 		@Inject
 		private org.matsim.api.core.v01.network.Network network;

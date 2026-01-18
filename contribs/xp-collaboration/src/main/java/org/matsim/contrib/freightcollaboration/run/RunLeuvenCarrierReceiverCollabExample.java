@@ -3,19 +3,44 @@ package org.matsim.contrib.freightcollaboration.run;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Id;
+import org.matsim.api.core.v01.Scenario;
 import org.matsim.api.core.v01.network.Link;
+import org.matsim.contrib.freightcollaboration.CollaboratorRole;
+import org.matsim.contrib.freightcollaboration.FreightCollaborators;
 import org.matsim.contrib.freightcollaboration.allocation.AllocationModelApproxShapleyValue;
 import org.matsim.contrib.freightcollaboration.allocation.AllocationModels;
 import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfigGroup;
+import org.matsim.contrib.freightcollaboration.controller.CollaborationModule;
+import org.matsim.contrib.freightcollaboration.controller.CollaboratorModules;
+import org.matsim.contrib.freightcollaboration.utils.LinkFreightAgentToFreightCollaborator;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
+import org.matsim.core.controler.AbstractModule;
+import org.matsim.core.controler.Controler;
 import org.matsim.core.controler.OutputDirectoryHierarchy;
+import org.matsim.core.scenario.ScenarioUtils;
+import org.matsim.freight.carriers.*;
+import org.matsim.freight.carriers.controller.CarrierModule;
+import org.matsim.freight.carriers.controller.CarrierScoringFunctionFactory;
+import org.matsim.freight.carriers.controller.CarrierStrategyManager;
+import org.matsim.freight.carriers.usecases.analysis.CarrierScoreStats;
+import org.matsim.freight.receiver.*;
+import org.matsim.freight.receiver.collaboration.CollaborationUtils;
+import org.matsim.vehicles.VehicleType;
 
+import java.io.BufferedReader;
 import java.io.File;
-import java.util.Map;
-import java.util.Set;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.*;
+import java.util.stream.IntStream;
+import java.util.zip.GZIPInputStream;
 
 import static org.matsim.contrib.freightcollaboration.run.RunCarrierReceiverCollabChessboardExample.createExampleFreightCollaborationConfig;
+import static org.matsim.freight.receiver.run.chessboard.ReceiverChessboardScenario.writeFreightScenario;
 
 /**
  * This run example aims to demonstrate how carrier-receiver collaborate in a pseudo-realistic scenario (Leuven).
@@ -93,6 +118,33 @@ public class RunLeuvenCarrierReceiverCollabExample {
 
 	public static void main(String[] args) {
 
+		List<Integer> instances = IntStream.range(0, 2).boxed().toList();
+		int instance = 1;
+
+		double[] penaltySweep = {0, 0.0003, 0.0006, 0.0008, 0.0014, 0.0028, 0.0056, 0.0098, 0.014, 0.028};
+//		double[] allocSweepShort = {0.6, 0.75, 0.9};
+		double allocSweepShort = 0.8;
+
+		List<AllocationMethod> methods = List.of(
+			AllocationMethod.SHAPLEY
+			// NOTE: Other methods commented out to reduce computation time, only exact Shapley is run for test case
+//			new AllocationMethodChoice("marginal", AllocationModels.MARGINAL, null),
+//			new AllocationMethodChoice("proportional", AllocationModels.PROPORTIONAL, null),
+//			new AllocationMethodChoice("approxShapMC", AllocationModels.APPROX_SHAPLEY, AllocationModelApproxShapleyValue.ApproximationMethod.MONTE_CARLO),
+//			new AllocationMethodChoice("approxShapStrat", AllocationModels.APPROX_SHAPLEY, AllocationModelApproxShapleyValue.ApproximationMethod.STRATIFIED)
+		);
+
+		for (ReceiverSpatialDistribution distribution : ReceiverSpatialDistribution.values()) {
+			for (DepotLocation depotLocation : DepotLocation.values()) {
+				for (double penalty : penaltySweep){
+					for (AllocationMethod allocationMethod : methods) {
+						runSingleLeuvenScenario(instance, "leuvenCRCollab", distribution, depotLocation,
+								allocationMethod, allocSweepShort, penalty);
+					}
+				}
+			}
+
+		}
 	}
 
 	private static void runSingleLeuvenScenario(int instanceId, String tag,
@@ -115,6 +167,77 @@ public class RunLeuvenCarrierReceiverCollabExample {
 
 		// Create freight collaboration config group and set parameters
 		FreightCollaborationConfigGroup freightCollaborationConfigGroup = createExampleFreightCollaborationConfig();
+		freightCollaborationConfigGroup.ALLOCATION_FACTOR = allocationFactor;
+		freightCollaborationConfigGroup.RECEIVER_RELAXATION_PENALTY = receiverCollaborationPenalty;
+		freightCollaborationConfigGroup.ALLOCATION_MODEL = allocationMethod.model;
+		if (allocationMethod.model == AllocationModels.APPROX_SHAPLEY && allocationMethod.approxMethod != null) {
+			freightCollaborationConfigGroup.APPROX_SHAPLEY_METHOD = allocationMethod.approxMethod.name();
+		}
+		config.addModule(freightCollaborationConfigGroup);
+
+		// Load scenario
+		Scenario scenario = ScenarioUtils.loadScenario(config);
+
+		// Generate carriers based on the specified depot locations
+		Carriers carriers = generateSecenarioCarriers(depotLocation);
+		// Add generated carriers to the scenario
+		Carriers scenarioCarriers = CarriersUtils.addOrGetCarriers(scenario);
+		for (var carrier : carriers.getCarriers().values()) {
+			scenarioCarriers.addCarrier(carrier);
+		}
+
+		// Add receiver config group and set replanning type to timeWindow
+		ReceiverConfigGroup receiverConfigGroup = ConfigUtils.addOrGetModule(scenario.getConfig(), ReceiverConfigGroup.class);
+		receiverConfigGroup.setReplanningType(ReceiverReplanningType.timeWindow);
+
+		// Add receivers and orders
+		Receivers receivers = generateScenarioReceivers(scenario, carriers, distribution, instanceId);
+		ReceiverUtils.setReceivers(receivers, scenario);
+
+		// Some settings for the Receivers package
+		writeFreightScenario(scenario);
+		CollaborationUtils.linkReceiverOrdersToCarriers(ReceiverUtils.getReceivers(scenario), CarriersUtils.getCarriers(scenario));
+		CollaborationUtils.createCoalitionWithCarriersAndAddCollaboratingReceivers(scenario);
+
+		Controler controler = new Controler(scenario);
+
+		ReceiverModule receiverModule = new ReceiverModule(ReceiverUtils.createFixedReceiverCostAllocation(freightCollaborationConfigGroup.RECEIVER_FIXED_FEE));
+		receiverModule.setReplanningType(ReceiverReplanningType.timeWindow);
+
+		FreightCollaborators freightCollaborators = new FreightCollaborators();
+		for (Carrier carrier : CarriersUtils.getCarriers(scenario).getCarriers().values()) {
+			var carrierCollaborator = LinkFreightAgentToFreightCollaborator.map(carrier, true);
+			freightCollaborators.addFreightCollaborator(carrierCollaborator);
+		}
+		for (Receiver receiver : ReceiverUtils.getReceivers(scenario).getReceivers().values()) {
+			var receiverCollaborator = LinkFreightAgentToFreightCollaborator.map(receiver, true);
+			freightCollaborators.addFreightCollaborator(receiverCollaborator);
+		}
+
+		CollaboratorModules collaboratorModules = new CollaboratorModules(Map.of(CollaboratorRole.RECEIVER, receiverModule,
+			CollaboratorRole.CARRIER, new CarrierModule()));
+		CollaborationModule collaborationModule = new CollaborationModule(collaboratorModules, freightCollaborators, scenario);
+
+		collaborationModule.installAllCollaboratorModules(controler);
+		controler.addOverridingModule(collaborationModule);
+
+		CarrierVehicleTypes carrierVehicleTypes = CarrierVehicleTypes.getVehicleTypes(scenarioCarriers);
+		CarrierVehicleTypes types = CarriersUtils.getCarrierVehicleTypes(scenario);
+		types.getVehicleTypes().putAll(carrierVehicleTypes.getVehicleTypes());
+
+		controler.addOverridingModule(new AbstractModule() {
+			@Override
+			public void install() {
+				bind(CarrierStrategyManager.class).toProvider(new RunCarrierReceiverCollabChessboardExample.MyCarrierPlanStrategyManagerProvider(types));
+				bind(CarrierScoringFunctionFactory.class).to(ScoringFunctionFactoryUsecase.CarrierScoringFunctionFactoryUsecase.class);
+				bind(ReceiverScoringFunctionFactory.class).to(ScoringFunctionFactoryUsecase.ReceiverScoringFunctionFactoryUsecase.class);
+			}
+		});
+
+		CarrierScoreStats scoreStats = new CarrierScoreStats(CarriersUtils.getCarriers(controler.getScenario()), controler.getScenario().getConfig().controller().getOutputDirectory() + "/carrier_scores", true);
+		controler.addControlerListener(scoreStats);
+		controler.run();
+
 	}
 
 	private static Config createConfig(String runId) {
@@ -129,6 +252,186 @@ public class RunLeuvenCarrierReceiverCollabExample {
 		config.controller().setWritePlansInterval(10);
 		config.global().setNumberOfThreads(4);
 		return config;
+	}
+
+	private static Carriers generateSecenarioCarriers(DepotLocation depotLocation){
+		Carriers carriers = new Carriers();
+
+		VehicleType lightVanType = CarrierVehicleType.Builder.newInstance(Id.create("light", VehicleType.class))
+			.setCapacity(3000)
+			.setFixCost(100)
+			.setCostPerDistanceUnit(8.5E-4)
+			.setCostPerTimeUnit(0.0125)  // change to 0.005 euro/sec = 18 euro/hr?
+			.build();
+		lightVanType.setNetworkMode("car");
+
+		VehicleType heavyVanType = CarrierVehicleType.Builder.newInstance(Id.create("heavy", VehicleType.class))
+			.setCapacity(5000)
+			.setFixCost(150)
+			.setCostPerDistanceUnit(1.22E-3)
+			.setCostPerTimeUnit(0.0167)  // change to 0.006 euro/sec = 21.6 euro/hr?
+			.build();
+		heavyVanType.setNetworkMode("car");
+
+		for (Id<Link> depotLinkId : depotLocation.depotLinkIds) {
+			String carrierIdStr = "carrier_" + depotLinkId.toString();
+			Carrier carrier = CarriersUtils.createCarrier(Id.create(carrierIdStr, Carrier.class));
+
+			CarrierVehicle lightVan = CarrierVehicle.Builder.newInstance(
+					Id.createVehicleId("lightVan_" + carrierIdStr),
+					Id.createLinkId(depotLinkId),
+					lightVanType)
+				.setEarliestStart(5 * 60 * 60)
+				.build();
+
+			CarrierVehicle heavyVan = CarrierVehicle.Builder.newInstance(
+					Id.createVehicleId("heavyVan_" + carrierIdStr),
+					Id.createLinkId(depotLinkId),
+					heavyVanType)
+				.setEarliestStart(5 * 60 * 60)
+				.build();
+
+			CarrierCapabilities carrierCapabilities1 = CarrierCapabilities.Builder.newInstance()
+				.addVehicle(lightVan)
+				.addVehicle(heavyVan)
+				.setFleetSize(CarrierCapabilities.FleetSize.INFINITE)
+				.build();
+			carrier.setCarrierCapabilities(carrierCapabilities1);
+			carriers.addCarrier(carrier);
+		}
+
+		return carriers;
+	}
+
+	private static Receivers generateScenarioReceivers(Scenario scenario,
+													   Carriers carriers,
+													   ReceiverSpatialDistribution distribution,
+													   int instanceId) {
+		Receivers receivers = ReceiverUtils.createReceivers();
+
+		Map<Id<Link>, String> receiverLocations = readReceiverLocation(instanceId, distribution);
+
+		for (Id<Link> locationLinkId: receiverLocations.keySet()) {
+			Receiver receiver = ReceiverUtils.newInstance(Id.create("receiver_"+locationLinkId.toString(), Receiver.class));
+			receiver.setLinkId(locationLinkId);
+			receiver.getAttributes().putAttribute(CollaborationUtils.ATTR_GRANDCOALITION_MEMBER, true);
+			receiver.getAttributes().putAttribute(CollaborationUtils.ATTR_COLLABORATION_STATUS, true);
+			// Add affiliated carrier ID as an attribute
+			receiver.getAttributes().putAttribute("affiliatedCarrierId", receiverLocations.get(locationLinkId));
+			receivers.addReceiver(receiver);
+		}
+
+
+
+		// Create a map <keys: carrierId (values in receiverLocations), values: Carrier object>
+		Map<String, Carrier> carrierMap = new HashMap<>();
+		Set<String> receiverLinkedCarrierIds = new HashSet<>(receiverLocations.values());
+		Iterator<String> receiverLinkedCarrierId = receiverLinkedCarrierIds.iterator();
+		for (Carrier carrier: carriers.getCarriers().values()){
+			carrierMap.put(receiverLinkedCarrierId.next(), carrier);
+		}
+
+		// Generate orders for each receiver from its affiliated carrier
+		for (Receiver receiver: receivers.getReceivers().values()) {
+			generateReceiverOrders(carrierMap.get(receiver.getAttributes().getAttribute("affiliatedCarrierId")),
+				receivers, receiver);
+		}
+
+		return receivers;
+	}
+
+	/**
+	 * Read csv.gz file containing generated receiver locations and affiliated carriers
+	 */
+	private static Map<Id<Link>, String> readReceiverLocation (int instanceId, ReceiverSpatialDistribution distribution){
+		final String filePath;
+		if (distribution == ReceiverSpatialDistribution.CLUSTERED) {
+			filePath = "data/randomDemand100Receivers/clustered/location_i%02d.csv.gz".formatted(instanceId);
+		} else if (distribution == ReceiverSpatialDistribution.DISPERSED) {
+			filePath = "data/randomDemand100Receivers/dispersed/location_i%02d.csv.gz".formatted(instanceId);
+		} else {
+			throw new IllegalArgumentException("Unsupported receiver spatial distribution: " + distribution);
+		}
+
+		// csv.gz: place_id, carrier_id, matched_link_id
+		// return: key=matched_link_id, value=carrier_id
+		Map<Id<Link>, String> linkId2CarrierId = new HashMap<>();
+		Path path = Path.of(filePath);
+		try (BufferedReader reader = new BufferedReader(new InputStreamReader(new GZIPInputStream(Files.newInputStream(path)), StandardCharsets.UTF_8))) {
+			String header = reader.readLine();
+			if (header == null) {
+				throw new IllegalStateException("Empty receiver location file: " + filePath);
+			}
+
+			String line;
+			int lineNo = 1;
+			while ((line = reader.readLine()) != null) {
+				lineNo++;
+				if (line.isBlank()) continue;
+
+				String[] tokens = line.split(",");
+				if (tokens.length < 3) {
+					throw new IllegalArgumentException("Invalid csv line (expected 3 columns) at " + filePath + ":" + lineNo + " -> " + line);
+				}
+
+				String carrierId = tokens[1].trim();
+				String matchedLinkIdStr = tokens[2].trim();
+				Id<Link> linkId = Id.createLinkId(matchedLinkIdStr);
+
+				String previous = linkId2CarrierId.put(linkId, carrierId);
+				if (previous != null && !previous.equals(carrierId)) {
+					logger.warn("Duplicate matched_link_id {} mapped to different carrier_id ({} -> {}). Keeping the latest.", linkId, previous, carrierId);
+				}
+			}
+		} catch (IOException e) {
+			throw new RuntimeException("Failed to read receiver location file: " + filePath, e);
+		}
+
+		return linkId2CarrierId;
+	}
+
+	private static void generateReceiverOrders(Carrier carrier,
+											   Receivers receivers,
+											   Receiver receiver) {
+
+		ProductType productType = ReceiverUtils.createAndGetProductType(receivers, Id.create("productType1", ProductType.class),
+			carrier.getCarrierCapabilities().getCarrierVehicles().values().iterator().next().getLinkId());
+		productType.setRequiredCapacity(5);
+
+		ReceiverProduct receiverProduct = ReceiverProduct.Builder.newInstance()
+			.setProductType(productType)
+			.setReorderingPolicy(ReceiverUtils.createSSReorderPolicy(100, 200))
+			.build();
+		receiver.addProduct(receiverProduct);
+
+		Collection<Order> orders = new ArrayList<>();
+		Order order = Order.Builder.newInstance(Id.create("Order"+receiver.getId().toString(), Order.class), receiver, receiverProduct)
+			.setServiceTime(10*60)
+			.buildWithCalculatedOrderQuantity();
+		orders.add(order);
+
+		ReceiverOrder receiverOrder = new ReceiverOrder(receiver.getId(), orders, carrier.getId());
+
+		ReceiverPlan receiverPlan = ReceiverPlan.Builder.newInstance(receiver, true)
+			.addReceiverOrder(receiverOrder)
+			.addTimeWindow(TimeWindow.newInstance(6*60*60, 8*60*60))
+			.build();
+
+		receiver.addPlan(receiverPlan);
+		receiver.setSelectedPlan(receiverPlan);
+
+		Id<CarrierShipment> shipmentId = Id.create("shipment_" + receiverOrder.getReceiverId(), CarrierShipment.class);
+
+		CarrierShipment shipment = CarrierShipment.Builder.newInstance(
+				shipmentId,
+				carrier.getCarrierCapabilities().getCarrierVehicles().values().iterator().next().getLinkId(),
+				receiver.getLinkId(),
+				1)
+			.setPickupDuration(300)
+			.setDeliveryDuration(300)
+			.build();
+
+		CarriersUtils.addShipment(carrier, shipment);
 	}
 
 
