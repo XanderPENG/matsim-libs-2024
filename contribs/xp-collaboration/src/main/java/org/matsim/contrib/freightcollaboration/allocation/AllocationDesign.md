@@ -181,3 +181,17 @@
 - Pseudo-sim uses static `TravelTime` from the last mobsim iteration; it does not feed back into demand — this is intentional for tractability.
 - Focus on carriers first; LSP/receiver support can mirror carriers once plan structures and scoring needs are clarified.
 
+## Parallelization
+The CodeX design the parallelization of the coalition PSim and scoring as follows (It works well now with the Leuven scenario):
+- Parallel coalition scoring/allocation now runs on a pooled executor in contribs/xp-collaboration/src/main/java/org/matsim/contrib/freightcollaboration/allocation/
+FreightCollaborationEngine.java: a shared ExecutorService is created using configurable parallelism, each coalition builds its own FreightPseudoSimulator (with VRP
+iterations pulled from config), sub-coalition scores are computed concurrently, buffered, then merged before allocation.
+- Approximate Shapley allocation was refactored for concurrency in .../allocation/AllocationModelApproxShapleyValue.java: per-coalition tasks keep their own pseudo-
+  simulator and seeded Random, caches stay local, results are merged thread-safely, and the shared executor is used when parallelism >1; negative contribution clipping
+  is preserved.
+- Configuration now surfaces PARALLELISM (0/auto -> available processors) and VRP_MAX_ITERATIONS with validation in .../config/FreightCollaborationConfigGroup.java;
+  these flow into the pseudo-simulator through the engine.
+- CollaborationDataStore uses a concurrent map for simulated coalition scores to avoid race conditions when multiple coalition tasks write results (.../allocation/
+  CollaborationDataStore.java).
+- AllocationUtils.createAllocationModel now accepts a pseudo-sim supplier and executor so allocation models can opt into parallel execution (.../utils/
+  AllocationUtils.java).

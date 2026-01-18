@@ -172,6 +172,8 @@ public class RunLeuvenCarrierReceiverCollabExample {
 		if (allocationMethod.model == AllocationModels.APPROX_SHAPLEY && allocationMethod.approxMethod != null) {
 			freightCollaborationConfigGroup.APPROX_SHAPLEY_METHOD = allocationMethod.approxMethod.name();
 		}
+		freightCollaborationConfigGroup.setVrpMaxIterations(50);
+		freightCollaborationConfigGroup.setParallelism(4);
 		config.addModule(freightCollaborationConfigGroup);
 
 		// Load scenario

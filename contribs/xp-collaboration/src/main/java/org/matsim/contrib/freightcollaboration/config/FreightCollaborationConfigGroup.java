@@ -38,6 +38,20 @@ public class FreightCollaborationConfigGroup extends ReflectiveConfigGroup {
 	@Parameter
 	public String INPUT_NETWORK_FILE;
 
+	/**
+	 * Maximum iterations for VRP solver inside FreightPseudoSimulator.
+	 * Kept configurable so sampling-heavy runs can trade accuracy for speed.
+	 */
+	@Parameter
+	public int VRP_MAX_ITERATIONS = 200;
+
+	/**
+	 * Thread pool size used for coalition evaluation/allocation.
+	 * 0 or negative values will be interpreted as "use available processors".
+	 */
+	@Parameter
+	public int PARALLELISM = Runtime.getRuntime().availableProcessors();
+
 	// Allocation model set, Proportional allocation by default
 	public AllocationModels ALLOCATION_MODEL = AllocationModels.APPROX_SHAPLEY;
 
@@ -154,6 +168,32 @@ public class FreightCollaborationConfigGroup extends ReflectiveConfigGroup {
 
 	public AllocationValueTypes getAllocationStrategy() {
 		return ALLOCATION_STRATEGY;
+	}
+
+	public int getVrpMaxIterations() {
+		return VRP_MAX_ITERATIONS;
+	}
+
+	public void setVrpMaxIterations(int vrpMaxIterations) {
+		if (vrpMaxIterations <= 0) {
+			throw new IllegalArgumentException("VRP_MAX_ITERATIONS must be positive.");
+		}
+		this.VRP_MAX_ITERATIONS = vrpMaxIterations;
+	}
+
+	public int getParallelism() {
+		return PARALLELISM > 0 ? PARALLELISM : Runtime.getRuntime().availableProcessors();
+	}
+
+	public void setParallelism(int parallelism) {
+		if (parallelism == 0) {
+			this.PARALLELISM = Runtime.getRuntime().availableProcessors();
+			return;
+		}
+		if (parallelism < 0) {
+			throw new IllegalArgumentException("PARALLELISM must be positive or zero for auto.");
+		}
+		this.PARALLELISM = parallelism;
 	}
 
 	public double getAllocationFactor() {

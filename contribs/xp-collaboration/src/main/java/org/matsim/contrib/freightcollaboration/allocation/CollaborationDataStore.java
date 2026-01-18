@@ -4,17 +4,15 @@ import com.google.inject.Inject;
 import com.google.inject.Singleton;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.Scenario;
-import org.matsim.api.core.v01.network.Network;
 import org.matsim.api.core.v01.population.BasicPlan;
 import org.matsim.contrib.freightcollaboration.CollaboratorRole;
 import org.matsim.contrib.freightcollaboration.MutableFreightCoalition;
-import org.matsim.core.utils.collections.Tuple;
 import org.matsim.freight.carriers.Carrier;
 import org.matsim.freight.carriers.CarrierPlan;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Singleton
 public class CollaborationDataStore {
@@ -38,9 +36,9 @@ public class CollaborationDataStore {
 	 */
 	public void addSimulatedCoalitionScores(MutableFreightCoalition coalition, Map<Set<Id<?>>, Double> subCoalitionScores) {
 		if (simulatedCoalitionScores == null) {
-			simulatedCoalitionScores = new HashMap<>();
+			simulatedCoalitionScores = new ConcurrentHashMap<>();
 		}
-		// Add the new entry
+		// Add/overwrite the entry (parallel-safe)
 		simulatedCoalitionScores.put(coalition, subCoalitionScores);
 	}
 

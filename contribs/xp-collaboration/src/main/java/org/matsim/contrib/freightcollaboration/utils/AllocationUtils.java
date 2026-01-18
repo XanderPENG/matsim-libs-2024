@@ -16,6 +16,8 @@ import org.matsim.freight.receiver.ReceiverPlan;
 import org.matsim.freight.receiver.ReceiverUtils;
 
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.function.Supplier;
 
 import static org.matsim.contrib.freightcollaboration.CollaborationTypes.*;
 
@@ -25,10 +27,12 @@ public class AllocationUtils {
 
 	// TODO: the CollaborationDataStore should be injected via Guice, fix it later
 	public static AllocationModel createAllocationModel(AllocationModels allocationModelType,
-														  CollaborationDataStore collaborationDataStore,
-														  FreightPseudoSimulator freightPseudoSimulator,
-														  List<MutableFreightCoalition> coalitions,
-														  double allocationFactor) {
+														 CollaborationDataStore collaborationDataStore,
+														 Supplier<FreightPseudoSimulator> freightPseudoSimulatorSupplier,
+														 List<MutableFreightCoalition> coalitions,
+														 double allocationFactor,
+														 ExecutorService executor,
+														 int parallelism) {
 		switch (allocationModelType){
 			case AllocationModels.PROPORTIONAL:
 				return new AllocationModelProportional(collaborationDataStore, allocationFactor);
@@ -37,7 +41,8 @@ public class AllocationUtils {
 			case AllocationModels.MARGINAL:
 				return new AllocationModelMarginalContribution(collaborationDataStore, allocationFactor);
 			case AllocationModels.APPROX_SHAPLEY:
-				return new AllocationModelApproxShapleyValue(collaborationDataStore, freightPseudoSimulator, coalitions, allocationFactor);
+				return new AllocationModelApproxShapleyValue(collaborationDataStore, freightPseudoSimulatorSupplier, coalitions,
+					allocationFactor, executor, parallelism);
 			default:
 				throw new IllegalArgumentException("Unknown allocation model type: " + allocationModelType);
 		}

@@ -11,6 +11,12 @@ import org.matsim.core.config.Config;
 import org.matsim.core.router.util.TravelTime;
 import org.matsim.freight.carriers.controller.CarrierScoringFunctionFactory;
 
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.function.Supplier;
 import java.util.*;
 
 public class FreightCollaborationEngine {
@@ -61,45 +67,78 @@ public class FreightCollaborationEngine {
 		//     // Perform specific logic for this collaboration type
 		// }
 		FreightCollaborationConfigGroup fcg = (FreightCollaborationConfigGroup) config.getModules().get(FreightCollaborationConfigGroup.GROUP_NAME);
-		FreightPseudoSimulator freightPsim = new FreightPseudoSimulator(collaborationDataStore, scenario.getNetwork(),
-			freightCollaborators, travelTime, carrierScoringFunctionFactory);
-		AllocationModel allocationModel = AllocationUtils.createAllocationModel(fcg.ALLOCATION_MODEL, collaborationDataStore,
-			freightPsim, existingCoalitions, fcg.getAllocationFactor());
-		if (allocationModel instanceof AllocationModelApproxShapleyValue approx) {
-			approx.setApproximationMethod(AllocationModelApproxShapleyValue.ApproximationMethod
-				.valueOf(fcg.getApproxShapleyMethod()));
-		}
-
+		int parallelism = Math.max(1, fcg.getParallelism());
 		if (existingCoalitions.isEmpty()) {
 			LOGGER.info("No valid coalitions found, skipping the allocation process.");
 			return;
 		}
 
-		if (fcg.ALLOCATION_MODEL == AllocationModels.APPROX_SHAPLEY) {
-			// ((AllocationModelApproxShapleyValue) allocationModel).setApproximationMethod(AllocationModelApproxShapleyValue.ApproximationMethod.STRATIFIED); ;
-			allocationModel.allocate(fcg.getAllocationStrategy());
-			return;
+		Supplier<FreightPseudoSimulator> pseudoSimulatorSupplier = () -> {
+			FreightPseudoSimulator simulator = new FreightPseudoSimulator(collaborationDataStore, scenario.getNetwork(),
+				freightCollaborators, travelTime, carrierScoringFunctionFactory);
+			simulator.setVrpMaxIterations(fcg.getVrpMaxIterations());
+			return simulator;
+		};
+
+		ExecutorService executor = Executors.newFixedThreadPool(parallelism,
+			r -> {
+				Thread t = new Thread(r);
+				t.setName("freight-collab-" + t.getId());
+				t.setDaemon(true);
+				return t;
+			});
+
+		AllocationModel allocationModel = AllocationUtils.createAllocationModel(fcg.ALLOCATION_MODEL, collaborationDataStore,
+			pseudoSimulatorSupplier, existingCoalitions, fcg.getAllocationFactor(), executor, parallelism);
+		if (allocationModel instanceof AllocationModelApproxShapleyValue approx) {
+			approx.setApproximationMethod(AllocationModelApproxShapleyValue.ApproximationMethod
+				.valueOf(fcg.getApproxShapleyMethod()));
 		}
 
-		// Need to run the freight psim to evaluate the new plans and calculate the contributions
-		for (MutableFreightCoalition coalition : existingCoalitions) {
-			// Extract the valid collaborators (player and distributor) based on the collaboration type
-			Map<Id<?>, FreightCollaborator<?>> validPlayer = AllocationUtils.extractValidPlayers(coalition);
-			Map<Id<?>, FreightCollaborator<?>> validDistributor = AllocationUtils.extractValidDistributors(coalition);
-			Map<Set<Id<?>>, Double> subCoalitionsScoreMap;
-			if (fcg.ALLOCATION_MODEL == AllocationModels.PROPORTIONAL) {
-				subCoalitionsScoreMap = freightPsim.runSubCoalitions(validDistributor, validPlayer,
-						buildSubCoalitionsForProportional(validPlayer.keySet()));
-			} else if (fcg.ALLOCATION_MODEL == AllocationModels.MARGINAL) {
-				subCoalitionsScoreMap = freightPsim.runSubCoalitions(validDistributor, validPlayer,
-						buildSubCoalitionsForMarginal(validPlayer.keySet()));
-			} else {
-				subCoalitionsScoreMap = freightPsim.runAllSubCoalitions(validDistributor, validPlayer);
+		try {
+			if (fcg.ALLOCATION_MODEL == AllocationModels.APPROX_SHAPLEY) {
+				allocationModel.allocate(fcg.getAllocationStrategy());
+				return;
 			}
-			// add the sub-coalitions scores to the data store
-			collaborationDataStore.addSimulatedCoalitionScores(coalition, subCoalitionsScoreMap);
+
+			// Evaluate coalitions in parallel before passing scores to allocation models
+			Map<MutableFreightCoalition, Map<Set<Id<?>>, Double>> coalitionScores = new ConcurrentHashMap<>();
+			List<Callable<Void>> tasks = existingCoalitions.stream()
+				.<Callable<Void>>map(coalition -> () -> {
+					FreightPseudoSimulator freightPsim = pseudoSimulatorSupplier.get();
+					// Extract the valid collaborators (player and distributor) based on the collaboration type
+					Map<Id<?>, FreightCollaborator<?>> validPlayer = AllocationUtils.extractValidPlayers(coalition);
+					Map<Id<?>, FreightCollaborator<?>> validDistributor = AllocationUtils.extractValidDistributors(coalition);
+					Map<Set<Id<?>>, Double> subCoalitionsScoreMap;
+					if (fcg.ALLOCATION_MODEL == AllocationModels.PROPORTIONAL) {
+						subCoalitionsScoreMap = freightPsim.runSubCoalitions(validDistributor, validPlayer,
+							buildSubCoalitionsForProportional(validPlayer.keySet()));
+					} else if (fcg.ALLOCATION_MODEL == AllocationModels.MARGINAL) {
+						subCoalitionsScoreMap = freightPsim.runSubCoalitions(validDistributor, validPlayer,
+							buildSubCoalitionsForMarginal(validPlayer.keySet()));
+					} else {
+						subCoalitionsScoreMap = freightPsim.runAllSubCoalitions(validDistributor, validPlayer);
+					}
+					coalitionScores.put(coalition, subCoalitionsScoreMap);
+					return null;
+				})
+				.toList();
+
+			for (Future<Void> future : executor.invokeAll(tasks)) {
+				future.get();
+			}
+
+			coalitionScores.forEach(collaborationDataStore::addSimulatedCoalitionScores);
+			allocationModel.allocate(fcg.getAllocationStrategy());
+
+		} catch (InterruptedException ie) {
+			Thread.currentThread().interrupt();
+			throw new RuntimeException("Freight collaboration was interrupted", ie);
+		} catch (Exception e) {
+			throw new RuntimeException("Error during freight collaboration execution", e);
+		} finally {
+			executor.shutdown();
 		}
-		allocationModel.allocate(fcg.getAllocationStrategy());
 
 		// Something to do with triggering the MATSim scoring module
 		/**
