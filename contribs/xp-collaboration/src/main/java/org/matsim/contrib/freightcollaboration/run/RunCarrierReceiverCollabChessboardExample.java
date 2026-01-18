@@ -101,12 +101,12 @@ public class RunCarrierReceiverCollabChessboardExample {
 		final Duration breakWindow = Duration.ofMinutes(15);
 		Instant windowStart = Instant.now();
 
-		List<Integer> instances = IntStream.range(0, 5).boxed().toList();
+		List<Integer> instances = IntStream.range(0, 10).boxed().toList();
 
-		/* Design 1 - finer penalty sweep: 0, 1, 2, 3, 5, 10, 20, 50, 100 euro/hr
-		 * which equals to approx. 0.0003, 0.0006, 0.0008, 0.0014, 0.0028, 0.0056, 0.014, 0.028 euro/sec
+		/* Design 1 - finer penalty sweep: 0, 1, 2, 3, 5, 10, 20, 35, 50, 100 euro/hr
+		 * which equals to approx. 0.0003, 0.0006, 0.0008, 0.0014, 0.0028, 0.0056, 0.0098, 0.014, 0.028 euro/sec
 		 */
-		double[] penaltySweep = {0, 0.0003, 0.0006, 0.0008, 0.0014, 0.0028, 0.0056, 0.014, 0.028};
+		double[] penaltySweep = {0, 0.0003, 0.0006, 0.0008, 0.0014, 0.0028, 0.0056, 0.0098, 0.014, 0.028};
 //		double[] allocSweepShort = {0.6, 0.75, 0.9};
 		double[] allocSweepShort = {0.8};
 		// Design 2: finer allocation factor sweep

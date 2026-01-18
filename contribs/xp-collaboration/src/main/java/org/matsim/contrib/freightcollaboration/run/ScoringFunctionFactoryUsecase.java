@@ -73,7 +73,7 @@ public class ScoringFunctionFactoryUsecase {
 
 			private double score;
 			private final double timeParameter = 0.008;
-			private final double missedTimeWindowPenalty = 0.0278;  // 100euro per hour
+			private final double missedTimeWindowPenalty = 0.0278*5;  // 100euro per hour
 
 			public SimpleDriversActivityScoring() {
 				super();
