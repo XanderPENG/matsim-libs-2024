@@ -35,7 +35,9 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.*;
+import java.util.OptionalDouble;
 import java.util.stream.IntStream;
 import java.util.zip.GZIPInputStream;
 
@@ -135,8 +137,28 @@ public class RunLeuvenCarrierReceiverCollabExample {
 
 		for (ReceiverSpatialDistribution distribution : ReceiverSpatialDistribution.values()) {
 			for (DepotLocation depotLocation : DepotLocation.values()) {
-				for (double penalty : penaltySweep){
-					for (AllocationMethod allocationMethod : methods) {
+				for (AllocationMethod allocationMethod : methods) {
+					boolean skipChain = false; // once a penalty step is skipped, skip all higher penalties
+					for (int pIdx = 0; pIdx < penaltySweep.length; pIdx++) {
+						double penalty = penaltySweep[pIdx];
+						if (pIdx > 0 && skipChain) {
+							String runId = buildRunId(instance, "leuvenCRCollab", distribution, depotLocation,
+								allocationMethod, allocSweepShort, penalty);
+							logRunStatus(runId, "SKIPPED", "Previous penalty scenario was skipped; skipping higher penalty as well.");
+							continue;
+						}
+						if (pIdx > 0) {
+							double prevPenalty = penaltySweep[pIdx - 1];
+							boolean noCollab = isNoCollaborationInPreviousPenalty(distribution, depotLocation, allocationMethod,
+								allocSweepShort, prevPenalty, instance);
+							if (noCollab) {
+								String runId = buildRunId(instance, "leuvenCRCollab", distribution, depotLocation,
+									allocationMethod, allocSweepShort, penalty);
+								logRunStatus(runId, "SKIPPED", "Previous penalty " + prevPenalty + " had no collaboration (avg.EXECUTED <= -100).");
+								skipChain = true;
+								continue;
+							}
+						}
 						runSingleLeuvenScenario(instance, "leuvenCRCollab", distribution, depotLocation,
 								allocationMethod, allocSweepShort, penalty);
 					}
@@ -150,8 +172,7 @@ public class RunLeuvenCarrierReceiverCollabExample {
 												ReceiverSpatialDistribution distribution, DepotLocation depotLocation,
 												AllocationMethod allocationMethod,
 												double allocationFactor, double receiverCollaborationPenalty)  {
-		String runId = "%s-%s-%s-%s-af%.2f-p%.4f-i%02d".formatted(tag, depotLocation.label, distribution.name().toLowerCase(),
-				allocationMethod.label, allocationFactor, receiverCollaborationPenalty, instanceId);
+		String runId = buildRunId(instanceId, tag, distribution, depotLocation, allocationMethod, allocationFactor, receiverCollaborationPenalty);
 		Config config = createConfig(runId);
 
 		// Get the output directory and check if it already exists
@@ -159,6 +180,7 @@ public class RunLeuvenCarrierReceiverCollabExample {
 		// If it exists, skip this experiment
 		if (new File(outputDir).exists()) {
 			logger.warn("Output directory {} already exists. Skipping this experiment.", outputDir);
+			logRunStatus(runId, "SKIPPED", "Output directory exists; assuming completed previously.");
 			return;
 		} else {
 			logger.info("Running experiment with runId: {}", runId);
@@ -238,6 +260,7 @@ public class RunLeuvenCarrierReceiverCollabExample {
 		CarrierScoreStats scoreStats = new CarrierScoreStats(CarriersUtils.getCarriers(controler.getScenario()), controler.getScenario().getConfig().controller().getOutputDirectory() + "/carrier_scores", true);
 		controler.addControlerListener(scoreStats);
 		controler.run();
+		logRunStatus(runId, "RUN", "Completed MATSim run.");
 
 	}
 
@@ -253,6 +276,86 @@ public class RunLeuvenCarrierReceiverCollabExample {
 		config.controller().setWritePlansInterval(10);
 		config.global().setNumberOfThreads(4);
 		return config;
+	}
+
+	private static String buildRunId(int instanceId, String tag,
+									 ReceiverSpatialDistribution distribution, DepotLocation depotLocation,
+									 AllocationMethod allocationMethod,
+									 double allocationFactor, double receiverCollaborationPenalty) {
+		return "%s-%s-%s-%s-af%.2f-p%.4f-i%02d".formatted(tag, depotLocation.label, distribution.name().toLowerCase(),
+			allocationMethod.label, allocationFactor, receiverCollaborationPenalty, instanceId);
+	}
+
+	private static void logRunStatus(String runId, String status, String reason) {
+		Path outputDir = Path.of("output", "leuvenCarrierReceiverCollab", runId);
+		try {
+			Files.createDirectories(outputDir);
+			Path log = outputDir.resolve("run_log.txt");
+			String line = "%s\t%s\t%s%n".formatted(status, runId, reason);
+			Files.writeString(log, line, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+		} catch (IOException e) {
+			logger.warn("Failed to write run log for {}: {}", runId, e.getMessage());
+		}
+	}
+
+	private static boolean isNoCollaborationInPreviousPenalty(ReceiverSpatialDistribution distribution,
+															  DepotLocation depotLocation,
+															  AllocationMethod allocationMethod,
+															  double allocationFactor,
+															  double previousPenalty,
+															  int instanceId) {
+		String prevRunId = buildRunId(instanceId, "leuvenCRCollab", distribution, depotLocation, allocationMethod,
+			allocationFactor, previousPenalty);
+		Path receiverScores = Path.of("output", "leuvenCarrierReceiverCollab", prevRunId, "receiver_scores.txt");
+		if (!Files.exists(receiverScores)) {
+			return false;
+		}
+		OptionalDouble lastAvgExecuted = readLastAvgExecuted(receiverScores);
+		return lastAvgExecuted.isPresent() && lastAvgExecuted.getAsDouble() <= -100.0;
+	}
+
+	private static OptionalDouble readLastAvgExecuted(Path receiverScores) {
+		try (BufferedReader reader = Files.newBufferedReader(receiverScores, StandardCharsets.UTF_8)) {
+			String header = reader.readLine();
+			if (header == null) return OptionalDouble.empty();
+			boolean tabDelimited = header.contains("\t");
+			String[] headTokens = tabDelimited ? header.split("\t") : header.trim().split("\\s+");
+			int avgExecIdx = -1;
+			for (int i = 0; i < headTokens.length; i++) {
+				String normalized = headTokens[i].replaceAll("[\\s\\.]", "").toLowerCase();
+				if (normalized.equals("avgexecuted")) {
+					avgExecIdx = i;
+					break;
+				}
+			}
+			// fallback: header split by whitespace produced multiple tokens ("avg.", "EXECUTED")
+			if (avgExecIdx < 0 && headTokens.length >= 2) {
+				for (int i = 0; i < headTokens.length - 1; i++) {
+					if (headTokens[i].equalsIgnoreCase("avg.") && headTokens[i + 1].equalsIgnoreCase("EXECUTED")) {
+						avgExecIdx = tabDelimited ? i : 1; // data lines are single token per column when tab-delimited; otherwise numeric at index 1
+						break;
+					}
+				}
+			}
+			// final fallback to the typical second column (ITERATION, avg.EXECUTED, ...)
+			if (avgExecIdx < 0 && (tabDelimited ? headTokens.length >= 2 : true)) {
+				avgExecIdx = 1;
+			}
+
+			String line;
+			String last = null;
+			while ((line = reader.readLine()) != null) {
+				if (line.isBlank()) continue;
+				last = line;
+			}
+			if (last == null) return OptionalDouble.empty();
+			String[] tokens = tabDelimited ? last.split("\t") : last.trim().split("\\s+");
+			if (avgExecIdx >= tokens.length) return OptionalDouble.empty();
+			return OptionalDouble.of(Double.parseDouble(tokens[avgExecIdx]));
+		} catch (IOException | NumberFormatException e) {
+			logger.warn("Failed to parse receiver_scores.txt at {}: {}", receiverScores, e.getMessage());
+			return OptionalDouble.empty();
+		}
 	}
 
 	private static Carriers generateSecenarioCarriers(DepotLocation depotLocation){
