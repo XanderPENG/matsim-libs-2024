@@ -16,6 +16,10 @@ import java.util.*;
 
 public class CoalitionUtils {
 
+    public record ReceiverDelta(boolean twExtended, boolean serviceContracted, Set<Id<Carrier>> carriers) {
+        public boolean hasChange() { return twExtended || serviceContracted; }
+    }
+
 
 	/**
 	 * Get all collaborated receivers from the freight collaborators, based on the collaboration status.
@@ -35,93 +39,88 @@ public class CoalitionUtils {
 	}
 
 
-	public static void markCollaboratedReceiver(FreightCollaborators freightCollaborators,
-												CollaborationDataStore collaborationDataStore) {
-		// Get all receiver collaborators
-		Map<Id<Receiver>, FreightCollaborator<Receiver>> allReceiverCollaborators = freightCollaborators.getFreightCollaboratorsByRole(CollaboratorRole.RECEIVER);
-		// Get the original plans from the data store
-		var receiverOriginPlans = collaborationDataStore.getOriginalPlans().get(CollaboratorRole.RECEIVER);
+    public static void markCollaboratedReceiver(FreightCollaborators freightCollaborators,
+                                                CollaborationDataStore collaborationDataStore) {
+        Map<Id<Receiver>, ReceiverPlan> originPlans = collaborationDataStore.getOriginalPlans()
+            .get(CollaboratorRole.RECEIVER)
+            .entrySet().stream()
+            .collect(HashMap::new, (m, e) -> m.put((Id<Receiver>) e.getKey(), (ReceiverPlan) e.getValue()), Map::putAll);
 
-		// For each receiver collaborator, compare its current plan with the original plan to determine collaboration status
-		for (FreightCollaborator<Receiver> receiverCollaborator : allReceiverCollaborators.values()) {
-			Receiver receiver = receiverCollaborator.getDelegate();
-			// Get the original plan
-			ReceiverPlan originalPlan = (ReceiverPlan) receiverOriginPlans.get(receiver.getId());
-			if (originalPlan == null) {
-				throw new RuntimeException("Original plan for receiver " + receiver.getId() + " not found in the data store.");
-			}
-			// Get the current plan
-			ReceiverPlan currentPlan = receiverCollaborator.getTypedSelectedPlan();
+        Map<Id<Receiver>, FreightCollaborator<Receiver>> allReceivers = freightCollaborators.getFreightCollaboratorsByRole(CollaboratorRole.RECEIVER);
 
-			Set<Id<Carrier>> collaboratingCarriers = new HashSet<>();
+        for (FreightCollaborator<Receiver> receiverCollaborator : allReceivers.values()) {
+            Receiver receiver = receiverCollaborator.getDelegate();
+            ReceiverPlan originalPlan = originPlans.get(receiver.getId());
+            if (originalPlan == null) {
+                throw new RuntimeException("Original plan for receiver " + receiver.getId() + " not found in the data store.");
+            }
 
-			for (ReceiverOrder order: currentPlan.getReceiverOrders()){
+            ReceiverPlan currentPlan = receiverCollaborator.getTypedSelectedPlan();
+            ReceiverDelta delta = computeReceiverDelta(originalPlan, currentPlan);
 
-				// Get the TWs and service durations of this current plan
-				List<TimeWindow> thisTWs = currentPlan.getTimeWindows();
-				List<Double> thisServiceDurations = new ArrayList<>();
-				order.getReceiverProductOrders().forEach(productOrder -> {
-					thisServiceDurations.add(productOrder.getServiceDuration());
-				});
+            if (delta.hasChange()) {
+                receiverCollaborator.enableCollaboration();
+                receiverCollaborator.setCollaborationPartners(new HashSet<>(delta.carriers()));
+            } else {
+                receiverCollaborator.disableCollaboration();
+                receiverCollaborator.setCollaborationPartners(Set.of());
+            }
+        }
 
-				// Get the TWs and service durations of the original plan
-				List<TimeWindow> originalTWs = originalPlan.getTimeWindows();
-				List<Double> originalServiceDurations = new ArrayList<>();
-				Objects.requireNonNull(originalPlan.getReceiverOrders().stream()
-						.filter(o -> o.getCarrierId() == order.getCarrierId())
-						.findFirst()
-						.orElse(null))
-					.getReceiverProductOrders()
-					.forEach(productOrder -> {
-						originalServiceDurations.add(productOrder.getServiceDuration());
-					});
-				// case 1: if any of the TW has been extended
-				boolean isExtended = false;
-				for (int i = 0; i < thisTWs.size(); i++) {
-					TimeWindow thisTW = thisTWs.get(i);
-					TimeWindow originalTW = originalTWs.get(i);
-					if (thisTW.getStart() < originalTW.getStart() ||
-						thisTW.getEnd() > originalTW.getEnd()) {
-						// mark as collaborated
-						isExtended = true;
-						collaboratingCarriers.add(order.getCarrierId());
-					}
-				}
+    }
 
-				if (isExtended) {
-					receiverCollaborator.enableCollaboration();
-					Set<Id<?>> collaborationPartnerIds = new HashSet<>(collaboratingCarriers);
-					receiverCollaborator.setCollaborationPartners(collaborationPartnerIds);
-				} else {
-					receiverCollaborator.disableCollaboration();
-				}
+    /**
+     * Compute whether a receiver relaxed TW or reduced service duration vs. its original plan.
+     * Returns carriers affected for quick coalition linking.
+     */
+    public static ReceiverDelta computeReceiverDelta(ReceiverPlan originalPlan, ReceiverPlan currentPlan) {
+        boolean twExtended = false;
+        boolean serviceContracted = false;
+        Set<Id<Carrier>> collaboratingCarriers = new HashSet<>();
 
-				// case 2: if the service duration has been contracted
-				boolean isContracted = false;
-				for (int i = 0; i < thisServiceDurations.size(); i++) {
-					double thisServiceDuration = thisServiceDurations.get(i);
-					double originalServiceDuration = originalServiceDurations.get(i);
-					if (thisServiceDuration < originalServiceDuration) {
-						isContracted = true;
-						collaboratingCarriers.add(order.getCarrierId());
-					}
-				}
+        // Build a lookup of original orders by carrier for fast access
+        Map<Id<Carrier>, ReceiverOrder> originalOrdersByCarrier = new HashMap<>();
+        for (ReceiverOrder order : originalPlan.getReceiverOrders()) {
+            originalOrdersByCarrier.put(order.getCarrierId(), order);
+        }
 
-				if (isContracted) {
-					receiverCollaborator.enableCollaboration();
-					Set<Id<?>> collaborationPartnerIds = new HashSet<>(collaboratingCarriers);
-					receiverCollaborator.setCollaborationPartners(collaborationPartnerIds);
-				} else {
-					if (!isExtended) {
-						receiverCollaborator.disableCollaboration();
-					}
-				}
-			}
+        List<TimeWindow> originalTWs = originalPlan.getTimeWindows();
 
+        for (ReceiverOrder order : currentPlan.getReceiverOrders()) {
+            ReceiverOrder originalOrder = originalOrdersByCarrier.get(order.getCarrierId());
+            if (originalOrder == null) {
+                continue; // no baseline to compare; treat as unchanged
+            }
 
-		}
+            // TWs assumed aligned by index
+            List<TimeWindow> currentTWs = currentPlan.getTimeWindows();
+            int twSize = Math.min(currentTWs.size(), originalTWs.size());
+            for (int i = 0; i < twSize; i++) {
+                TimeWindow tw = currentTWs.get(i);
+                TimeWindow base = originalTWs.get(i);
+                if (tw.getStart() < base.getStart() || tw.getEnd() > base.getEnd()) {
+                    twExtended = true;
+                    collaboratingCarriers.add(order.getCarrierId());
+                    break; // one extension is enough
+                }
+            }
 
-	}
+            var currentDurations = order.getReceiverProductOrders().stream().toList();
+            var baseDurations = originalOrder.getReceiverProductOrders().stream().toList();
+            int durSize = Math.min(currentDurations.size(), baseDurations.size());
+            for (int i = 0; i < durSize; i++) {
+                double cur = currentDurations.get(i).getServiceDuration();
+                double base = baseDurations.get(i).getServiceDuration();
+                if (cur < base) {
+                    serviceContracted = true;
+                    collaboratingCarriers.add(order.getCarrierId());
+                    break;
+                }
+            }
+        }
+
+        return new ReceiverDelta(twExtended, serviceContracted, collaboratingCarriers);
+    }
 
 
 }

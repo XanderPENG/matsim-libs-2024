@@ -17,7 +17,6 @@ import org.matsim.core.controler.events.IterationStartsEvent;
 import org.matsim.core.controler.listener.BeforeMobsimListener;
 import org.matsim.core.controler.listener.IterationStartsListener;
 import org.matsim.freight.carriers.Carrier;
-import org.matsim.freight.carriers.FreightCarriersConfigGroup;
 import org.matsim.freight.carriers.TimeWindow;
 import org.matsim.freight.logistics.LSP;
 import org.matsim.freight.receiver.Receiver;
@@ -25,8 +24,8 @@ import org.matsim.freight.receiver.ReceiverOrder;
 import org.matsim.freight.receiver.ReceiverPlan;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
-import static org.matsim.contrib.freightcollaboration.CollaborationTypes.CARRIER_CARRIER;
 import static org.matsim.contrib.freightcollaboration.CollaborationTypes.CARRIER_RECEIVER;
 import static org.matsim.contrib.freightcollaboration.CollaborationTypes.LSP_RECEIVER;
 
@@ -112,6 +111,8 @@ public class FormFreightCoalitionListener implements BeforeMobsimListener {
 		freightCollaborationConfigGroup.getCollaborationParamSets().forEach( collaborationParamSet -> {
 			collaborationTypes.add(collaborationParamSet.getCollaborationType());
 		});
+		// Precompute per-receiver deltas once per iteration to avoid repeated scans
+		Map<Id<Receiver>, CoalitionUtils.ReceiverDelta> receiverDeltas = precomputeReceiverDeltas();
 		List<MutableFreightCoalition> mutableCoalitions = new ArrayList<>();
 		for (CollaborationType collaborationType : collaborationTypes){
 			switch (collaborationType) {
@@ -121,8 +122,8 @@ public class FormFreightCoalitionListener implements BeforeMobsimListener {
 					Map<Id<Carrier>, FreightCollaborator<Carrier>> carrierCollaborators = freightCollaborators.getFreightCollaboratorsByRole(CollaboratorRole.CARRIER);
 					// for-loop through all carrier collaborators
 					for (FreightCollaborator<Carrier> carrierCollaborator : carrierCollaborators.values()){
-						// find all linked collaborating receivers for this carrier
-						Set<FreightCollaborator<Receiver>> linkedCollaboratingReceivers = findCollaboratingReceiversForCarrier(carrierCollaborator);
+						// find all linked collaborating receivers for this carrier using cached deltas
+						Set<FreightCollaborator<Receiver>> linkedCollaboratingReceivers = findCollaboratingReceiversForCarrier(carrierCollaborator, receiverDeltas);
 						// if there is any linked collaborating receiver, form a mutable coalition
 						if (!linkedCollaboratingReceivers.isEmpty()){
 							MutableFreightCoalition mutableCoalition = new MutableFreightCoalition(CARRIER_RECEIVER);
@@ -200,59 +201,40 @@ public class FormFreightCoalitionListener implements BeforeMobsimListener {
 		}
 	}
 
-	private Set<FreightCollaborator<Receiver>> findCollaboratingReceiversForCarrier(FreightCollaborator<Carrier> carrierCollaborator){;
-		Set<FreightCollaborator<Receiver>> collaboratingReceivers = new HashSet<>();
-		// Get all receiver collaborators
-		Map<Id<Receiver>, FreightCollaborator<Receiver>> receiverCollaborators = freightCollaborators.getFreightCollaboratorsByRole(CollaboratorRole.RECEIVER);
-		// Get the linked receivers for this carrier by comparing the receiver plan against its origin plan
-		for (FreightCollaborator<Receiver> receiverCollaborator : receiverCollaborators.values()){
-			// Check if the receiver is linked to the carrier
-			ReceiverPlan receiverPlan = receiverCollaborator.getTypedSelectedPlan();
-			for (ReceiverOrder order: receiverPlan.getReceiverOrders()){
-				// if any of the orders is assigned to this carrier, then judge if it is different from the original plan
-				if (order.getCarrierId() == carrierCollaborator.getId()){
-					// Get the TWs and service durations of this current plan
-					List<TimeWindow> thisTWs = receiverPlan.getTimeWindows();
-					List<Double> thisServiceDurations = new ArrayList<>();
-					order.getReceiverProductOrders().forEach(productOrder -> {
-						thisServiceDurations.add(productOrder.getServiceDuration());
-					});
+    private Set<FreightCollaborator<Receiver>> findCollaboratingReceiversForCarrier(FreightCollaborator<Carrier> carrierCollaborator,
+                                                                                    Map<Id<Receiver>, CoalitionUtils.ReceiverDelta> receiverDeltas){
+        Set<FreightCollaborator<Receiver>> collaboratingReceivers = new HashSet<>();
+        Map<Id<Receiver>, FreightCollaborator<Receiver>> receiverCollaborators = freightCollaborators.getFreightCollaboratorsByRole(CollaboratorRole.RECEIVER);
 
-					// Get the TWs and service durations of the original plan
-					ReceiverPlan originalPlan = (ReceiverPlan) collaborationDataStore.getOriginalPlans().get(CollaboratorRole.RECEIVER).get(receiverCollaborator.getId());
-					List<TimeWindow> originalTWs = originalPlan.getTimeWindows();
-					List<Double> originalServiceDurations = new ArrayList<>();
-					Objects.requireNonNull(originalPlan.getReceiverOrders().stream()
-							.filter(o -> o.getCarrierId() == carrierCollaborator.getId())
-							.findFirst()
-							.orElse(null))
-							.getReceiverProductOrders()
-							.forEach(productOrder -> {
-								originalServiceDurations.add(productOrder.getServiceDuration());
-							});
-					// case 1: if any of the TW has been extended
-					for (int i = 0; i < thisTWs.size(); i++) {
-						TimeWindow thisTW = thisTWs.get(i);
-						TimeWindow originalTW = originalTWs.get(i);
-						if (thisTW.getStart() < originalTW.getStart() ||
-								thisTW.getEnd() > originalTW.getEnd()) {
-							collaboratingReceivers.add(receiverCollaborator);
-						}
-					}
+        for (Map.Entry<Id<Receiver>, CoalitionUtils.ReceiverDelta> entry : receiverDeltas.entrySet()) {
+            CoalitionUtils.ReceiverDelta delta = entry.getValue();
+            if (!delta.hasChange()) continue;
+            if (!delta.carriers().contains(carrierCollaborator.getId())) continue;
+            FreightCollaborator<Receiver> rc = receiverCollaborators.get(entry.getKey());
+            if (rc != null) {
+                collaboratingReceivers.add(rc);
+            }
+        }
+        return collaboratingReceivers;
+    }
 
-					// case 2: if the service duration has been contracted
-					for (int i = 0; i < thisServiceDurations.size(); i++) {
-						double thisServiceDuration = thisServiceDurations.get(i);
-						double originalServiceDuration = originalServiceDurations.get(i);
-						if (thisServiceDuration < originalServiceDuration) {
-							collaboratingReceivers.add(receiverCollaborator);
-						}
-					}
-				}
-			}
-		}
-		return collaboratingReceivers;
-	}
+    /**
+     * Precompute deltas for all receivers once per iteration to avoid O(C×R) repeated work.
+     */
+    private Map<Id<Receiver>, CoalitionUtils.ReceiverDelta> precomputeReceiverDeltas() {
+        Map<Id<Receiver>, CoalitionUtils.ReceiverDelta> deltas = new HashMap<>();
+        Map<Id<Receiver>, FreightCollaborator<Receiver>> receivers = freightCollaborators.getFreightCollaboratorsByRole(CollaboratorRole.RECEIVER);
+        var originalReceiverPlans = collaborationDataStore.getOriginalPlans().get(CollaboratorRole.RECEIVER);
+
+        for (Map.Entry<Id<Receiver>, FreightCollaborator<Receiver>> entry : receivers.entrySet()) {
+            ReceiverPlan original = (ReceiverPlan) originalReceiverPlans.get(entry.getKey());
+            if (original == null) continue;
+            ReceiverPlan current = entry.getValue().getTypedSelectedPlan();
+            CoalitionUtils.ReceiverDelta delta = CoalitionUtils.computeReceiverDelta(original, current);
+            deltas.put(entry.getKey(), delta);
+        }
+        return deltas;
+    }
 
 	/**
 	 * Since this listener need to be called after rerouting, it should be put at later order.
