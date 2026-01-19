@@ -36,6 +36,7 @@ import org.matsim.vehicles.Vehicle;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class FreightPseudoSimulator {
 
@@ -102,22 +103,19 @@ public class FreightPseudoSimulator {
 		LOGGER.info("Starting Freight Pseudo Simulator");
 		// Generate all possible sub-coalitions of the given players
 		var subCoalitionScoreMap = AllocationUtils.generateSubsets(players);
-		Map<Set<Id<?>>, Double> result = new HashMap<>();
-		// For each sub-coalition, simulate it and record its score
-		for (Set<Id<?>> subCoalition : subCoalitionScoreMap.keySet()) {
-			result.put(Set.copyOf(subCoalition), simulateSubCoalition(distributors, players, subCoalition));
-		}
-
+		ConcurrentHashMap<Set<Id<?>>, Double> result = new ConcurrentHashMap<>();
+		subCoalitionScoreMap.keySet().parallelStream()
+			.forEach(subCoalition -> result.put(Set.copyOf(subCoalition), simulateSubCoalition(distributors, players, subCoalition)));
 		return result;
 	}
 
 	Map<Set<Id<?>>, Double> runSubCoalitions(Map<Id<?>, FreightCollaborator<?>> distributors,
 											 Map<Id<?>, FreightCollaborator<?>> players,
 											 Collection<Set<Id<?>>> subCoalitions) {
-		Map<Set<Id<?>>, Double> subCoalitionScoreMap = new HashMap<>();
-		for (Set<Id<?>> subCoalition : subCoalitions) {
-			subCoalitionScoreMap.put(Set.copyOf(subCoalition), simulateSubCoalition(distributors, players, subCoalition));
-		}
+		ConcurrentHashMap<Set<Id<?>>, Double> subCoalitionScoreMap = new ConcurrentHashMap<>();
+		subCoalitions.parallelStream()
+			.forEach(subCoalition -> subCoalitionScoreMap.put(Set.copyOf(subCoalition),
+				simulateSubCoalition(distributors, players, subCoalition)));
 		return subCoalitionScoreMap;
 	}
 

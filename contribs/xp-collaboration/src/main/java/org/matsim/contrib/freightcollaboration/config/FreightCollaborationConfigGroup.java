@@ -90,6 +90,18 @@ public class FreightCollaborationConfigGroup extends ReflectiveConfigGroup {
 	@Parameter
 	public double CARRIER_CHARGED_FEE = 200.0;
 
+	@Parameter
+	public int MONTE_CARLO_SAMPLES = 10;
+
+	@Parameter
+	public double SAMPLES_RATIO = 0.2;
+
+	@Parameter
+	public int STRATIFIED_SAMPLES_PER_LEVEL = 5;
+
+	@Parameter
+	public int MAX_STRATIFIED_EVALUATIONS = 100;
+
 //	@StringSetter("collaborationParamSets")
 	public void setCollaborationParamSets(String value) {
 		// Parameter sets are provided as <paramSet> elements; ignore any string and mirror parsed sets.
@@ -223,6 +235,50 @@ public class FreightCollaborationConfigGroup extends ReflectiveConfigGroup {
 
 	public Set<CollaborationParamSet> getCollaborationParamSets() {
 		return collaborationParamSets;
+	}
+
+	public int getMonteCarloSamples() {
+		return MONTE_CARLO_SAMPLES;
+	}
+
+	public void setMonteCarloSamples(int samples) {
+		if (samples <= 0) {
+			throw new IllegalArgumentException("MONTE_CARLO_SAMPLES must be positive.");
+		}
+		this.MONTE_CARLO_SAMPLES = samples;
+	}
+
+	public double getSamplesRatio() {
+		return SAMPLES_RATIO;
+	}
+
+	public void setSamplesRatio(double ratio) {
+		if (ratio <= 0.0 || ratio > 1.0) {
+			throw new IllegalArgumentException("SAMPLES_RATIO must be in (0,1].");
+		}
+		this.SAMPLES_RATIO = ratio;
+	}
+
+	public int getStratifiedSamplesPerLevel() {
+		return STRATIFIED_SAMPLES_PER_LEVEL;
+	}
+
+	public void setStratifiedSamplesPerLevel(int perLevel) {
+		if (perLevel <= 0) {
+			throw new IllegalArgumentException("STRATIFIED_SAMPLES_PER_LEVEL must be positive.");
+		}
+		this.STRATIFIED_SAMPLES_PER_LEVEL = perLevel;
+	}
+
+	public int getMaxStratifiedEvaluations() {
+		return MAX_STRATIFIED_EVALUATIONS;
+	}
+
+	public void setMaxStratifiedEvaluations(int maxEval) {
+		if (maxEval <= 0) {
+			throw new IllegalArgumentException("MAX_STRATIFIED_EVALUATIONS must be positive.");
+		}
+		this.MAX_STRATIFIED_EVALUATIONS = maxEval;
 	}
 
 }

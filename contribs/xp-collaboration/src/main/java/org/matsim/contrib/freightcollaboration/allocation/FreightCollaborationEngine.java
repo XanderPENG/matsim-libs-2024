@@ -93,6 +93,10 @@ public class FreightCollaborationEngine {
 		if (allocationModel instanceof AllocationModelApproxShapleyValue approx) {
 			approx.setApproximationMethod(AllocationModelApproxShapleyValue.ApproximationMethod
 				.valueOf(fcg.getApproxShapleyMethod()));
+			approx.setMonteCarloSamples(fcg.getMonteCarloSamples());
+			approx.setSamplesRatio(fcg.getSamplesRatio());
+			approx.setStratifiedSamplesPerLevel(fcg.getStratifiedSamplesPerLevel());
+			approx.setMaxStratifiedEvaluations(fcg.getMaxStratifiedEvaluations());
 		}
 
 		try {
