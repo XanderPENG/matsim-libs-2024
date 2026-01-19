@@ -22,7 +22,7 @@ class RunCarrierReceiverShapleyChessboardExampleTest {
 	void generateFullyRandomReceiversWithinAreaTest() {
 		Scenario scenario = loadTestScenario();
 		Network network = scenario.getNetwork();
-		Set<Id<Link>> candidateLinks = RunCarrierReceiverShapleyChessboardExample.generateFullyRandomReceiversWithinArea(network, 10, 491);
+		Set<Id<Link>> candidateLinks = RunCarrierReceiverCollabChessboardExample.generateFullyRandomReceiversWithinArea(network, 10, 491);
 		// validate that each link should be within the area
 		for (Id<Link> link : candidateLinks) {
 			System.out.println(link);
@@ -37,7 +37,7 @@ class RunCarrierReceiverShapleyChessboardExampleTest {
 	void generateClusteredReceiversWithinAreaTest() {
 		Scenario scenario = loadTestScenario();
 		Network network = scenario.getNetwork();
-		Set<Id<Link>> candidateLinks = RunCarrierReceiverShapleyChessboardExample.generateClusteredReceiversWithinArea(network, 10, 251);
+		Set<Id<Link>> candidateLinks = RunCarrierReceiverCollabChessboardExample.generateClusteredReceiversWithinArea(network, 10, 251);
 		/* Validate that each link should be within a certain 3000 * 3000 area, meaning:
 		 * for any two links, the x and y difference of their from/to nodes should be <= 3000
 		 */
@@ -60,7 +60,7 @@ class RunCarrierReceiverShapleyChessboardExampleTest {
 	void generateHierarchyDispersedReceiversWithinAreaTest() {
 		Scenario scenario = loadTestScenario();
 		Network network = scenario.getNetwork();
-		Set<Id<Link>> candidateLinks = RunCarrierReceiverShapleyChessboardExample.generateHierarchyDispersedReceiversWithinArea(network, 10,
+		Set<Id<Link>> candidateLinks = RunCarrierReceiverCollabChessboardExample.generateHierarchyDispersedReceiversWithinArea(network, 10,
 			13);
 		// validate that each link should be within the area
 		for (Id<Link> link : candidateLinks) {

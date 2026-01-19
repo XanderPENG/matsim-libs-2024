@@ -56,6 +56,8 @@ public class FreightPseudoSimulator {
 	private static Logger LOGGER = LogManager.getLogger(FreightPseudoSimulator.class);
 	/** Upper bound for jsprit iterations during sampling; keeps Shapley runs lightweight. */
 	private int vrpMaxIterations = 100;
+	/** Lighter bound used for sample/partial coalitions to speed approximate methods. */
+	private int vrpSampleIterations = 40;
 
 //	FreightPseudoSimulator() {}
 
@@ -79,6 +81,18 @@ public class FreightPseudoSimulator {
 			throw new IllegalArgumentException("vrpMaxIterations must be positive.");
 		}
 		this.vrpMaxIterations = vrpMaxIterations;
+		// Keep sample iterations proportionally lower unless user overrides later.
+		if (vrpSampleIterations >= vrpMaxIterations) {
+			this.vrpSampleIterations = Math.max(10, vrpMaxIterations / 2);
+		}
+	}
+
+	/** Optional override for sampling iterations (e.g., in Shapley Monte‑Carlo). */
+	public void setVrpSampleIterations(int vrpSampleIterations) {
+		if (vrpSampleIterations <= 0) {
+			throw new IllegalArgumentException("vrpSampleIterations must be positive.");
+		}
+		this.vrpSampleIterations = vrpSampleIterations;
 	}
 
 	/** Simulate all possible sub-coalitions of the given players and distributors
@@ -161,8 +175,10 @@ public class FreightPseudoSimulator {
 			// merge the non-collaborating receivers and the collaborating ones
 			receiverCollaborators.addAll(nonCollaboratingReceivers);
 			// need to re-generate the carrier plan based on the new receiver plans/requests
+			boolean isFullCoalition = collaboratingSubset.size() == copyPlayers.size();
+			int iterations = isFullCoalition ? vrpMaxIterations : vrpSampleIterations;
 			LinkReceiverAndCarrier.receiversTriggerCarrierReplan(carrierCollaborator, receiverCollaborators,
-					network, tt, vrpMaxIterations
+					network, tt, iterations
 			);
 			// Then run the carrier PSim
 			var driverLegsAndActivitiesMap = runActivityBasedCarrierSimulation(carrierCollaborator.getDelegate());

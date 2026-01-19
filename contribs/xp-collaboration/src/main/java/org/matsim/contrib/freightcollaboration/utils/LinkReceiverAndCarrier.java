@@ -20,9 +20,19 @@ import org.matsim.freight.carriers.jsprit.NetworkRouter;
 import org.matsim.freight.receiver.*;
 
 import java.util.Collection;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 public class LinkReceiverAndCarrier {
+
+	/** Cache transport costs per (carrier, travelTime instance) because those are immutable once built. */
+	private static final Map<String, NetworkBasedTransportCosts> COSTS_CACHE = new ConcurrentHashMap<>();
+	/** Cache best VRP solutions per (carrier, receiver subset, travelTime instance) to warm‑start jsprit. */
+	private static final Map<String, VehicleRoutingProblemSolution> VRP_SOLUTION_CACHE = new ConcurrentHashMap<>();
+	private static volatile int CURRENT_TT_TOKEN = Integer.MIN_VALUE;
+	private static final Object CACHE_LOCK = new Object();
 
 	/**
 	 * Re-generate a carrier plan based on the receivers that collaborate in the sampled coalition.
@@ -31,8 +41,24 @@ public class LinkReceiverAndCarrier {
 	public static void receiversTriggerCarrierReplan(FreightCollaborator<Carrier> carrierCollaborator,
 													 Set<FreightCollaborator<Receiver>> receiverCollaborators,
 													 Network network, TravelTime tt, int maxIterations) {
+		final int ttToken = System.identityHashCode(tt);
+		// If travel time object changed (new mobsim iteration), drop caches to avoid unbounded growth and stale warm-starts.
+		if (ttToken != CURRENT_TT_TOKEN) {
+			synchronized (CACHE_LOCK) {
+				if (ttToken != CURRENT_TT_TOKEN) {
+					COSTS_CACHE.clear();
+					VRP_SOLUTION_CACHE.clear();
+					CURRENT_TT_TOKEN = ttToken;
+				}
+			}
+		}
+		final Carrier carrier = carrierCollaborator.getDelegate();
+		final Set<Id<Receiver>> receiverIds = receiverCollaborators.stream()
+			.map(fc->fc.getDelegate().getId())
+			.collect(Collectors.toUnmodifiableSet());
+		final String cacheKey = subsetKey(carrier.getId(), receiverIds, ttToken);
+
 		// Clean the carrier's current plan and services/shipments
-		Carrier carrier = carrierCollaborator.getDelegate();
 		carrier.clearPlans();
 		carrier.getShipments().clear();
 		carrier.getServices().clear();
@@ -69,23 +95,51 @@ public class LinkReceiverAndCarrier {
 		}
 
 		// After processing all orders, we may want to create a new plan for the carrier
-		VehicleRoutingProblem.Builder vrpBuilder = MatsimJspritFactory.createRoutingProblemBuilder(carrier, network);
-		NetworkBasedTransportCosts netBasedCosts = NetworkBasedTransportCosts.Builder.newInstance(network,
-			carrier.getCarrierCapabilities().getVehicleTypes())
-			.setTravelTime(tt). // Set travel time from the MATSim simulation
-			build();
+		NetworkBasedTransportCosts netBasedCosts = COSTS_CACHE.computeIfAbsent(
+			costCacheKey(carrier.getId(), ttToken),
+			ignored -> NetworkBasedTransportCosts.Builder.newInstance(network,
+					carrier.getCarrierCapabilities().getVehicleTypes())
+				.setTravelTime(tt)
+				.build());
+
+		VehicleRoutingProblem.Builder vrpBuilder = MatsimJspritFactory.createRoutingProblemBuilder(carrier, network)
+			.setRoutingCost(netBasedCosts);
 		VehicleRoutingProblem vrp = vrpBuilder.setRoutingCost(netBasedCosts).build();
 		// New a VRP algorithm and search for solutions
 		VehicleRoutingAlgorithm vra = new SchrimpfFactory().createAlgorithm(vrp);
+		VehicleRoutingProblemSolution warmStart = VRP_SOLUTION_CACHE.get(cacheKey);
+		if (warmStart != null) {
+			try {
+				var addInitial = vra.getClass().getMethod("addInitialSolution", VehicleRoutingProblemSolution.class);
+				addInitial.invoke(vra, warmStart);
+			} catch (Exception reflectionFailure) {
+				// Best-effort warm-start; fall back silently if jsprit version differs.
+			}
+		}
 		vra.setMaxIterations(maxIterations);
 		Collection<VehicleRoutingProblemSolution> solutions = vra.searchSolutions();
 		// Create a new carrierPlan from the best solution
-		CarrierPlan newPlan = MatsimJspritFactory.createPlan(carrier, Solutions.bestOf(solutions));
+		VehicleRoutingProblemSolution bestSolution = Solutions.bestOf(solutions);
+		VRP_SOLUTION_CACHE.put(cacheKey, bestSolution);
+		CarrierPlan newPlan = MatsimJspritFactory.createPlan(carrier, bestSolution);
 		// Route plan so as to add routes to the plan
 		NetworkRouter.routePlan(newPlan, netBasedCosts);
 		// Assign this plan now to the carrier and make it the selected carrier plan
 		carrier.addPlan(newPlan);
 		carrier.setSelectedPlan(newPlan);
+	}
+
+	private static String subsetKey(Id<Carrier> carrierId, Set<Id<Receiver>> receiverIds, int ttToken) {
+		// Deterministic key: carrier + sorted receiver ids + token of travel time (captures iteration TT changes).
+		String receivers = receiverIds.stream()
+			.map(Id::toString)
+			.sorted()
+			.collect(Collectors.joining(","));
+		return carrierId + "|" + ttToken + "|" + receivers;
+	}
+
+	private static String costCacheKey(Id<Carrier> carrierId, int ttToken) {
+		return carrierId + "|" + ttToken;
 	}
 
 	@SuppressWarnings("unchecked")

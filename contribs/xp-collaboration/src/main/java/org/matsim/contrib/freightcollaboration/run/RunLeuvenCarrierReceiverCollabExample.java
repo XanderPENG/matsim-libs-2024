@@ -247,7 +247,7 @@ public class RunLeuvenCarrierReceiverCollabExample {
 		config.controller().setOutputDirectory("output/leuvenCarrierReceiverCollab/" + runId + "/");
 		config.controller().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
 		config.controller().setFirstIteration(0);
-		config.controller().setLastIteration(50);
+		config.controller().setLastIteration(30);
 		// set writing output every 5 iterations
 		config.controller().setWriteEventsInterval(10);
 		config.controller().setWritePlansInterval(10);

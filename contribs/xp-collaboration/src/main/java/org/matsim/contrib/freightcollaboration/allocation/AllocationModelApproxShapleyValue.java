@@ -33,11 +33,11 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 	private long randomSeed = 1L;
 	private boolean useCostSavings = true;
 	private ApproximationMethod approximationMethod = ApproximationMethod.MONTE_CARLO;
-	private int monteCarloSamples = 20;
-	private double samplesRatio = 0.4;
-	private int stratifiedSamplesPerLevel = 20;
+	private int monteCarloSamples = 10;
+	private double samplesRatio = 0.2;
+	private int stratifiedSamplesPerLevel = 5;
 	/** Hard cap on unique sub-coalitions evaluated per coalition when using stratified sampling. */
-	private int maxStratifiedEvaluations = 400;
+	private int maxStratifiedEvaluations = 100;
 
 	public AllocationModelApproxShapleyValue(CollaborationDataStore collaborationDataStore,
 											 Supplier<FreightPseudoSimulator> pseudoSimulatorSupplier,
