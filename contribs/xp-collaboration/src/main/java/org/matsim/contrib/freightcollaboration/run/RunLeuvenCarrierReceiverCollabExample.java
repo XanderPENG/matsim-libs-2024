@@ -56,6 +56,7 @@ public class RunLeuvenCarrierReceiverCollabExample {
 	// Logger
 	private static final Logger logger = LogManager.getLogger(RunLeuvenCarrierReceiverCollabExample.class);
 
+	private static final String OUTPUT_BASE_DIR = "leuvenCarrierReceiverCollab60Receivers/";
 	// Spatial distribution of receivers
 	private enum ReceiverSpatialDistribution {
 //		FULLY_RANDOM,
@@ -123,7 +124,7 @@ public class RunLeuvenCarrierReceiverCollabExample {
 		List<Integer> instances = IntStream.range(0, 2).boxed().toList();
 		int instance = 1;
 
-		double[] penaltySweep = {0, 0.0003, 0.0006, 0.0008, 0.0014, 0.0028, 0.0056, 0.0098, 0.014, 0.028};
+		double[] penaltySweep = {0, 0.0003, 0.0008, 0.0014, 0.0028, 0.0056, 0.0098, 0.014, 0.028};
 //		double[] allocSweepShort = {0.6, 0.75, 0.9};
 		double allocSweepShort = 0.8;
 
@@ -196,6 +197,10 @@ public class RunLeuvenCarrierReceiverCollabExample {
 		}
 		freightCollaborationConfigGroup.setVrpMaxIterations(50);
 		freightCollaborationConfigGroup.setParallelism(4);
+		freightCollaborationConfigGroup.setSamplesRatio(0.4);
+		freightCollaborationConfigGroup.setMonteCarloSamples(10);
+		freightCollaborationConfigGroup.setStratifiedSamplesPerLevel(10);
+		freightCollaborationConfigGroup.setMaxStratifiedEvaluations(200);
 		config.addModule(freightCollaborationConfigGroup);
 
 		// Load scenario
@@ -214,7 +219,7 @@ public class RunLeuvenCarrierReceiverCollabExample {
 		receiverConfigGroup.setReplanningType(ReceiverReplanningType.timeWindow);
 
 		// Add receivers and orders
-		Receivers receivers = generateScenarioReceivers(scenario, carriers, distribution, instanceId);
+		Receivers receivers = generateScenarioReceivers(scenario, carriers, depotLocation, distribution, instanceId);
 		ReceiverUtils.setReceivers(receivers, scenario);
 
 		// Some settings for the Receivers package
@@ -266,8 +271,8 @@ public class RunLeuvenCarrierReceiverCollabExample {
 
 	private static Config createConfig(String runId) {
 		Config config = ConfigUtils.createConfig();
-		config.network().setInputFile("data/GemeenteLeuvenWithHbefaType/GemeenteLeuvenWithHbefaType.xml.gz");
-		config.controller().setOutputDirectory("output/leuvenCarrierReceiverCollab/" + runId + "/");
+		config.network().setInputFile("data/GemeenteLeuvenWithHbefaType/carGemeenteLeuvenWithHbefaType.xml.gz");
+		config.controller().setOutputDirectory("output/" + OUTPUT_BASE_DIR + runId + "/");
 		config.controller().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
 		config.controller().setFirstIteration(0);
 		config.controller().setLastIteration(30);
@@ -287,7 +292,7 @@ public class RunLeuvenCarrierReceiverCollabExample {
 	}
 
 	private static void logRunStatus(String runId, String status, String reason) {
-		Path outputDir = Path.of("output", "leuvenCarrierReceiverCollab", runId);
+		Path outputDir = Path.of("output", OUTPUT_BASE_DIR, runId);
 		try {
 			Files.createDirectories(outputDir);
 			Path log = outputDir.resolve("run_log.txt");
@@ -306,7 +311,7 @@ public class RunLeuvenCarrierReceiverCollabExample {
 															  int instanceId) {
 		String prevRunId = buildRunId(instanceId, "leuvenCRCollab", distribution, depotLocation, allocationMethod,
 			allocationFactor, previousPenalty);
-		Path receiverScores = Path.of("output", "leuvenCarrierReceiverCollab", prevRunId, "receiver_scores.txt");
+		Path receiverScores = Path.of("output", OUTPUT_BASE_DIR, prevRunId, "receiver_scores.txt");
 		if (!Files.exists(receiverScores)) {
 			return false;
 		}
@@ -363,7 +368,8 @@ public class RunLeuvenCarrierReceiverCollabExample {
 
 		VehicleType lightVanType = CarrierVehicleType.Builder.newInstance(Id.create("light", VehicleType.class))
 			.setCapacity(3000)
-			.setFixCost(100)
+			.setFixCost(300)
+			.setMaxVelocity(25/3.6)
 			.setCostPerDistanceUnit(8.5E-4)
 			.setCostPerTimeUnit(0.0125)  // change to 0.005 euro/sec = 18 euro/hr?
 			.build();
@@ -371,7 +377,8 @@ public class RunLeuvenCarrierReceiverCollabExample {
 
 		VehicleType heavyVanType = CarrierVehicleType.Builder.newInstance(Id.create("heavy", VehicleType.class))
 			.setCapacity(5000)
-			.setFixCost(150)
+			.setFixCost(500)
+			.setMaxVelocity(25/3.6)
 			.setCostPerDistanceUnit(1.22E-3)
 			.setCostPerTimeUnit(0.0167)  // change to 0.006 euro/sec = 21.6 euro/hr?
 			.build();
@@ -409,11 +416,12 @@ public class RunLeuvenCarrierReceiverCollabExample {
 
 	private static Receivers generateScenarioReceivers(Scenario scenario,
 													   Carriers carriers,
+													   DepotLocation depotLocation,
 													   ReceiverSpatialDistribution distribution,
 													   int instanceId) {
 		Receivers receivers = ReceiverUtils.createReceivers();
 
-		Map<Id<Link>, String> receiverLocations = readReceiverLocation(instanceId, distribution);
+		Map<Id<Link>, String> receiverLocations = readReceiverLocation(instanceId, depotLocation, distribution);
 
 		for (Id<Link> locationLinkId: receiverLocations.keySet()) {
 			Receiver receiver = ReceiverUtils.newInstance(Id.create("receiver_"+locationLinkId.toString(), Receiver.class));
@@ -421,23 +429,23 @@ public class RunLeuvenCarrierReceiverCollabExample {
 			receiver.getAttributes().putAttribute(CollaborationUtils.ATTR_GRANDCOALITION_MEMBER, true);
 			receiver.getAttributes().putAttribute(CollaborationUtils.ATTR_COLLABORATION_STATUS, true);
 			// Add affiliated carrier ID as an attribute
-			receiver.getAttributes().putAttribute("affiliatedCarrierId", receiverLocations.get(locationLinkId));
+			receiver.getAttributes().putAttribute("affiliatedCarrierId", Id.create("carrier_" + receiverLocations.get(locationLinkId), Carrier.class));
 			receivers.addReceiver(receiver);
 		}
 
 
 
-		// Create a map <keys: carrierId (values in receiverLocations), values: Carrier object>
-		Map<String, Carrier> carrierMap = new HashMap<>();
-		Set<String> receiverLinkedCarrierIds = new HashSet<>(receiverLocations.values());
-		Iterator<String> receiverLinkedCarrierId = receiverLinkedCarrierIds.iterator();
-		for (Carrier carrier: carriers.getCarriers().values()){
-			carrierMap.put(receiverLinkedCarrierId.next(), carrier);
-		}
+//		// Create a map <keys: carrierId (values in receiverLocations), values: Carrier object>
+//		Map<String, Carrier> carrierMap = new HashMap<>();
+//		Set<String> receiverLinkedCarrierIds = new HashSet<>(receiverLocations.values());
+//		Iterator<String> receiverLinkedCarrierId = receiverLinkedCarrierIds.iterator();
+//		for (Carrier carrier: carriers.getCarriers().values()){
+//			carrierMap.put(receiverLinkedCarrierId.next(), carrier);
+//		}
 
 		// Generate orders for each receiver from its affiliated carrier
 		for (Receiver receiver: receivers.getReceivers().values()) {
-			generateReceiverOrders(carrierMap.get(receiver.getAttributes().getAttribute("affiliatedCarrierId")),
+			generateReceiverOrders(carriers.getCarriers().get(receiver.getAttributes().getAttribute("affiliatedCarrierId")),
 				receivers, receiver);
 		}
 
@@ -447,18 +455,25 @@ public class RunLeuvenCarrierReceiverCollabExample {
 	/**
 	 * Read csv.gz file containing generated receiver locations and affiliated carriers
 	 */
-	private static Map<Id<Link>, String> readReceiverLocation (int instanceId, ReceiverSpatialDistribution distribution){
+	private static Map<Id<Link>, String> readReceiverLocation (int instanceId,
+															   DepotLocation depotLocation,
+															   ReceiverSpatialDistribution distribution){
 		final String filePath;
-		if (distribution == ReceiverSpatialDistribution.CLUSTERED) {
-			filePath = "data/randomDemand100Receivers/clustered/location_i%02d.csv.gz".formatted(instanceId);
-		} else if (distribution == ReceiverSpatialDistribution.DISPERSED) {
-			filePath = "data/randomDemand100Receivers/dispersed/location_i%02d.csv.gz".formatted(instanceId);
+		if (distribution == ReceiverSpatialDistribution.CLUSTERED && depotLocation == DepotLocation.INSIDE) {
+			filePath = "data/randomDemand60Receivers/inside_clustered/demand.csv.gz";
+		} else if (distribution == ReceiverSpatialDistribution.CLUSTERED && depotLocation == DepotLocation.OUTSIDE) {
+			filePath = "data/randomDemand60Receivers/outside_clustered/demand.csv.gz";
+		} else if (distribution == ReceiverSpatialDistribution.DISPERSED && depotLocation == DepotLocation.INSIDE) {
+			filePath = "data/randomDemand60Receivers/inside_dispersed/demand.csv.gz";
+		} else if (distribution == ReceiverSpatialDistribution.DISPERSED && depotLocation == DepotLocation.OUTSIDE) {
+			filePath = "data/randomDemand60Receivers/outside_dispersed/demand.csv.gz";
+//			filePath = "data/randomDemand100Receivers/dispersed/location_i%02d.csv.gz".formatted(instanceId);
 		} else {
 			throw new IllegalArgumentException("Unsupported receiver spatial distribution: " + distribution);
 		}
 
-		// csv.gz: place_id, carrier_id, matched_link_id
-		// return: key=matched_link_id, value=carrier_id
+		// csv.gz: place_id, matched_link_id, depot_linkId
+		// return: key=matched_link_id, value=depot_linkId (as String - carrier ID)
 		Map<Id<Link>, String> linkId2CarrierId = new HashMap<>();
 		Path path = Path.of(filePath);
 		try (BufferedReader reader = new BufferedReader(new InputStreamReader(new GZIPInputStream(Files.newInputStream(path)), StandardCharsets.UTF_8))) {
@@ -478,8 +493,8 @@ public class RunLeuvenCarrierReceiverCollabExample {
 					throw new IllegalArgumentException("Invalid csv line (expected 3 columns) at " + filePath + ":" + lineNo + " -> " + line);
 				}
 
-				String carrierId = tokens[1].trim();
-				String matchedLinkIdStr = tokens[2].trim();
+				String carrierId = tokens[2].trim();
+				String matchedLinkIdStr = tokens[1].trim();
 				Id<Link> linkId = Id.createLinkId(matchedLinkIdStr);
 
 				String previous = linkId2CarrierId.put(linkId, carrierId);
@@ -510,7 +525,7 @@ public class RunLeuvenCarrierReceiverCollabExample {
 
 		Collection<Order> orders = new ArrayList<>();
 		Order order = Order.Builder.newInstance(Id.create("Order"+receiver.getId().toString(), Order.class), receiver, receiverProduct)
-			.setServiceTime(10*60)
+			.setServiceTime(15*60)
 			.buildWithCalculatedOrderQuantity();
 		orders.add(order);
 
