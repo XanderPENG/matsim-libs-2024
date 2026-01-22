@@ -121,8 +121,8 @@ public class RunLeuvenCarrierReceiverCollabExample {
 
 	public static void main(String[] args) {
 
-		List<Integer> instances = IntStream.range(0, 2).boxed().toList();
-		int instance = 1;
+		List<Integer> instances = IntStream.range(0, 10).boxed().toList();
+//		int instance = 1;
 
 		double[] penaltySweep = {0, 0.0003, 0.0008, 0.0014, 0.0028, 0.0056, 0.0098, 0.014, 0.028};
 //		double[] allocSweepShort = {0.6, 0.75, 0.9};
@@ -136,36 +136,44 @@ public class RunLeuvenCarrierReceiverCollabExample {
 			AllocationMethod.APPROX_SHAPLEY_STRATIFIED
 		);
 
-		for (ReceiverSpatialDistribution distribution : ReceiverSpatialDistribution.values()) {
-			for (DepotLocation depotLocation : DepotLocation.values()) {
-				for (AllocationMethod allocationMethod : methods) {
-					boolean skipChain = false; // once a penalty step is skipped, skip all higher penalties
-					for (int pIdx = 0; pIdx < penaltySweep.length; pIdx++) {
-						double penalty = penaltySweep[pIdx];
-						if (pIdx > 0 && skipChain) {
-							String runId = buildRunId(instance, "leuvenCRCollab", distribution, depotLocation,
-								allocationMethod, allocSweepShort, penalty);
-							logRunStatus(runId, "SKIPPED", "Previous penalty scenario was skipped; skipping higher penalty as well.");
-							continue;
-						}
-						if (pIdx > 0) {
-							double prevPenalty = penaltySweep[pIdx - 1];
-							boolean noCollab = isNoCollaborationInPreviousPenalty(distribution, depotLocation, allocationMethod,
-								allocSweepShort, prevPenalty, instance);
-							if (noCollab) {
+		for (int instance : instances){
+			for (ReceiverSpatialDistribution distribution : ReceiverSpatialDistribution.values()) {
+				for (DepotLocation depotLocation : DepotLocation.values()) {
+					for (AllocationMethod allocationMethod : methods) {
+						boolean skipChain = false; // once a penalty step is skipped, skip all higher penalties
+						for (int pIdx = 0; pIdx < penaltySweep.length; pIdx++) {
+							double penalty = penaltySweep[pIdx];
+							if (pIdx > 0 && skipChain) {
 								String runId = buildRunId(instance, "leuvenCRCollab", distribution, depotLocation,
 									allocationMethod, allocSweepShort, penalty);
-								logRunStatus(runId, "SKIPPED", "Previous penalty " + prevPenalty + " had no collaboration (avg.EXECUTED <= -100).");
-								skipChain = true;
+								logRunStatus(runId, "SKIPPED", "Previous penalty scenario was skipped; skipping higher penalty as well.");
 								continue;
 							}
+							if (pIdx > 0) {
+								double prevPenalty = penaltySweep[pIdx - 1];
+								boolean noCollab = isNoCollaborationInPreviousPenalty(distribution, depotLocation, allocationMethod,
+									allocSweepShort, prevPenalty, instance);
+								if (noCollab) {
+									String runId = buildRunId(instance, "leuvenCRCollab", distribution, depotLocation,
+										allocationMethod, allocSweepShort, penalty);
+									logRunStatus(runId, "SKIPPED", "Previous penalty " + prevPenalty + " had no collaboration (avg.EXECUTED <= -100).");
+									skipChain = true;
+									continue;
+								}
+							}
+							runSingleLeuvenScenario(instance, "leuvenCRCollab", distribution, depotLocation,
+									allocationMethod, allocSweepShort, penalty);
 						}
-						runSingleLeuvenScenario(instance, "leuvenCRCollab", distribution, depotLocation,
-								allocationMethod, allocSweepShort, penalty);
 					}
 				}
-			}
 
+			}
+			// Sleep between instances to avoid heating issues
+			try {
+				Thread.sleep(20 * 60 * 1000L);
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+			}
 		}
 	}
 
@@ -195,7 +203,7 @@ public class RunLeuvenCarrierReceiverCollabExample {
 		if (allocationMethod.model == AllocationModels.APPROX_SHAPLEY && allocationMethod.approxMethod != null) {
 			freightCollaborationConfigGroup.APPROX_SHAPLEY_METHOD = allocationMethod.approxMethod.name();
 		}
-		freightCollaborationConfigGroup.setVrpMaxIterations(50);
+		freightCollaborationConfigGroup.setVrpMaxIterations(100);
 		freightCollaborationConfigGroup.setParallelism(4);
 		freightCollaborationConfigGroup.setSamplesRatio(0.4);
 		freightCollaborationConfigGroup.setMonteCarloSamples(10);
@@ -460,13 +468,13 @@ public class RunLeuvenCarrierReceiverCollabExample {
 															   ReceiverSpatialDistribution distribution){
 		final String filePath;
 		if (distribution == ReceiverSpatialDistribution.CLUSTERED && depotLocation == DepotLocation.INSIDE) {
-			filePath = "data/randomDemand60Receivers/inside_clustered/demand.csv.gz";
+			filePath = "data/randomDemand60Receivers/inside_clustered/demand"+ instanceId + ".csv.gz";
 		} else if (distribution == ReceiverSpatialDistribution.CLUSTERED && depotLocation == DepotLocation.OUTSIDE) {
-			filePath = "data/randomDemand60Receivers/outside_clustered/demand.csv.gz";
+			filePath = "data/randomDemand60Receivers/outside_clustered/demand"+ instanceId + ".csv.gz";
 		} else if (distribution == ReceiverSpatialDistribution.DISPERSED && depotLocation == DepotLocation.INSIDE) {
-			filePath = "data/randomDemand60Receivers/inside_dispersed/demand.csv.gz";
+			filePath = "data/randomDemand60Receivers/inside_dispersed/demand"+ instanceId + ".csv.gz";
 		} else if (distribution == ReceiverSpatialDistribution.DISPERSED && depotLocation == DepotLocation.OUTSIDE) {
-			filePath = "data/randomDemand60Receivers/outside_dispersed/demand.csv.gz";
+			filePath = "data/randomDemand60Receivers/outside_dispersed/demand"+ instanceId + ".csv.gz";
 //			filePath = "data/randomDemand100Receivers/dispersed/location_i%02d.csv.gz".formatted(instanceId);
 		} else {
 			throw new IllegalArgumentException("Unsupported receiver spatial distribution: " + distribution);
@@ -493,8 +501,8 @@ public class RunLeuvenCarrierReceiverCollabExample {
 					throw new IllegalArgumentException("Invalid csv line (expected 3 columns) at " + filePath + ":" + lineNo + " -> " + line);
 				}
 
-				String carrierId = tokens[2].trim();
-				String matchedLinkIdStr = tokens[1].trim();
+				String carrierId = tokens[3].trim();
+				String matchedLinkIdStr = tokens[2].trim();
 				Id<Link> linkId = Id.createLinkId(matchedLinkIdStr);
 
 				String previous = linkId2CarrierId.put(linkId, carrierId);
