@@ -89,7 +89,7 @@ public class RunCarrierReceiverCollabChessboardExample {
 			upper right: j(7,2)
 	 */
 	private enum CustomerDistributionScenario {
-		FULLY_RANDOM,
+		// FULLY_RANDOM,
 		CLUSTERED,
 		DISPERSED;
 	}
@@ -101,12 +101,12 @@ public class RunCarrierReceiverCollabChessboardExample {
 		final Duration breakWindow = Duration.ofMinutes(15);
 		Instant windowStart = Instant.now();
 
-		List<Integer> instances = IntStream.range(0, 10).boxed().toList();
+		List<Integer> instances = IntStream.range(0, 50).boxed().toList();
 
-		/* Design 1 - finer penalty sweep: 0, 1, 2, 3, 5, 10, 20, 35, 50, 100 euro/hr
-		 * which equals to approx. 0.0003, 0.0006, 0.0008, 0.0014, 0.0028, 0.0056, 0.0098, 0.014, 0.028 euro/sec
+		/* Design 1 - finer penalty sweep: 0, 1, 2, 3, 5, 10, 20, 35, 50, 60, 80 100 euro/hr
+		 * which equals to approx. 0.0003, 0.0006, 0.0008, 0.0014, 0.0028, 0.0056, 0.0098, 0.014, 0.0167, 0.0222, 0.028 euro/sec
 		 */
-		double[] penaltySweep = {0, 0.0003, 0.0006, 0.0008, 0.0014, 0.0028, 0.0056, 0.0098, 0.014, 0.028};
+		double[] penaltySweep = {0, 0.0003, 0.0008, 0.0014, 0.0028, 0.0056, 0.0098, 0.014, 0.0167, 0.0222, 0.028};
 //		double[] allocSweepShort = {0.6, 0.75, 0.9};
 		double[] allocSweepShort = {0.8};
 		// Design 2: finer allocation factor sweep
@@ -133,11 +133,11 @@ public class RunCarrierReceiverCollabChessboardExample {
 						for (double allocFactor : allocSweepShort) {
 							for (AllocationMethodChoice method : methods) {
 								// Check if we need a break
-								if (Duration.between(windowStart, Instant.now()).compareTo(workWindow) >= 0) {
-									System.out.println("Cooldown: sleeping for " + breakWindow + " after " + workWindow + " of work.");
-									safeSleep(breakWindow);
-									windowStart = Instant.now();
-								}
+//								if (Duration.between(windowStart, Instant.now()).compareTo(workWindow) >= 0) {
+//									System.out.println("Cooldown: sleeping for " + breakWindow + " after " + workWindow + " of work.");
+//									safeSleep(breakWindow);
+//									windowStart = Instant.now();
+//								}
 
 								runSingleExperiment("penSweep", allocFactor, penalty, method, instance, depotScenario,
 									customerDistributionScenario);
@@ -182,6 +182,7 @@ public class RunCarrierReceiverCollabChessboardExample {
 		freightCfg.ALLOCATION_FACTOR = allocationFactor;
 		freightCfg.RECEIVER_RELAXATION_PENALTY = receiverPenalty;
 		freightCfg.ALLOCATION_MODEL = methodChoice.model;
+		freightCfg.setVrpMaxIterations(100);
 		if (methodChoice.model == AllocationModels.APPROX_SHAPLEY && methodChoice.approxMethod != null) {
 			freightCfg.APPROX_SHAPLEY_METHOD = methodChoice.approxMethod.name();
 		}
@@ -350,8 +351,8 @@ public class RunCarrierReceiverCollabChessboardExample {
 		Set<Id<Link>> candidateLinks;
 
 		switch (customerDistributionScenario) {
-			case CustomerDistributionScenario.FULLY_RANDOM ->
-				candidateLinks = generateFullyRandomReceiversWithinArea(network, count, seed);
+//			case CustomerDistributionScenario.FULLY_RANDOM ->
+//				candidateLinks = generateFullyRandomReceiversWithinArea(network, count, seed);
 			case CustomerDistributionScenario.CLUSTERED ->
 				candidateLinks = generateClusteredReceiversWithinArea(network, count, seed);
 			case CustomerDistributionScenario.DISPERSED ->
