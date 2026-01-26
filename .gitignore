@@ -17,3 +17,6 @@ matsim/src/main/java/Doxyfile
 
 # ignore output directories:
 output/
+
+#ignore pycache
+**/__pycache__/
