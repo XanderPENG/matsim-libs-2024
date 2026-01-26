@@ -129,7 +129,7 @@ public class RunLeuvenCarrierReceiverCollabExample {
 		double allocSweepShort = 0.8;
 
 		List<AllocationMethod> methods = List.of(
-//			AllocationMethod.SHAPLEY,
+			AllocationMethod.SHAPLEY,
 			AllocationMethod.MARGINAL,
 			AllocationMethod.PROPORTIONAL,
 			AllocationMethod.APPROX_SHAPLEY_MC,
