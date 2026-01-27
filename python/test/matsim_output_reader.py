@@ -12,7 +12,7 @@ import matsim
 import pandas as pd
 import geopandas as gpd
 import gzip
-from typing import Tuple
+from typing import Dict, Tuple
 
 def read_receivers(receiver_file_path, tw=None) -> dict:
     """
@@ -91,13 +91,14 @@ def read_receivers(receiver_file_path, tw=None) -> dict:
         'total_score': total_score
     }
 
-def read_carriers(carrier_file_path) -> Tuple[pd.DataFrame, pd.DataFrame]:   
+def read_carriers(carrier_file_path, with_iter0_scores=True) -> Tuple[pd.DataFrame, pd.DataFrame]:   
     """
     Reads MATSim carriers output file and derive its shipments, vehicles, and the
     score of the selected plan.
     
     Args:
         carrier_file_path (str): Path to the carriers XML file. 
+        with_iter0_scores (bool, optional): Whether to include iter0 scores. Defaults to True.
     Returns:
         A dict containing shipments DataFrame, vehicles DataFrame, and total score.
     """
@@ -107,14 +108,23 @@ def read_carriers(carrier_file_path) -> Tuple[pd.DataFrame, pd.DataFrame]:
 
 
 
-    if carrier_file_path.endswith('.gz') or carrier_file_path.endswith('.xml'):
+    if carrier_file_path.endswith('.xml.gz'):
         parse_filepath = carrier_file_path
-    else:
-        parse_filepath = carrier_file_path + 'output_carriers.xml.gz'
-
-    with gzip.open(parse_filepath, 'rb') as f:
-        tree = etree.parse(f)
+        with gzip.open(parse_filepath, 'rb') as f:
+            tree = etree.parse(f)
+            root = tree.getroot()
+    elif carrier_file_path.endswith('.xml'):
+        parse_filepath = carrier_file_path
+        tree = etree.parse(parse_filepath)
         root = tree.getroot()
+    elif os.path.isdir(carrier_file_path):
+        parse_filepath = os.path.join(carrier_file_path, 'output_carriers.xml.gz')
+        with gzip.open(parse_filepath, 'rb') as f:
+            tree = etree.parse(f)
+            root = tree.getroot()
+    else:
+        raise ValueError(f"Invalid carrier file path: {carrier_file_path}")
+
     
     # Handle namespace
     ns = {'m': 'http://www.matsim.org/files/dtd'}
@@ -185,4 +195,35 @@ def read_carriers(carrier_file_path) -> Tuple[pd.DataFrame, pd.DataFrame]:
         # End of carrier loop
     carriers_df = pd.DataFrame(carriers_data)
     shipments_df = pd.DataFrame(carriers_shipments)
+
+    #--- Read iter0 scores if required---
+    is_iter0_plan = os.path.basename(parse_filepath) == '0.carrierPlans.xml'
+    if with_iter0_scores and not is_iter0_plan:
+        folder_path = os.path.dirname(carrier_file_path)
+        iter0_carrier_score_dict = read_iter0_carriers(folder_path, only_scores=True)
+        carriers_df['iter0_carrier_score'] = carriers_df['carrier_id'].map(iter0_carrier_score_dict)
+
     return carriers_df, shipments_df
+
+def read_iter0_carriers(file_path: str, only_scores: bool = True) -> Dict[str, float]:
+    """
+    Reads the ITERATION_0 carriers output file to extract carrier plans 
+    When there are NO collaboration happened.
+
+    Args:
+        file_path (str): Path to the output folder.
+    """
+    #---check if the input is a path---
+    if os.path.isdir(file_path):
+        iter0_carrier_filepath = os.path.join(file_path, 'ITERS', 'it.0', '0.carrierPlans.xml')
+    elif os.path.isfile(file_path) and os.path.basename(file_path) == '0.carrierPlans.xml':
+        iter0_carrier_filepath = file_path
+    else:
+        raise ValueError(f"{file_path} is not a folder path or iter0 carrier plan file")
+    
+    if only_scores:
+        carriers_df, _ = read_carriers(iter0_carrier_filepath, with_iter0_scores=False)
+        return dict(zip(carriers_df['carrier_id'], carriers_df['carrier_score']))
+
+    return read_carriers(iter0_carrier_filepath, with_iter0_scores=False)
+        
