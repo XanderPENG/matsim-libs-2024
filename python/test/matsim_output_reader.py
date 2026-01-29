@@ -200,8 +200,11 @@ def read_carriers(carrier_file_path, with_iter0_scores=True) -> Tuple[pd.DataFra
     is_iter0_plan = os.path.basename(parse_filepath) == '0.carrierPlans.xml'
     if with_iter0_scores and not is_iter0_plan:
         folder_path = os.path.dirname(carrier_file_path)
-        iter0_carrier_score_dict = read_iter0_carriers(folder_path, only_scores=True)
-        carriers_df['iter0_carrier_score'] = carriers_df['carrier_id'].map(iter0_carrier_score_dict)
+        iter0_carrier_df, _ = read_iter0_carriers(folder_path, only_scores=False)
+        iter0_scores = iter0_carrier_df.set_index('carrier_id')['carrier_score']
+        iter0_vehicles = iter0_carrier_df.set_index('carrier_id')['num_vehicles']
+        carriers_df['iter0_carrier_score'] = carriers_df['carrier_id'].map(iter0_scores)
+        carriers_df['iter0_num_vehicles'] = carriers_df['carrier_id'].map(iter0_vehicles)
 
     return carriers_df, shipments_df
 
@@ -227,3 +230,70 @@ def read_iter0_carriers(file_path: str, only_scores: bool = True) -> Dict[str, f
 
     return read_carriers(iter0_carrier_filepath, with_iter0_scores=False)
         
+def read_matsim_events_as_df(events_file_path: str, event_types: str):
+    """ Read specified MATSim events (could be several types) into a pandas DataFrame.
+
+    Args:
+        events_file_path (str): Path to the MATSim events file.
+        event_types (str): e.g., "VehicleEntersTraffic,VehicleLeavesTraffic"
+
+    Returns:
+        pd.DataFrame: DataFrame containing the specified MATSim events.
+    """
+    events = matsim.event_reader(events_file_path, types=event_types)
+    # Get event keys
+    event_keys = set()
+    events_list = []
+    for event in events:
+        events_list.append(event)
+        current_keys = list(event.keys())
+        event_keys.update(current_keys)
+    # Store events in a dict
+    events_dict = {}
+    for idx, event in enumerate(events_list):
+        event_dict = {}
+        for key in event_keys:
+            if key in event.keys():
+                event_dict[key] = event[key]
+            else:
+                event_dict[key] = None
+        events_dict[idx] = event_dict
+    # Convert to DataFrame
+    events_df = pd.DataFrame.from_dict(events_dict, orient='index')
+    # Convert columns which is number-like str into float and ignore the rest
+    for column in events_df.columns:
+        try:
+            events_df[column] = events_df[column].astype(float)
+        except:
+            pass
+    return events_df
+
+
+def read_collaboration_allocation_data(folder_path: str, last_iter=50) -> Dict[str, float]:
+    """ Read the collaboration allocation data from the specified folder.
+
+    Args:
+        folder_path (str): Path to the output folder.
+    Returns:    
+        Dict[str, float]: A dictionary containing allocation data.
+    """
+
+    if os.path.isdir(folder_path):
+        last_iter_filepath = os.path.join(folder_path, 'ITERS', f'it.{last_iter}', f'{last_iter}.collaboration_data.xml')
+    elif os.path.isfile(folder_path) and os.path.basename(folder_path) == f'{last_iter}.collaboration_data.xml':
+        last_iter_filepath = folder_path
+    else:
+        raise ValueError(f"{folder_path} is not a folder path or collaboration data file")  
+    
+    # Parse the XML file
+    tree = etree.parse(last_iter_filepath)
+    root = tree.getroot()
+    
+    # Extract allocation data
+    allocation_dict = {}
+    for allocation in root.findall('.//allocation'):
+        collaborator_id = allocation.get('collaboratorId')
+        value = float(allocation.get('value'))
+        allocation_dict[collaborator_id] = value
+    
+    return allocation_dict
