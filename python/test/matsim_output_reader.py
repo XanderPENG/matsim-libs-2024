@@ -285,6 +285,10 @@ def read_collaboration_allocation_data(folder_path: str, last_iter=50) -> Dict[s
     else:
         return {'carrier1': 0.0}
     
+    # Check if file exists before parsing
+    if not os.path.exists(last_iter_filepath):
+        return {'carrier1': 0.0}
+    
     # Parse the XML file
     tree = etree.parse(last_iter_filepath)
     root = tree.getroot()
