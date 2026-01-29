@@ -283,7 +283,7 @@ def read_collaboration_allocation_data(folder_path: str, last_iter=50) -> Dict[s
     elif os.path.isfile(folder_path) and os.path.basename(folder_path) == f'{last_iter}.collaboration_data.xml':
         last_iter_filepath = folder_path
     else:
-        raise ValueError(f"{folder_path} is not a folder path or collaboration data file")  
+        return {'carrier1': 0.0}
     
     # Parse the XML file
     tree = etree.parse(last_iter_filepath)
