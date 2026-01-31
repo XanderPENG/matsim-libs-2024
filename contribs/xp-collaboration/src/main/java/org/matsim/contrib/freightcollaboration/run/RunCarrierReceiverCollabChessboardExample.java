@@ -89,7 +89,7 @@ public class RunCarrierReceiverCollabChessboardExample {
 			upper right: j(7,2)
 	 */
 	private enum CustomerDistributionScenario {
-		// FULLY_RANDOM,
+		FULLY_RANDOM,
 		CLUSTERED,
 		DISPERSED;
 	}
@@ -101,13 +101,14 @@ public class RunCarrierReceiverCollabChessboardExample {
 		final Duration breakWindow = Duration.ofMinutes(15);
 		Instant windowStart = Instant.now();
 
-		List<Integer> instances = IntStream.range(0, 50).boxed().toList();
+		List<Integer> instances = IntStream.range(50, 51).boxed().toList();
 
 		/* Design 1 - finer penalty sweep: 0, 1, 2, 3, 5, 10, 20, 35, 50, 60, 80 100 euro/hr
 		 * which equals to approx. 0.0003, 0.0006, 0.0008, 0.0014, 0.0028, 0.0056, 0.0098, 0.014, 0.0167, 0.0222, 0.028 euro/sec
 		 */
 		double[] penaltySweep = {0, 0.0003, 0.0008, 0.0014, 0.0028, 0.0056, 0.0098, 0.014, 0.0167, 0.0222, 0.028};
 //		double[] allocSweepShort = {0.6, 0.75, 0.9};
+//		double[] allocSweepShort = {0.5, 0.6, 0.7, 0.8, 0.9};
 		double[] allocSweepShort = {0.8};
 		// Design 2: finer allocation factor sweep
 		double fixedPenalty = 0.005;
@@ -325,13 +326,13 @@ public class RunCarrierReceiverCollabChessboardExample {
 				Id.createVehicleId("lightVan1"),
 				Id.createLinkId(depotLinkId),
 				lightVanType)
-			.setEarliestStart(5 * 60 * 60)
+			.setEarliestStart(6 * 60 * 60)
 			.build();
 		CarrierVehicle heavyVan = CarrierVehicle.Builder.newInstance(
 				Id.createVehicleId("heavyVan1"),
 				Id.createLinkId(depotLinkId),
 				heavyVanType)
-			.setEarliestStart(5 * 60 * 60)
+			.setEarliestStart(6 * 60 * 60)
 			.build();
 		CarrierCapabilities carrierCapabilities1 = CarrierCapabilities.Builder.newInstance()
 			.addVehicle(lightVan)
@@ -351,8 +352,8 @@ public class RunCarrierReceiverCollabChessboardExample {
 		Set<Id<Link>> candidateLinks;
 
 		switch (customerDistributionScenario) {
-//			case CustomerDistributionScenario.FULLY_RANDOM ->
-//				candidateLinks = generateFullyRandomReceiversWithinArea(network, count, seed);
+			case CustomerDistributionScenario.FULLY_RANDOM ->
+				candidateLinks = generateFullyRandomReceiversWithinArea(network, count, seed);
 			case CustomerDistributionScenario.CLUSTERED ->
 				candidateLinks = generateClusteredReceiversWithinArea(network, count, seed);
 			case CustomerDistributionScenario.DISPERSED ->
@@ -625,7 +626,7 @@ public class RunCarrierReceiverCollabChessboardExample {
 
 			ReceiverPlan receiverPlan = ReceiverPlan.Builder.newInstance(receiver, status)
 				.addReceiverOrder(receiverOrder1)
-				.addTimeWindow(TimeWindow.newInstance(6*60*60, 8*60*60))
+				.addTimeWindow(TimeWindow.newInstance(6*60*60, 7*60*60))
 				.build();
 
 			this.receiverPlans.put(receiver.getId(), receiverPlan);

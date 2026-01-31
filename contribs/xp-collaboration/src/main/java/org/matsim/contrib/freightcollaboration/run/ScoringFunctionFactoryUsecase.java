@@ -12,6 +12,7 @@ import org.matsim.contrib.freightcollaboration.FreightCollaborators;
 import org.matsim.contrib.freightcollaboration.allocation.CollaborationDataStore;
 import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfigGroup;
 import org.matsim.contrib.freightcollaboration.utils.LinkReceiverAndCarrier;
+import org.matsim.contrib.freightcollaboration.allocation.AllocationValueTypes;
 import org.matsim.core.scoring.ScoringFunction;
 import org.matsim.core.scoring.SumScoringFunction;
 import org.matsim.freight.carriers.*;
@@ -57,7 +58,7 @@ public class ScoringFunctionFactoryUsecase {
 			sf.addScoringFunction(new SimpleDriversActivityScoring());
 			double feePerReceiver = freightConfig != null ? freightConfig.CARRIER_CHARGED_FEE : 200.0;
 			sf.addScoringFunction(new SimpleChargingReceiverScoring(carrier, freightCollaborators, feePerReceiver));
-			sf.addScoringFunction(new retainCostSaving(carrier, dataStore));
+			sf.addScoringFunction(new distributeCostSavings(carrier, dataStore, freightConfig, freightCollaborators));
 			return sf;
 		}
 
@@ -73,7 +74,7 @@ public class ScoringFunctionFactoryUsecase {
 
 			private double score;
 			private final double timeParameter = 0.008;
-			private final double missedTimeWindowPenalty = 0.0278*5;  // 100euro per hour
+			private final double missedTimeWindowPenalty = 0.0278;  // 100euro per hour
 
 			public SimpleDriversActivityScoring() {
 				super();
@@ -148,16 +149,26 @@ public class ScoringFunctionFactoryUsecase {
 				return score;
 			}
 		}
+		/* Note: This assumes each receiver is linked to a single carrier.
+		    If receivers can belong to multiple carriers, summing their full allocations per carrier could double‑count payouts.
 
-		static class retainCostSaving implements SumScoringFunction.BasicScoring {
 
-			private Carrier carrier;
-			private  CollaborationDataStore dataStore;
+		 */
+		static class distributeCostSavings implements SumScoringFunction.BasicScoring {
 
-			public retainCostSaving(Carrier carrier, CollaborationDataStore dataStore) {
+			private final Carrier carrier;
+			private final CollaborationDataStore dataStore;
+			private final FreightCollaborationConfigGroup freightConfig;
+			private final FreightCollaborators freightCollaborators;
+
+			public distributeCostSavings(Carrier carrier, CollaborationDataStore dataStore,
+										 FreightCollaborationConfigGroup freightConfig,
+										 FreightCollaborators freightCollaborators) {
 				super();
 				this.carrier = carrier;
 				this.dataStore = dataStore;
+				this.freightConfig = freightConfig;
+				this.freightCollaborators = freightCollaborators;
 			}
 
 			@Override
@@ -170,7 +181,19 @@ public class ScoringFunctionFactoryUsecase {
 				if (dataStore.getAllocatedValues() == null || dataStore.getAllocatedValues().isEmpty()) {
 					return 0.0;
 				}
-				return dataStore.getAllocatedValues().getOrDefault(carrier.getId(), 0.0);
+				if (freightConfig == null || freightConfig.getAllocationStrategy() != AllocationValueTypes.COST_SAVINGS) {
+					return 0.0;
+				}
+				double distributed = 0.0;
+				Set<FreightCollaborator<Receiver>> linkedReceivers =
+					LinkReceiverAndCarrier.findLinkedReceivers(carrier, freightCollaborators);
+				for (FreightCollaborator<Receiver> receiver : linkedReceivers) {
+					double allocation = dataStore.getAllocatedValues().getOrDefault(receiver.getId(), 0.0);
+					if (allocation > 0) {
+						distributed += allocation;
+					}
+				}
+				return -distributed;
 			}
 		}
 

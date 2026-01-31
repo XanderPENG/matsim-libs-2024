@@ -317,8 +317,13 @@ public class FreightPseudoSimulator {
 					// create a FreightActivity based on lastAct and this leg time
 					Activity basicActivity = PopulationUtils.createActivityFromLinkId(lastAct.getActivityType(),
 							lastAct.getLocation());
-					basicActivity.setStartTime(((Tour.Leg) el).getExpectedDepartureTime());
-					basicActivity.setEndTime(lastAct.getDuration() + ((Tour.Leg) el).getExpectedDepartureTime());
+					double nextLegDeparture = ((Tour.Leg) el).getExpectedDepartureTime();
+					double actDuration = lastAct.getDuration();
+					// In carrier routing, the next-leg departure equals activity end time.
+					// So activity start is end minus duration (this keeps time-window penalties consistent).
+					double actStart = nextLegDeparture - actDuration;
+					basicActivity.setStartTime(actStart);
+					basicActivity.setEndTime(nextLegDeparture);
 					FreightActivity freightActivity = new FreightActivity(basicActivity, lastAct.getTimeWindow());
 					// add to freightActivities
 					freightActivities.add(freightActivity);

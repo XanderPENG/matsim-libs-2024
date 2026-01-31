@@ -7,6 +7,8 @@ import org.matsim.contrib.freightcollaboration.run.ScoringFunctionFactoryUsecase
 import org.matsim.core.scoring.ScoringFunction;
 import org.matsim.core.utils.collections.Tuple;
 import org.matsim.freight.carriers.Carrier;
+import org.matsim.freight.carriers.CarrierPlan;
+import org.matsim.freight.carriers.ScheduledTour;
 import org.matsim.freight.carriers.controller.CarrierScoringFunctionFactory;
 import org.matsim.freight.carriers.controller.FreightActivity;
 
@@ -70,6 +72,20 @@ class CarrierPSimScorer {
 			// Lastly, using getScore and finish to finalize scoring
 			scoringFunction.finish();
 			totalScore += scoringFunction.getScore();
+		}
+		// Fixed vehicle costs are carrier-level and should only be counted once.
+		int driverCount = driverLegsAndActivities.size();
+		if (driverCount > 1) {
+			double fixedCost = 0.0;
+			CarrierPlan selectedPlan = carrier.getSelectedPlan();
+			if (selectedPlan != null) {
+				for (ScheduledTour tour : selectedPlan.getScheduledTours()) {
+					if (!tour.getTour().getTourElements().isEmpty()) {
+						fixedCost += (-1) * tour.getVehicle().getType().getCostInformation().getFixedCosts();
+					}
+				}
+			}
+			totalScore -= (driverCount - 1) * fixedCost;
 		}
 		return totalScore;
 	}
