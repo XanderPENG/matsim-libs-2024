@@ -465,6 +465,79 @@ def compute_merged_shipment_df(
     merged_df['penalty'] = config.penalty
     merged_df['instance'] = config.instance
     
+    #----- Compute delivery time deviations with signs: + indicates delayed delivery while - means early delivery -----
+    # Deviation = actual_delivery_time - end_of_time_window
+    # Positive (+) means delivered AFTER the time window (delayed/late)
+    # Negative (-) means delivered BEFORE the time window end (on-time or early)
+    
+    # Convert time window bounds to seconds if they are strings
+    def to_seconds(val):
+        """Convert time value to seconds (handles both numeric and HH:MM:SS format)."""
+        if pd.isna(val):
+            return np.nan
+        if isinstance(val, (int, float)):
+            return float(val)
+        if isinstance(val, str):
+            try:
+                return float(val)
+            except ValueError:
+                parts = val.split(':')
+                if len(parts) == 3:
+                    return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
+                elif len(parts) == 2:
+                    return float(parts[0]) * 60 + float(parts[1])
+        return np.nan
+    
+    # Convert delivery time window bounds
+    merged_df['start_delivery_sec'] = merged_df['start_delivery'].apply(to_seconds)
+    merged_df['end_delivery_sec'] = merged_df['end_delivery'].apply(to_seconds)
+    
+    # Final iteration deviation (vs. end of time window)
+    # Positive = late (after window), Negative = early (before window end)
+    if 'final_delivery_time' in merged_df.columns:
+        merged_df['final_delivery_time_deviation_sec'] = (
+            merged_df['final_delivery_time'] - merged_df['end_delivery_sec']
+        )
+        merged_df['final_delivery_time_deviation_min'] = (
+            merged_df['final_delivery_time_deviation_sec'] / 60.0
+        )
+        # Also compute deviation from start (for early arrivals before window opens)
+        merged_df['final_early_arrival_deviation_sec'] = (
+            merged_df['start_delivery_sec'] - merged_df['final_delivery_time']
+        ).clip(lower=0)  # Only positive when arriving before window starts
+        merged_df['final_early_arrival_deviation_min'] = (
+            merged_df['final_early_arrival_deviation_sec'] / 60.0
+        )
+    else:
+        merged_df['final_delivery_time_deviation_min'] = np.nan
+        merged_df['final_early_arrival_deviation_min'] = np.nan
+    
+    # Iter0 deviation (vs. end of time window)
+    if 'iter0_delivery_time' in merged_df.columns:
+        merged_df['iter0_delivery_time_deviation_sec'] = (
+            merged_df['iter0_delivery_time'] - merged_df['end_delivery_sec']
+        )
+        merged_df['iter0_delivery_time_deviation_min'] = (
+            merged_df['iter0_delivery_time_deviation_sec'] / 60.0
+        )
+        # Also compute deviation from start
+        merged_df['iter0_early_arrival_deviation_sec'] = (
+            merged_df['start_delivery_sec'] - merged_df['iter0_delivery_time']
+        ).clip(lower=0)
+        merged_df['iter0_early_arrival_deviation_min'] = (
+            merged_df['iter0_early_arrival_deviation_sec'] / 60.0
+        )
+    else:
+        merged_df['iter0_delivery_time_deviation_min'] = np.nan
+        merged_df['iter0_early_arrival_deviation_min'] = np.nan
+    
+    # Drop intermediate columns
+    merged_df = merged_df.drop(columns=[
+        'start_delivery_sec', 'end_delivery_sec',
+        'final_delivery_time_deviation_sec', 'iter0_delivery_time_deviation_sec',
+        'final_early_arrival_deviation_sec', 'iter0_early_arrival_deviation_sec'
+    ], errors='ignore')
+    
     return merged_df
 
 
@@ -915,6 +988,187 @@ def quick_analyze(
         compute_network_distances=compute_network_distances,
         verbose=True
     )
+
+
+def aggregate_shipment_metrics_from_clean_folder(
+    clean_folder_path: str,
+    verbose: bool = True
+) -> pd.DataFrame:
+    """
+    Aggregate shipment-level metrics from all scenario folders in the clean data directory.
+    
+    This function reads shipments.csv.gz from each scenario folder, computes deviation and
+    distance metrics, and returns a summary DataFrame with one row per scenario.
+    
+    Args:
+        clean_folder_path: Path to the clean data directory containing scenario folders.
+            Each folder should be named as: {depot}-{distribution}-af{af}-p{penalty}-i{instance}
+            e.g., "center-CLUSTERED-af0.80-p0.0222-i11"
+        verbose: Whether to show progress bar.
+    
+    Returns:
+        DataFrame with columns:
+            - depot_location: Depot position (center/left)
+            - receiver_distribution: Receiver distribution type (CLUSTERED/DISPERSED/FULLY_RANDOM)
+            - allocation_factor: Allocation factor value
+            - penalty: Penalty value
+            - instance_id: Instance number
+            - iter0_mean_delivery_deviation_min: Mean deviation (minutes) for iter0, + = late, - = early
+            - final_mean_delivery_deviation_min: Mean deviation (minutes) for final, + = late, - = early
+            - iter0_early_arrival_count: Number of shipments delivered before time window starts (iter0)
+            - iter0_late_arrival_count: Number of shipments delivered after time window ends (iter0)
+            - final_early_arrival_count: Number of shipments delivered before time window starts (final)
+            - final_late_arrival_count: Number of shipments delivered after time window ends (final)
+            - iter0_total_travel_distance_km: Sum of travel distances (km) for all shipments (iter0)
+            - final_total_travel_distance_km: Sum of travel distances (km) for all shipments (final)
+    """
+    # Helper function to convert time to seconds
+    def to_seconds(val):
+        """Convert time value to seconds (handles both numeric and HH:MM:SS format)."""
+        if pd.isna(val):
+            return np.nan
+        if isinstance(val, (int, float)):
+            return float(val)
+        if isinstance(val, str):
+            try:
+                return float(val)
+            except ValueError:
+                parts = val.split(':')
+                if len(parts) == 3:
+                    return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
+                elif len(parts) == 2:
+                    return float(parts[0]) * 60 + float(parts[1])
+        return np.nan
+    
+    # Regex pattern to parse folder names
+    # Format: {depot}-{distribution}-af{af}-p{penalty}-i{instance}
+    folder_pattern = re.compile(
+        r'^(?P<depot>\w+)-(?P<distribution>\w+)-af(?P<af>[\d.]+)-p(?P<penalty>[\d.]+)-i(?P<instance>\d+)$'
+    )
+    
+    # List all scenario folders
+    clean_path = Path(clean_folder_path)
+    scenario_folders = [
+        f for f in clean_path.iterdir() 
+        if f.is_dir() and folder_pattern.match(f.name)
+    ]
+    
+    if verbose:
+        print(f"Found {len(scenario_folders)} scenario folders in {clean_folder_path}")
+    
+    results = []
+    iterator = tqdm(scenario_folders, desc="Processing scenarios") if verbose else scenario_folders
+    
+    for folder in iterator:
+        # Parse folder name
+        match = folder_pattern.match(folder.name)
+        if not match:
+            continue
+            
+        depot = match.group('depot')
+        distribution = match.group('distribution')
+        allocation_factor = float(match.group('af'))
+        penalty = float(match.group('penalty'))
+        instance_id = int(match.group('instance'))
+        
+        # Read shipments.csv.gz
+        shipments_path = folder / 'shipments.csv.gz'
+        if not shipments_path.exists():
+            if verbose:
+                tqdm.write(f"Warning: shipments.csv.gz not found in {folder.name}, skipping...")
+            continue
+        
+        try:
+            df = pd.read_csv(shipments_path, compression='gzip')
+        except Exception as e:
+            if verbose:
+                tqdm.write(f"Error reading {shipments_path}: {e}, skipping...")
+            continue
+        
+        # Convert time window bounds to seconds
+        df['start_delivery_sec'] = df['start_delivery'].apply(to_seconds)
+        df['end_delivery_sec'] = df['end_delivery'].apply(to_seconds)
+        
+        # ----- 1. Compute delivery time deviation -----
+        # Deviation = actual_delivery_time - end_of_time_window (in seconds, then convert to minutes)
+        # Positive (+) = delivered AFTER time window (late)
+        # Negative (-) = delivered BEFORE time window ends (on-time or early)
+        
+        # Final iteration deviation
+        if 'final_delivery_time' in df.columns:
+            df['final_deviation_sec'] = df['final_delivery_time'] - df['end_delivery_sec']
+            final_mean_deviation_min = df['final_deviation_sec'].mean() / 60.0
+        else:
+            final_mean_deviation_min = np.nan
+        
+        # Iter0 deviation
+        if 'iter0_delivery_time' in df.columns:
+            df['iter0_deviation_sec'] = df['iter0_delivery_time'] - df['end_delivery_sec']
+            iter0_mean_deviation_min = df['iter0_deviation_sec'].mean() / 60.0
+        else:
+            iter0_mean_deviation_min = np.nan
+        
+        # ----- 2. Count missed time window shipments -----
+        # Early arrival: delivery_time < start_delivery (arrived before TW opens)
+        # Late arrival: delivery_time > end_delivery (arrived after TW closes)
+        
+        # Final iteration
+        if 'final_delivery_time' in df.columns:
+            final_early_count = (df['final_delivery_time'] < df['start_delivery_sec']).sum()
+            final_late_count = (df['final_delivery_time'] > df['end_delivery_sec']).sum()
+        else:
+            final_early_count = np.nan
+            final_late_count = np.nan
+        
+        # Iter0
+        if 'iter0_delivery_time' in df.columns:
+            iter0_early_count = (df['iter0_delivery_time'] < df['start_delivery_sec']).sum()
+            iter0_late_count = (df['iter0_delivery_time'] > df['end_delivery_sec']).sum()
+        else:
+            iter0_early_count = np.nan
+            iter0_late_count = np.nan
+        
+        # ----- 3. Compute total travel distance -----
+        if 'final_travel_distance_km' in df.columns:
+            final_total_distance_km = df['final_travel_distance_km'].sum()
+        else:
+            final_total_distance_km = np.nan
+        
+        if 'iter0_travel_distance_km' in df.columns:
+            iter0_total_distance_km = df['iter0_travel_distance_km'].sum()
+        else:
+            iter0_total_distance_km = np.nan
+        
+        # Append result row
+        results.append({
+            'depot_location': depot,
+            'receiver_distribution': distribution,
+            'allocation_factor': allocation_factor,
+            'penalty': penalty,
+            'instance_id': instance_id,
+            'iter0_mean_delivery_deviation_min': iter0_mean_deviation_min,
+            'final_mean_delivery_deviation_min': final_mean_deviation_min,
+            'iter0_early_arrival_count': iter0_early_count,
+            'iter0_late_arrival_count': iter0_late_count,
+            'final_early_arrival_count': final_early_count,
+            'final_late_arrival_count': final_late_count,
+            'iter0_total_travel_distance_km': iter0_total_distance_km,
+            'final_total_travel_distance_km': final_total_distance_km,
+        })
+    
+    # Create DataFrame
+    result_df = pd.DataFrame(results)
+    
+    # Sort by scenario parameters
+    if not result_df.empty:
+        result_df = result_df.sort_values(
+            by=['depot_location', 'receiver_distribution', 'allocation_factor', 'penalty', 'instance_id']
+        ).reset_index(drop=True)
+    
+    if verbose:
+        print(f"Processed {len(result_df)} scenarios successfully.")
+    
+    return result_df
 
 
 if __name__ == "__main__":
