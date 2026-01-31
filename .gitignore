@@ -17,3 +17,6 @@ matsim/src/main/java/Doxyfile
 
 # ignore output directories:
 output/
+data/freightChessboardRC/clean/
+#ignore pycache
+**/__pycache__/
