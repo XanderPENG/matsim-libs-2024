@@ -24,6 +24,8 @@ public class CollaborationDataStore {
 	private Map<Id<?>, Double> allocatedValues;
 	private Scenario scenario;
 	private Map<Id<Carrier>, Carrier> LspReceiverCopiedNonDistrCarriers;
+	private Map<Id<Carrier>, Double> iter0CarrierBaselineFeeFree;
+	private Map<Id<Carrier>, Double> iter0CarrierBaselineFeeIncluded;
 
 	public CollaborationDataStore(Map<CollaboratorRole, Map<Id<?>, ? extends BasicPlan>> originalPlans) {
 		this.originalPlans = originalPlans;
@@ -82,5 +84,21 @@ public class CollaborationDataStore {
 
 	public Map<Id<Carrier>, Carrier> getLspReceiverCopiedNonDistrCarriers() {
 		return LspReceiverCopiedNonDistrCarriers;
+	}
+
+	public void setIter0CarrierBaselineFeeFree(Map<Id<Carrier>, Double> baselineScores) {
+		this.iter0CarrierBaselineFeeFree = baselineScores;
+	}
+
+	public Map<Id<Carrier>, Double> getIter0CarrierBaselineFeeFree() {
+		return iter0CarrierBaselineFeeFree;
+	}
+
+	public void setIter0CarrierBaselineFeeIncluded(Map<Id<Carrier>, Double> baselineScores) {
+		this.iter0CarrierBaselineFeeIncluded = baselineScores;
+	}
+
+	public Map<Id<Carrier>, Double> getIter0CarrierBaselineFeeIncluded() {
+		return iter0CarrierBaselineFeeIncluded;
 	}
 }

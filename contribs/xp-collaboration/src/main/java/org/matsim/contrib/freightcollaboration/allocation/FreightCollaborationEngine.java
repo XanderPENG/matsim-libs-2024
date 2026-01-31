@@ -75,7 +75,7 @@ public class FreightCollaborationEngine {
 
 		Supplier<FreightPseudoSimulator> pseudoSimulatorSupplier = () -> {
 			FreightPseudoSimulator simulator = new FreightPseudoSimulator(collaborationDataStore, scenario.getNetwork(),
-				freightCollaborators, travelTime, carrierScoringFunctionFactory);
+				freightCollaborators, travelTime, carrierScoringFunctionFactory, fcg);
 			simulator.setVrpMaxIterations(fcg.getVrpMaxIterations());
 			return simulator;
 		};

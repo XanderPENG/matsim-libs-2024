@@ -8,6 +8,7 @@ import org.matsim.api.core.v01.population.Activity;
 import org.matsim.api.core.v01.population.Leg;
 import org.matsim.api.core.v01.population.Route;
 import org.matsim.contrib.freightcollaboration.*;
+import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfigGroup;
 import org.matsim.contrib.freightcollaboration.run.ScoringFunctionFactoryUsecase;
 import org.matsim.contrib.freightcollaboration.utils.AllocationUtils;
 import org.matsim.contrib.freightcollaboration.utils.LinkReceiverAndCarrier;
@@ -53,6 +54,7 @@ public class FreightPseudoSimulator {
 	TravelTime tt;
 
 	CarrierScoringFunctionFactory carrierScoringFunctionFactory;
+	FreightCollaborationConfigGroup freightConfig;
 
 	private static Logger LOGGER = LogManager.getLogger(FreightPseudoSimulator.class);
 	/** Upper bound for jsprit iterations during sampling; keeps Shapley runs lightweight. */
@@ -64,12 +66,14 @@ public class FreightPseudoSimulator {
 
 	FreightPseudoSimulator(CollaborationDataStore dataStore, Network network,
 						   FreightCollaborators freightCollaborators, TravelTime tt,
-						   CarrierScoringFunctionFactory carrierScoringFunctionFactory) {
+						   CarrierScoringFunctionFactory carrierScoringFunctionFactory,
+						   FreightCollaborationConfigGroup freightConfig) {
 		this.tt = tt;
 		this.collaborationDataStore = dataStore;
 		this.network = network;
 		this.freightCollaborators = freightCollaborators;
 		this.carrierScoringFunctionFactory = carrierScoringFunctionFactory;
+		this.freightConfig = freightConfig;
 	}
 
 	void run() {
@@ -151,6 +155,17 @@ public class FreightPseudoSimulator {
 		// if it is carrier-receiver collaboration - runCarrierPSim
 		if (CollaborationTypes.CARRIER_RECEIVER.isCompatible(collaboratorRoleOfDistributors, collaboratorRoleOfPlayers)) {
 			var carrierCollaborator = (FreightCollaborator<Carrier>) copyDistributors.values().iterator().next();
+			if (collaboratingSubset.isEmpty() && freightConfig != null
+				&& freightConfig.getIter0BaselineMode() != FreightCollaborationConfigGroup.Iter0BaselineMode.DISABLED) {
+				Id<Carrier> carrierId = carrierCollaborator.getDelegate().getId();
+				Map<Id<Carrier>, Double> baselineMap = freightConfig.getIter0BaselineMode() ==
+					FreightCollaborationConfigGroup.Iter0BaselineMode.FEE_INCLUDED
+					? collaborationDataStore.getIter0CarrierBaselineFeeIncluded()
+					: collaborationDataStore.getIter0CarrierBaselineFeeFree();
+				if (baselineMap != null && baselineMap.containsKey(carrierId)) {
+					return baselineMap.get(carrierId);
+				}
+			}
 			var receiverCollaborators = new HashSet<>((Set<FreightCollaborator<Receiver>>) (Set<?>) Set.copyOf(copyPlayers.values()));
 			Set<FreightCollaborator<Receiver>> nonCollaboratingReceivers = new HashSet<>();
 			@SuppressWarnings("unchecked")
@@ -183,7 +198,7 @@ public class FreightPseudoSimulator {
 			// calculate the score based on the output legs and activities
 			// TODO: inject the carrierScoringFunctionFactory properly
 			CarrierPSimScorer carrierPSimScorer = new CarrierPSimScorer(driverLegsAndActivitiesMap,
-				carrierCollaborator.getDelegate(), carrierScoringFunctionFactory);
+				carrierCollaborator.getDelegate(), carrierScoringFunctionFactory, freightConfig);
 			return carrierPSimScorer.getScore();
 
 			}
@@ -254,7 +269,7 @@ public class FreightPseudoSimulator {
 				var driverLegsAndActivitiesMap = runActivityBasedCarrierSimulation(lspCarrierResource.getCarrier());
 				// Score each affiliated carrier
 				CarrierPSimScorer carrierPSimScorer = new CarrierPSimScorer(driverLegsAndActivitiesMap,
-					lspCarrierResource.getCarrier(), carrierScoringFunctionFactory);
+					lspCarrierResource.getCarrier(), carrierScoringFunctionFactory, freightConfig);
 				// Set the score back to the carrier plan
 				lspCarrierResource.getCarrier().getSelectedPlan().setScore(carrierPSimScorer.getScore());
 			}

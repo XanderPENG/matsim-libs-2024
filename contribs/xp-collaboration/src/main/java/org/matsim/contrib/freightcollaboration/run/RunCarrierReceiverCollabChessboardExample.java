@@ -187,6 +187,8 @@ public class RunCarrierReceiverCollabChessboardExample {
 		if (methodChoice.model == AllocationModels.APPROX_SHAPLEY && methodChoice.approxMethod != null) {
 			freightCfg.APPROX_SHAPLEY_METHOD = methodChoice.approxMethod.name();
 		}
+		freightCfg.setPsimScoringModeString(FreightCollaborationConfigGroup.PsimScoringMode.BASIC_COST.toString());
+		freightCfg.setIter0BaselineModeString(FreightCollaborationConfigGroup.Iter0BaselineMode.FEE_FREE.toString());
 		config.addModule(freightCfg);
 
 		runSingleControler(config, depotScenario, customerDistributionScenario, instance);

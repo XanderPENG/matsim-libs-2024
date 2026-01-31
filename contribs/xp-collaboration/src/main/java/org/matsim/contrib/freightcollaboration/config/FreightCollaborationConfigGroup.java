@@ -61,6 +61,27 @@ public class FreightCollaborationConfigGroup extends ReflectiveConfigGroup {
 	 */
 	private AllocationValueTypes ALLOCATION_STRATEGY = AllocationValueTypes.COST_SAVINGS;
 
+	public enum PsimScoringMode {
+		BASIC_COST,
+		BASIC_PLUS_FEES
+	}
+
+	public enum Iter0BaselineMode {
+		DISABLED,
+		FEE_FREE,
+		FEE_INCLUDED
+	}
+
+	/**
+	 * Controls which scoring function the carrier PSim uses.
+	 */
+	private PsimScoringMode PSIM_SCORING_MODE = PsimScoringMode.BASIC_COST;
+
+	/**
+	 * Controls whether iteration-0 carrier scores are cached and reused as the baseline.
+	 */
+	private Iter0BaselineMode ITER0_BASELINE_MODE = Iter0BaselineMode.DISABLED;
+
 	/**
 	 * Approximate Shapley method selection (MONTE_CARLO | STRATIFIED).
 	 */
@@ -180,6 +201,44 @@ public class FreightCollaborationConfigGroup extends ReflectiveConfigGroup {
 
 	public AllocationValueTypes getAllocationStrategy() {
 		return ALLOCATION_STRATEGY;
+	}
+
+	@StringGetter("PSIM_SCORING_MODE")
+	public String getPsimScoringModeString() {
+		return PSIM_SCORING_MODE.toString();
+	}
+
+	@StringSetter("PSIM_SCORING_MODE")
+	public void setPsimScoringModeString(String mode) {
+		try {
+			this.PSIM_SCORING_MODE = PsimScoringMode.valueOf(mode);
+		} catch (IllegalArgumentException e) {
+			throw new IllegalArgumentException("Invalid PSIM_SCORING_MODE: " + mode + ". Valid options are: " + String.join(", ",
+				java.util.Arrays.stream(PsimScoringMode.values()).map(Enum::name).toArray(String[]::new)));
+		}
+	}
+
+	public PsimScoringMode getPsimScoringMode() {
+		return PSIM_SCORING_MODE;
+	}
+
+	@StringGetter("ITER0_BASELINE_MODE")
+	public String getIter0BaselineModeString() {
+		return ITER0_BASELINE_MODE.toString();
+	}
+
+	@StringSetter("ITER0_BASELINE_MODE")
+	public void setIter0BaselineModeString(String mode) {
+		try {
+			this.ITER0_BASELINE_MODE = Iter0BaselineMode.valueOf(mode);
+		} catch (IllegalArgumentException e) {
+			throw new IllegalArgumentException("Invalid ITER0_BASELINE_MODE: " + mode + ". Valid options are: " + String.join(", ",
+				java.util.Arrays.stream(Iter0BaselineMode.values()).map(Enum::name).toArray(String[]::new)));
+		}
+	}
+
+	public Iter0BaselineMode getIter0BaselineMode() {
+		return ITER0_BASELINE_MODE;
 	}
 
 	public int getVrpMaxIterations() {

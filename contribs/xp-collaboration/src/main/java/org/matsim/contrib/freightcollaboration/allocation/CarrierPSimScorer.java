@@ -4,6 +4,7 @@ import com.google.inject.Inject;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.population.Leg;
 import org.matsim.contrib.freightcollaboration.run.ScoringFunctionFactoryUsecase;
+import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfigGroup;
 import org.matsim.core.scoring.ScoringFunction;
 import org.matsim.core.utils.collections.Tuple;
 import org.matsim.freight.carriers.Carrier;
@@ -21,15 +22,18 @@ class CarrierPSimScorer {
 
 	Map<Integer, Tuple<List<FreightActivity>, List<Leg>>> driverLegsAndActivities;
 	Carrier carrier;
+	FreightCollaborationConfigGroup freightConfig;
 
 //	@Inject
 	CarrierScoringFunctionFactory carrierScoringFunctionFactory;
 
 	CarrierPSimScorer(Map<Integer, Tuple<List<FreightActivity>, List<Leg>>> driverLegsAndActivities, Carrier carrier,
-					  CarrierScoringFunctionFactory carrierScoringFunctionFactory) {
+					  CarrierScoringFunctionFactory carrierScoringFunctionFactory,
+					  FreightCollaborationConfigGroup freightConfig) {
 		this.driverLegsAndActivities = driverLegsAndActivities;
 		this.carrier = carrier;
 		this.carrierScoringFunctionFactory = carrierScoringFunctionFactory;
+		this.freightConfig = freightConfig;
 	}
 
 	private void initScoringFunctions(){
@@ -37,7 +41,15 @@ class CarrierPSimScorer {
 		for(Integer driverId : driverLegsAndActivities.keySet()) {
 			// create scoring function for each driver, only considering cost components
 			// TODO: make this more general if other scoring functions are needed
-			ScoringFunction scoringFunction = ((ScoringFunctionFactoryUsecase.CarrierScoringFunctionFactoryUsecase) carrierScoringFunctionFactory).createBasicCostScoringFunction(carrier);
+			ScoringFunctionFactoryUsecase.CarrierScoringFunctionFactoryUsecase factory =
+				(ScoringFunctionFactoryUsecase.CarrierScoringFunctionFactoryUsecase) carrierScoringFunctionFactory;
+			ScoringFunction scoringFunction;
+			if (freightConfig != null
+				&& freightConfig.getPsimScoringMode() == FreightCollaborationConfigGroup.PsimScoringMode.BASIC_PLUS_FEES) {
+				scoringFunction = factory.createBasicCostPlusFeesScoringFunction(carrier);
+			} else {
+				scoringFunction = factory.createBasicCostScoringFunction(carrier);
+			}
 			scoringFunctions.put(driverId, scoringFunction);
 		}
 	}

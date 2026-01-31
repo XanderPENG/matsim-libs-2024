@@ -42,6 +42,7 @@ public class CollaborationModule extends AbstractModule {
 
 	@Override
 	public void install() {
+		this.addControlerListenerBinding().to(Iter0BaselineCarrierScoreListener.class);
 		this.addControlerListenerBinding().to(NotifyCoalitionInfoListener.class);
 		this.addControlerListenerBinding().to(FormFreightCoalitionListener.class);
 		this.addControlerListenerBinding().to(FreightCollaborationListener.class);

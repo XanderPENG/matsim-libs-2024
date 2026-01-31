@@ -70,6 +70,16 @@ public class ScoringFunctionFactoryUsecase {
 			return sf;
 		}
 
+		public ScoringFunction createBasicCostPlusFeesScoringFunction(Carrier carrier) {
+			SumScoringFunction sf = new SumScoringFunction();
+			sf.addScoringFunction(new CarrierScoringFunctionFactoryImpl.SimpleDriversLegScoring(carrier, network));
+			sf.addScoringFunction(new CarrierScoringFunctionFactoryImpl.SimpleVehicleEmploymentScoring(carrier));
+			sf.addScoringFunction(new SimpleDriversActivityScoring());
+			double feePerReceiver = freightConfig != null ? freightConfig.CARRIER_CHARGED_FEE : 200.0;
+			sf.addScoringFunction(new SimpleChargingReceiverScoring(carrier, freightCollaborators, feePerReceiver));
+			return sf;
+		}
+
 		public static class SimpleDriversActivityScoring implements SumScoringFunction.BasicScoring, SumScoringFunction.ActivityScoring {
 
 			private double score;
