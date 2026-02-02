@@ -476,3 +476,124 @@ def convert_link_df_to_networkx_graph(link_df: pd.DataFrame) -> nx.Graph:
         G.add_edge(from_node, to_node, **edge_attrs)
     
     return G
+
+
+def compute_nearest_neighbor_index(points: np.ndarray,
+                                   study_area: float = None,
+                                   study_bounds: tuple = None) -> Dict:
+    """
+    Calculate the Nearest Neighbor Index (NNI) for a set of points.
+    
+    The NNI is a measure of spatial dispersion:
+    - NNI < 1: Clustered distribution
+    - NNI = 1: Random distribution  
+    - NNI > 1: Dispersed/uniform distribution
+    
+    Formula:
+        NNI = D_observed / D_expected
+        D_expected = 0.5 / sqrt(n / A)
+        
+    where n = number of points, A = study area
+    
+    Args:
+        points: Array of shape (n, 2) containing x, y coordinates of points
+        study_area: Area of the study region (optional, will be estimated from bounding box if not provided)
+        study_bounds: Tuple of (x_min, y_min, x_max, y_max) for study area bounds (optional)
+            If provided, used to calculate study_area
+    
+    Returns:
+        Dict containing:
+            - 'nni': Nearest Neighbor Index value
+            - 'mean_observed_distance': Mean observed nearest neighbor distance
+            - 'mean_expected_distance': Mean expected nearest neighbor distance under random distribution
+            - 'z_score': Z-score for statistical significance test
+            - 'p_value': Two-tailed p-value for the z-score
+            - 'pattern': String describing the pattern ('clustered', 'random', or 'dispersed')
+            - 'n_points': Number of points
+            - 'study_area': Study area used in calculation
+    
+    Examples:
+        # Using coordinates array
+        coords = np.array([[1, 2], [3, 4], [5, 6], [7, 8]])
+        result = compute_nearest_neighbor_index(coords)
+        
+        # With explicit study area
+        result = compute_nearest_neighbor_index(coords, study_area=100)
+        
+        # With study bounds
+        result = compute_nearest_neighbor_index(coords, study_bounds=(0, 0, 10, 10))
+        
+        # From a GeoDataFrame
+        coords = np.column_stack([gdf.geometry.x, gdf.geometry.y])
+        result = compute_nearest_neighbor_index(coords)
+    """
+    from scipy.spatial import distance
+    from scipy import stats as scipy_stats
+    
+    points = np.asarray(points)
+    n = len(points)
+    
+    if n < 2:
+        raise ValueError("At least 2 points are required to compute NNI.")
+    
+    # Calculate study area if not provided
+    if study_area is None:
+        if study_bounds is not None:
+            x_min, y_min, x_max, y_max = study_bounds
+        else:
+            # Estimate from bounding box of points
+            x_min, y_min = points.min(axis=0)
+            x_max, y_max = points.max(axis=0)
+        
+        # Add small buffer to avoid zero area
+        width = max(x_max - x_min, 1e-10)
+        height = max(y_max - y_min, 1e-10)
+        study_area = width * height
+    
+    # Calculate pairwise distances
+    dist_matrix = distance.cdist(points, points, metric='euclidean')
+    
+    # Set diagonal to infinity to exclude self-distances
+    np.fill_diagonal(dist_matrix, np.inf)
+    
+    # Find nearest neighbor distance for each point
+    nn_distances = dist_matrix.min(axis=1)
+    
+    # Mean observed nearest neighbor distance
+    mean_observed = nn_distances.mean()
+    
+    # Expected mean nearest neighbor distance under random distribution
+    # D_expected = 0.5 / sqrt(n / A) = 0.5 * sqrt(A / n)
+    mean_expected = 0.5 * np.sqrt(study_area / n)
+    
+    # Nearest Neighbor Index
+    nni = mean_observed / mean_expected
+    
+    # Standard error for significance testing
+    # SE = 0.26136 / sqrt(n^2 / A) = 0.26136 * sqrt(A) / n
+    se = 0.26136 * np.sqrt(study_area) / n
+    
+    # Z-score
+    z_score = (mean_observed - mean_expected) / se
+    
+    # Two-tailed p-value
+    p_value = 2 * (1 - scipy_stats.norm.cdf(abs(z_score)))
+    
+    # Determine pattern
+    if nni < 0.8:
+        pattern = 'clustered'
+    elif nni > 1.2:
+        pattern = 'dispersed'
+    else:
+        pattern = 'random'
+    
+    return {
+        'nni': nni,
+        'mean_observed_distance': mean_observed,
+        'mean_expected_distance': mean_expected,
+        'z_score': z_score,
+        'p_value': p_value,
+        'pattern': pattern,
+        'n_points': n,
+        'study_area': study_area
+    }

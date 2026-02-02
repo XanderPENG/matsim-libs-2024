@@ -1139,6 +1139,17 @@ def aggregate_shipment_metrics_from_clean_folder(
         else:
             iter0_total_distance_km = np.nan
         
+        # ----- 4. compute used vehicles (fleet size) -----
+        if 'final_vehicle_id' in df.columns:
+            final_fleet_size = df['final_vehicle_id'].nunique()
+        else:
+            final_fleet_size = np.nan
+
+        if 'iter0_vehicle_id' in df.columns:
+            iter0_fleet_size = df['iter0_vehicle_id'].nunique()
+        else:
+            iter0_fleet_size = np.nan
+
         # Append result row
         results.append({
             'depot_location': depot,
@@ -1154,6 +1165,8 @@ def aggregate_shipment_metrics_from_clean_folder(
             'final_late_arrival_count': final_late_count,
             'iter0_total_travel_distance_km': iter0_total_distance_km,
             'final_total_travel_distance_km': final_total_distance_km,
+            'iter0_fleet_size': iter0_fleet_size,
+            'final_fleet_size': final_fleet_size
         })
     
     # Create DataFrame
@@ -1171,7 +1184,201 @@ def aggregate_shipment_metrics_from_clean_folder(
     return result_df
 
 
-if __name__ == "__main__":
+def aggregate_nni_from_clean_folder(
+    clean_folder_path: str,
+    study_area: float = None,
+    study_area_by_distribution: Dict[str, float] = None,
+    study_bounds: Tuple[float, float, float, float] = None,
+    study_bounds_by_distribution: Dict[str, Tuple[float, float, float, float]] = None,
+    verbose: bool = True
+) -> pd.DataFrame:
+    """
+    Aggregate Nearest Neighbor Index (NNI) metrics from geo_data.geojson files.
+    
+    This function reads geo_data.geojson from each scenario folder, filters receiver points,
+    computes NNI using metric_anls.compute_nearest_neighbor_index, and returns a summary DataFrame.
+    
+    Args:
+        clean_folder_path: Path to the clean data directory containing scenario folders.
+            Each folder should be named as: {depot}-{distribution}-af{af}-p{penalty}-i{instance}
+            e.g., "center-CLUSTERED-af0.80-p0.0222-i11"
+        study_area: Default study area to use for all scenarios (optional).
+            If not provided, will be estimated from bounding box of points.
+        study_area_by_distribution: Dict mapping receiver_distribution to study_area (optional).
+            Allows different study areas for different distributions.
+            e.g., {'CLUSTERED': 1000, 'DISPERSED': 2000, 'FULLY_RANDOM': 1500}
+            Takes precedence over study_area if the distribution key exists.
+        study_bounds: Default study bounds (x_min, y_min, x_max, y_max) (optional).
+            If provided, used to calculate study_area.
+        study_bounds_by_distribution: Dict mapping receiver_distribution to study_bounds (optional).
+            Allows different study bounds for different distributions.
+            e.g., {'CLUSTERED': (0, 0, 100, 100), 'DISPERSED': (0, 0, 200, 200)}
+            Takes precedence over study_bounds if the distribution key exists.
+        verbose: Whether to show progress bar.
+    
+    Returns:
+        DataFrame with columns:
+            - depot_location: Depot position (center/left)
+            - receiver_distribution: Receiver distribution type (CLUSTERED/DISPERSED/FULLY_RANDOM)
+            - allocation_factor: Allocation factor value
+            - penalty: Penalty value
+            - instance_id: Instance number
+            - nni: Nearest Neighbor Index value
+            - mean_observed_distance: Mean observed nearest neighbor distance
+            - mean_expected_distance: Mean expected nearest neighbor distance
+            - z_score: Z-score for significance test
+            - p_value: Two-tailed p-value
+            - pattern: Distribution pattern ('clustered', 'random', 'dispersed')
+            - n_receivers: Number of receiver points
+            - study_area: Study area used in calculation
+    
+    Examples:
+        # Basic usage - study area estimated from bounding box
+        nni_df = aggregate_nni_from_clean_folder('/path/to/clean')
+        
+        # With explicit study area for all scenarios
+        nni_df = aggregate_nni_from_clean_folder('/path/to/clean', study_area=10000)
+        
+        # Different study areas per distribution type
+        nni_df = aggregate_nni_from_clean_folder(
+            '/path/to/clean',
+            study_area_by_distribution={
+                'CLUSTERED': 5000,
+                'DISPERSED': 15000,
+                'FULLY_RANDOM': 10000
+            }
+        )
+        
+        # Different study bounds per distribution type
+        nni_df = aggregate_nni_from_clean_folder(
+            '/path/to/clean',
+            study_bounds_by_distribution={
+                'CLUSTERED': (0, 0, 50, 100),
+                'DISPERSED': (0, 0, 100, 150),
+                'FULLY_RANDOM': (0, 0, 100, 100)
+            }
+        )
+    """
+    # Regex pattern to parse folder names
+    # Format: {depot}-{distribution}-af{af}-p{penalty}-i{instance}
+    folder_pattern = re.compile(
+        r'^(?P<depot>\w+)-(?P<distribution>\w+)-af(?P<af>[\d.]+)-p(?P<penalty>[\d.]+)-i(?P<instance>\d+)$'
+    )
+    
+    # List all scenario folders
+    clean_path = Path(clean_folder_path)
+    scenario_folders = [
+        f for f in clean_path.iterdir() 
+        if f.is_dir() and folder_pattern.match(f.name)
+    ]
+    
+    if verbose:
+        print(f"Found {len(scenario_folders)} scenario folders in {clean_folder_path}")
+    
+    results = []
+    iterator = tqdm(scenario_folders, desc="Processing NNI") if verbose else scenario_folders
+    
+    for folder in iterator:
+        # Parse folder name
+        match = folder_pattern.match(folder.name)
+        if not match:
+            continue
+            
+        depot = match.group('depot')
+        distribution = match.group('distribution')
+        allocation_factor = float(match.group('af'))
+        penalty = float(match.group('penalty'))
+        instance_id = int(match.group('instance'))
+        
+        # Read geo_data.geojson
+        geo_path = folder / 'geo_data.geojson'
+        if not geo_path.exists():
+            if verbose:
+                tqdm.write(f"Warning: geo_data.geojson not found in {folder.name}, skipping...")
+            continue
+        
+        try:
+            gdf = gpd.read_file(geo_path)
+        except Exception as e:
+            if verbose:
+                tqdm.write(f"Error reading {geo_path}: {e}, skipping...")
+            continue
+        
+        # Filter for receiver points only
+        if 'type' not in gdf.columns:
+            if verbose:
+                tqdm.write(f"Warning: 'type' column not found in {folder.name}, skipping...")
+            continue
+        
+        receivers_gdf = gdf[gdf['type'] == 'receiver'].copy()
+        
+        if len(receivers_gdf) < 2:
+            if verbose:
+                tqdm.write(f"Warning: Less than 2 receivers in {folder.name}, skipping NNI calculation...")
+            continue
+        
+        # Extract coordinates
+        coords = np.column_stack([receivers_gdf.geometry.x, receivers_gdf.geometry.y])
+        
+        # Determine study area/bounds for this distribution
+        current_study_area = None
+        current_study_bounds = None
+        
+        # Check distribution-specific study area first
+        if study_area_by_distribution is not None and distribution in study_area_by_distribution:
+            current_study_area = study_area_by_distribution[distribution]
+        elif study_area is not None:
+            current_study_area = study_area
+        
+        # Check distribution-specific study bounds (if study_area not already set)
+        if current_study_area is None:
+            if study_bounds_by_distribution is not None and distribution in study_bounds_by_distribution:
+                current_study_bounds = study_bounds_by_distribution[distribution]
+            elif study_bounds is not None:
+                current_study_bounds = study_bounds
+        
+        # Compute NNI
+        try:
+            nni_result = metric_anls.compute_nearest_neighbor_index(
+                coords,
+                study_area=current_study_area,
+                study_bounds=current_study_bounds
+            )
+        except Exception as e:
+            if verbose:
+                tqdm.write(f"Error computing NNI for {folder.name}: {e}, skipping...")
+            continue
+        
+        # Append result row
+        results.append({
+            'depot_location': depot,
+            'receiver_distribution': distribution,
+            'allocation_factor': allocation_factor,
+            'penalty': penalty,
+            'instance_id': instance_id,
+            'nni': nni_result['nni'],
+            'mean_observed_distance': nni_result['mean_observed_distance'],
+            'mean_expected_distance': nni_result['mean_expected_distance'],
+            'z_score': nni_result['z_score'],
+            'p_value': nni_result['p_value'],
+            'pattern': nni_result['pattern'],
+            'n_receivers': nni_result['n_points'],
+            'study_area': nni_result['study_area']
+        })
+    
+    # Create DataFrame
+    result_df = pd.DataFrame(results)
+    
+    # Sort by scenario parameters
+    if not result_df.empty:
+        result_df = result_df.sort_values(
+            by=['depot_location', 'receiver_distribution', 'allocation_factor', 'penalty', 'instance_id']
+        ).reset_index(drop=True)
+    
+    if verbose:
+        print(f"Processed NNI for {len(result_df)} scenarios successfully.")
+    
+    return result_df
     print("Starting analysis of all scenarios...")
     repo_root = r'./'
     anls_path = os.path.join(repo_root, "output", "chessboardCarrierReceiverCollab")
