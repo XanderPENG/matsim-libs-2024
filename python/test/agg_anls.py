@@ -749,7 +749,7 @@ def process_all_scenarios(
     receiver_distributions: Optional[List[str]] = None,
     penalties: Optional[List[float]] = None,
     instances: Optional[List[int]] = None,
-    allocation_factor: float = 0.8,
+    allocation_factors: Optional[List[float]] = None,
     original_tw: Tuple[int, int] = (6, 8),
     last_iter: int = 50,
     compute_network_distances: bool = True,
@@ -767,7 +767,8 @@ def process_all_scenarios(
         receiver_distributions: List of receiver distributions to include (default: all).
         penalties: List of penalty values to include (default: all).
         instances: List of instance numbers to include (default: all).
-        allocation_factor: Allocation factor to match.
+        allocation_factors: List of allocation factors to include (default: [0.8]).
+            Can be a single value or multiple values, e.g., [0.6, 0.8, 1.0].
         original_tw: Original time window tuple.
         last_iter: Last iteration number.
         compute_network_distances: Whether to compute network-based distances.
@@ -776,15 +777,25 @@ def process_all_scenarios(
     Returns:
         DataFrame with all computed metrics for all processed scenarios.
     """
-    # Get matching scenarios
-    scenarios = get_matching_scenarios(
-        input_path,
-        depot_locations,
-        receiver_distributions,
-        penalties,
-        instances,
-        allocation_factor
-    )
+    # Default allocation factors if not provided
+    if allocation_factors is None:
+        allocation_factors = [0.8]
+    
+    # Get matching scenarios for all allocation factors
+    scenarios = []
+    for af in allocation_factors:
+        af_scenarios = get_matching_scenarios(
+            input_path,
+            depot_locations,
+            receiver_distributions,
+            penalties,
+            instances,
+            af
+        )
+        scenarios.extend(af_scenarios)
+    
+    # Sort all scenarios
+    scenarios = sorted(scenarios, key=lambda x: (x.depot_location, x.receiver_distribution, x.allocation_factor, x.penalty, x.instance))
     
     if verbose:
         print(f"Found {len(scenarios)} matching scenarios")
@@ -957,6 +968,7 @@ def quick_analyze(
     depot_locations: List[str] = ['center', 'left'],
     receiver_distributions: List[str] = ['DISPERSED', 'CLUSTERED'],
     penalty_list: List[float] = [0, 0.0003, 0.0008, 0.0014, 0.0028, 0.0056, 0.0098, 0.014, 0.0167, 0.0222, 0.028],
+    allocation_factors: List[float] = [0.8],
     total_instances: int = 50,
     original_tw: Tuple[int, int] = (6, 8),
     compute_network_distances: bool = True
@@ -970,6 +982,7 @@ def quick_analyze(
         depot_locations: List of depot locations.
         receiver_distributions: List of receiver distributions.
         penalty_list: List of penalty values.
+        allocation_factors: List of allocation factor values.
         total_instances: Total number of instances (0 to total_instances-1).
         original_tw: Original time window.
         compute_network_distances: Whether to compute network distances.
@@ -984,6 +997,7 @@ def quick_analyze(
         receiver_distributions=receiver_distributions,
         penalties=penalty_list,
         instances=list(range(total_instances)),
+        allocation_factors=allocation_factors,
         original_tw=original_tw,
         compute_network_distances=compute_network_distances,
         verbose=True
@@ -1379,9 +1393,11 @@ def aggregate_nni_from_clean_folder(
         print(f"Processed NNI for {len(result_df)} scenarios successfully.")
     
     return result_df
+
+if __name__ == "__main__":
     print("Starting analysis of all scenarios...")
     repo_root = r'./'
-    anls_path = os.path.join(repo_root, "output", "chessboardCarrierReceiverCollab")
+    anls_path = os.path.join(repo_root, "data", "chessboardCarrierReceiverCollabCorrect")
     print(f"Analyzing all scenarios in: {anls_path}")
     OUTPUT_PATH = os.path.join(repo_root, "data", "freightChessboardRC", "clean")
     DEPOT_LOCATIONS = [DepotLocation.INSIDE.value, DepotLocation.OUTSIDE.value]
@@ -1390,9 +1406,10 @@ def aggregate_nni_from_clean_folder(
                               ReceiverDistribution.RANDOM.value]
     PENALTY_LIST = [0, 0.0003, 0.0008, 0.0014, 0.0028, 0.0056,
                     0.0098, 0.014, 0.0167, 0.0222, 0.028]
-    ORIGINAL_TW = (6, 8)
-    LAST_ITER = 50
-    TOTAL_INSTANCES = 50
+    ORIGINAL_TW = (6, 7)
+    LAST_ITER = 30
+    TOTAL_INSTANCES = 60
+    ALLOCATION_FACTORS = [0.5, 0.6, 0.7, 0.8, 0.9]  
 
     test_all_metrics_df = process_all_scenarios(
         input_path=anls_path,
@@ -1400,7 +1417,7 @@ def aggregate_nni_from_clean_folder(
         depot_locations=DEPOT_LOCATIONS,  
         receiver_distributions=RECEIVER_DISTRIBUTIONS,
         penalties=PENALTY_LIST,
-        allocation_factor=0.8,
+        allocation_factors=ALLOCATION_FACTORS,
         instances=list(range(TOTAL_INSTANCES)),
         original_tw=ORIGINAL_TW,
         last_iter=LAST_ITER,

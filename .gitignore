@@ -18,5 +18,6 @@ matsim/src/main/java/Doxyfile
 # ignore output directories:
 output/
 data/freightChessboardRC/clean/
+data/chessboardCarrierReceiverCollabCorrect/
 #ignore pycache
 **/__pycache__/
