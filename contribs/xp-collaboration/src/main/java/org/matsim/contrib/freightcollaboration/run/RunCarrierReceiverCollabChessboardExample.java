@@ -101,7 +101,7 @@ public class RunCarrierReceiverCollabChessboardExample {
 		final Duration breakWindow = Duration.ofMinutes(15);
 		Instant windowStart = Instant.now();
 
-		List<Integer> instances = IntStream.range(50, 51).boxed().toList();
+		List<Integer> instances = IntStream.range(0, 1).boxed().toList();
 
 		/* Design 1 - finer penalty sweep: 0, 1, 2, 3, 5, 10, 20, 35, 50, 60, 80 100 euro/hr
 		 * which equals to approx. 0.0003, 0.0006, 0.0008, 0.0014, 0.0028, 0.0056, 0.0098, 0.014, 0.0167, 0.0222, 0.028 euro/sec
@@ -113,6 +113,11 @@ public class RunCarrierReceiverCollabChessboardExample {
 		// Design 2: finer allocation factor sweep
 		double fixedPenalty = 0.005;
 		double[] allocSweepLong = IntStream.range(0, 12).mapToDouble(i -> 0.4 + 0.05 * i).toArray();
+		List<CustomerDistributionScenario> customerDistributionScenarios = List.of(
+//			CustomerDistributionScenario.FULLY_RANDOM,
+//			CustomerDistributionScenario.CLUSTERED,
+			CustomerDistributionScenario.DISPERSED
+		);
 
 		List<AllocationMethodChoice> methods = List.of(
 			new AllocationMethodChoice("exactShapley", AllocationModels.SHAPLEY, null)
@@ -126,7 +131,7 @@ public class RunCarrierReceiverCollabChessboardExample {
 		// Several instances/individual MATSim runs
 		for (int instance : instances) {
 			// Three customer distribution scenarios
-			for (CustomerDistributionScenario customerDistributionScenario : CustomerDistributionScenario.values()) {
+			for (CustomerDistributionScenario customerDistributionScenario : customerDistributionScenarios) {
 				// Two depot scenarios
 				for (DepotScenario depotScenario : DepotScenario.values()) {
 					// Design 1: penalty sweep
@@ -276,10 +281,10 @@ public class RunCarrierReceiverCollabChessboardExample {
 		Config config = ConfigUtils.createConfig();
 		config.setContext(context);
 		config.network().setInputFile("grid9x9.xml");
-		config.controller().setOutputDirectory("output/chessboardCarrierReceiverCollab/" + runId + "/");
+		config.controller().setOutputDirectory("output/chessboardCarrierReceiverCollabCorrectMoreDispersed/" + runId + "/");
 		config.controller().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
 		config.controller().setFirstIteration(0);
-		config.controller().setLastIteration(50);
+		config.controller().setLastIteration(30);
 		// set writing output every 5 iterations
 		config.controller().setWriteEventsInterval(10);
 		config.controller().setWritePlansInterval(10);
@@ -359,7 +364,7 @@ public class RunCarrierReceiverCollabChessboardExample {
 			case CustomerDistributionScenario.CLUSTERED ->
 				candidateLinks = generateClusteredReceiversWithinArea(network, count, seed);
 			case CustomerDistributionScenario.DISPERSED ->
-				candidateLinks = generateHierarchyDispersedReceiversWithinArea(network, count, seed);
+				candidateLinks = generateMoreHierarchyDispersedReceiversWithinArea(network, count, seed);
 			default ->
 				throw new IllegalStateException("Unexpected value: " + customerDistributionScenario);
 		}
@@ -445,6 +450,35 @@ public class RunCarrierReceiverCollabChessboardExample {
 			center.getX() - 2500.0, center.getX() + 2500.0,
 			center.getY() - 2000.0, center.getY() + 2000.0,
 			6, random);
+
+		return receiverLinks;
+	}
+
+	static  Set<Id<Link>> generateMoreHierarchyDispersedReceiversWithinArea(Network network, int count, int seed){
+		Set<Id<Link>> receiverLinks =  new HashSet<>();
+		if (count != 10) {
+			throw new IllegalStateException("Hierarchy dispersed scenario expects exactly 10 receivers, got " + count);
+		}
+		Random random = new Random(41_317 + seed);
+		Link centerLink = network.getLinks().get(Id.createLinkId("i(5,4)"));
+		receiverLinks.add(centerLink.getId());
+
+		Coord center = midpoint(centerLink);
+		List<Link> areaLinks = network.getLinks().values().stream()
+			.filter(link -> link.getAllowedModes().contains(TransportMode.car))
+			.map(link -> (Link) link)
+			.toList();
+
+
+		addBalancedEdgeLinks(receiverLinks, areaLinks,
+			center.getX() - 2500.0, center.getX() + 2500.0,
+			center.getY() - 2000.0, center.getY() + 2000.0,
+			4, random);
+
+		addBalancedEdgeLinks(receiverLinks, areaLinks,
+			center.getX() - 4500.0, center.getX() + 4500.0,
+			center.getY() - 4000.0, center.getY() + 4000.0,
+			5, random);
 
 		return receiverLinks;
 	}
