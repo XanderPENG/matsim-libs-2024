@@ -597,3 +597,89 @@ def compute_nearest_neighbor_index(points: np.ndarray,
         'n_points': n,
         'study_area': study_area
     }
+
+
+def compute_ashmans_d(
+    df: pd.DataFrame, 
+    col_name: str, 
+    n_components: int = 2,
+    random_state: int = 42
+) -> Dict:
+    """
+    Compute Ashman's D index to assess bimodality of a distribution.
+    
+    Ashman's D index is commonly used to determine whether a distribution 
+    is truly bimodal. The formula is:
+    
+    D = sqrt(2) * |μ₁ - μ₂| / sqrt(σ₁² + σ₂²)
+    
+    Interpretation:
+    - D > 2: Strong evidence of bimodality (two distinct modes)
+    - D ≈ 2: Borderline bimodality
+    - D < 2: Weak or no bimodality (unimodal distribution likely)
+    
+    Args:
+        df (pd.DataFrame): Input DataFrame containing the data.
+        col_name (str): Name of the column to analyze for bimodality.
+        n_components (int): Number of Gaussian components to fit (default: 2).
+        random_state (int): Random state for reproducibility.
+    
+    Returns:
+        Dict: Dictionary containing:
+            - 'ashmans_d': The computed Ashman's D index
+            - 'mu1', 'mu2': Means of the two Gaussian components
+            - 'sigma1', 'sigma2': Standard deviations of the two components
+            - 'weights': Mixing weights of the components
+            - 'is_bimodal': Boolean indicating if D > 2 (strong bimodality)
+            - 'interpretation': Text interpretation of the result
+    """
+    from sklearn.mixture import GaussianMixture
+    
+    # Extract data and remove NaN values
+    data = df[col_name].dropna().values.reshape(-1, 1)
+    
+    if len(data) < n_components:
+        raise ValueError(f"Not enough data points ({len(data)}) for {n_components} components")
+    
+    # Fit Gaussian Mixture Model
+    gmm = GaussianMixture(n_components=n_components, random_state=random_state)
+    gmm.fit(data)
+    
+    # Extract parameters
+    means = gmm.means_.flatten()
+    variances = gmm.covariances_.flatten()
+    weights = gmm.weights_
+    
+    # Sort by means to ensure consistent ordering
+    sorted_indices = np.argsort(means)
+    mu1, mu2 = means[sorted_indices[0]], means[sorted_indices[1]]
+    sigma1 = np.sqrt(variances[sorted_indices[0]])
+    sigma2 = np.sqrt(variances[sorted_indices[1]])
+    weights = weights[sorted_indices]
+    
+    # Compute Ashman's D index
+    # D = sqrt(2) * |μ₁ - μ₂| / sqrt(σ₁² + σ₂²)
+    ashmans_d = np.sqrt(2) * np.abs(mu1 - mu2) / np.sqrt(sigma1**2 + sigma2**2)
+    
+    # Determine interpretation
+    if ashmans_d > 2:
+        interpretation = "Strong bimodality (two distinct modes)"
+        is_bimodal = True
+    elif ashmans_d >= 1.5:
+        interpretation = "Moderate bimodality (borderline)"
+        is_bimodal = False
+    else:
+        interpretation = "Weak or no bimodality (likely unimodal)"
+        is_bimodal = False
+    
+    return {
+        'ashmans_d': ashmans_d,
+        'mu1': mu1,
+        'mu2': mu2,
+        'sigma1': sigma1,
+        'sigma2': sigma2,
+        'weights': weights.tolist(),
+        'is_bimodal': is_bimodal,
+        'interpretation': interpretation,
+        'n_samples': len(data)
+    }

@@ -1379,6 +1379,172 @@ def aggregate_nni_from_clean_folder(
         print(f"Processed NNI for {len(result_df)} scenarios successfully.")
     
     return result_df
+
+
+def aggregate_collaborative_receivers_by_link(
+    clean_folder_path: str,
+    verbose: bool = True
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Aggregate collaborative receiver counts by link_id from geo_data.geojson files.
+    
+    This function reads geo_data.geojson from each scenario folder, filters for collaborative
+    receivers (type=='receiver' AND is_collaborative==True), counts how many collaborative
+    receivers are at each link_id, and aggregates across instances for each scenario.
+    
+    Args:
+        clean_folder_path: Path to the clean data directory containing scenario folders.
+            Each folder should be named as: {depot}-{distribution}-af{af}-p{penalty}-i{instance}
+            e.g., "center-CLUSTERED-af0.80-p0.0222-i11"
+        verbose: Whether to show progress bar.
+    
+    Returns:
+        Tuple of two DataFrames:
+        
+        1. instance_level_df: DataFrame with one row per (scenario, instance, link_id) combination:
+            - depot_location: Depot position (center/left)
+            - receiver_distribution: Receiver distribution type
+            - allocation_factor: Allocation factor value
+            - penalty: Penalty value
+            - instance_id: Instance number
+            - link_id: The link identifier
+            - collab_receiver_count: Number of collaborative receivers at this link_id
+        
+        2. aggregated_df: DataFrame with mean counts across instances (long format):
+            - depot_location: Depot position (center/left)
+            - receiver_distribution: Receiver distribution type
+            - allocation_factor: Allocation factor value
+            - penalty: Penalty value
+            - link_id: The link identifier
+            - mean_collab_count: Mean count of collaborative receivers across instances
+            - std_collab_count: Std deviation of counts across instances
+            - n_instances: Number of instances with this link_id having collaborative receivers
+    
+    Examples:
+        # Basic usage
+        instance_df, agg_df = aggregate_collaborative_receivers_by_link('/path/to/clean')
+        
+        # Get wide format (pivot table) with link_ids as columns
+        wide_df = agg_df.pivot_table(
+            index=['depot_location', 'receiver_distribution', 'allocation_factor', 'penalty'],
+            columns='link_id',
+            values='mean_collab_count',
+            fill_value=0
+        )
+    """
+    # Regex pattern to parse folder names
+    # Format: {depot}-{distribution}-af{af}-p{penalty}-i{instance}
+    folder_pattern = re.compile(
+        r'^(?P<depot>\w+)-(?P<distribution>\w+)-af(?P<af>[\d.]+)-p(?P<penalty>[\d.]+)-i(?P<instance>\d+)$'
+    )
+    
+    # List all scenario folders
+    clean_path = Path(clean_folder_path)
+    scenario_folders = [
+        f for f in clean_path.iterdir() 
+        if f.is_dir() and folder_pattern.match(f.name)
+    ]
+    
+    if verbose:
+        print(f"Found {len(scenario_folders)} scenario folders in {clean_folder_path}")
+    
+    instance_level_results = []
+    iterator = tqdm(scenario_folders, desc="Processing collaborative receivers") if verbose else scenario_folders
+    
+    for folder in iterator:
+        # Parse folder name
+        match = folder_pattern.match(folder.name)
+        if not match:
+            continue
+            
+        depot = match.group('depot')
+        distribution = match.group('distribution')
+        allocation_factor = float(match.group('af'))
+        penalty = float(match.group('penalty'))
+        instance_id = int(match.group('instance'))
+        
+        # Read geo_data.geojson
+        geo_path = folder / 'geo_data.geojson'
+        if not geo_path.exists():
+            if verbose:
+                tqdm.write(f"Warning: geo_data.geojson not found in {folder.name}, skipping...")
+            continue
+        
+        try:
+            gdf = gpd.read_file(geo_path)
+        except Exception as e:
+            if verbose:
+                tqdm.write(f"Error reading {geo_path}: {e}, skipping...")
+            continue
+        
+        # Check required columns
+        if 'type' not in gdf.columns or 'is_collaborative' not in gdf.columns or 'link_id' not in gdf.columns:
+            if verbose:
+                tqdm.write(f"Warning: Required columns not found in {folder.name}, skipping...")
+            continue
+        
+        # Filter for collaborative receivers only
+        collab_receivers = gdf[
+            (gdf['type'] == 'receiver') & 
+            (gdf['is_collaborative'] == True)
+        ].copy()
+        
+        if len(collab_receivers) == 0:
+            # No collaborative receivers in this instance
+            continue
+        
+        # Count collaborative receivers by link_id
+        link_counts = collab_receivers.groupby('link_id').size().reset_index(name='collab_receiver_count')
+        
+        # Add scenario identifiers to each row
+        for _, row in link_counts.iterrows():
+            instance_level_results.append({
+                'depot_location': depot,
+                'receiver_distribution': distribution,
+                'allocation_factor': allocation_factor,
+                'penalty': penalty,
+                'instance_id': instance_id,
+                'link_id': row['link_id'],
+                'collab_receiver_count': row['collab_receiver_count']
+            })
+    
+    # Create instance-level DataFrame
+    instance_df = pd.DataFrame(instance_level_results)
+    
+    if instance_df.empty:
+        if verbose:
+            print("No collaborative receivers found in any scenario.")
+        return instance_df, pd.DataFrame()
+    
+    # Sort instance-level DataFrame
+    instance_df = instance_df.sort_values(
+        by=['depot_location', 'receiver_distribution', 'allocation_factor', 'penalty', 'instance_id', 'link_id']
+    ).reset_index(drop=True)
+    
+    # Aggregate across instances: compute mean and std of counts for each (scenario, link_id)
+    aggregated_df = instance_df.groupby(
+        ['depot_location', 'receiver_distribution', 'allocation_factor', 'penalty', 'link_id']
+    ).agg(
+        mean_collab_count=('collab_receiver_count', 'mean'),
+        std_collab_count=('collab_receiver_count', 'std'),
+        n_instances=('collab_receiver_count', 'count')
+    ).reset_index()
+    
+    # Fill NaN std with 0 (happens when only 1 instance)
+    aggregated_df['std_collab_count'] = aggregated_df['std_collab_count'].fillna(0)
+    
+    # Sort aggregated DataFrame
+    aggregated_df = aggregated_df.sort_values(
+        by=['depot_location', 'receiver_distribution', 'allocation_factor', 'penalty', 'link_id']
+    ).reset_index(drop=True)
+    
+    if verbose:
+        print(f"Processed {len(instance_df)} instance-link records from {instance_df['instance_id'].nunique()} unique instances.")
+        print(f"Aggregated to {len(aggregated_df)} scenario-link combinations.")
+    
+    return instance_df, aggregated_df
+
+
     print("Starting analysis of all scenarios...")
     repo_root = r'./'
     anls_path = os.path.join(repo_root, "output", "chessboardCarrierReceiverCollab")
