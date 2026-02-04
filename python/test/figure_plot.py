@@ -2562,3 +2562,422 @@ def nested_donut_chart_simple(
         plt.show()
     
     return fig, ax
+
+
+def box_plot(data_list,
+             col_name,
+             labels=None,
+             box_colors=None,
+             bg_colors=None,
+             figure_size=(10, 6),
+             dpi=350,
+             figure_folder=None,
+             filename=None,
+             **kwargs):
+    """
+    Plot box plots for multiple DataFrames/Series with customizable colors and background regions.
+    
+    Args:
+        data_list: List of DataFrames or Series. If DataFrames, col_name is used to extract data.
+                   If Series, col_name is ignored for data extraction.
+        col_name: Name of the column to plot (used when data_list contains DataFrames)
+        labels: List of labels for each box (default: auto-generated 'Box 1', 'Box 2', ...)
+        box_colors: List of colors for each box (default: seaborn color palette)
+        bg_colors: List of background colors for each box region (default: None, no background)
+                   Set to a list of colors to add alternating/custom background strips behind boxes.
+        figure_size: Figure size as tuple (width, height) (default: (10, 6))
+        dpi: Figure resolution (default: 350)
+        figure_folder: Folder path to save figure (optional)
+        filename: Filename to save figure (optional)
+        
+    Keyword Args:
+        # Box appearance
+        box_alpha: Alpha for box face color (default: 0.7)
+        box_linewidth: Line width for box edges (default: 1.5)
+        box_edgecolor: Edge color for boxes (default: 'black')
+        use_box_color_for_lines: Whether to use box color for all lines (edges, whiskers, caps, median) (default: False)
+                                 When True, each box's color will be applied to all its associated lines.
+        
+        # Median and mean display
+        show_median: Whether to show median line (default: True)
+        median_color: Color for median line (default: 'red')
+        median_linewidth: Line width for median (default: 2)
+        show_mean: Whether to show mean marker (default: False)
+        mean_marker: Marker style for mean (default: 'D' diamond)
+        mean_color: Color for mean marker (default: 'green')
+        mean_size: Size for mean marker (default: 8)
+        
+        # Whisker and cap appearance
+        whisker_color: Color for whiskers (default: 'black')
+        whisker_linewidth: Line width for whiskers (default: 1.5)
+        whisker_linestyle: Line style for whiskers (default: '-')
+        cap_color: Color for caps (default: 'black')
+        cap_linewidth: Line width for caps (default: 1.5)
+        
+        # Outlier (flier) appearance
+        show_fliers: Whether to show outliers (default: True)
+        flier_marker: Marker style for outliers (default: 'o')
+        flier_color: Face color for outliers (default: 'gray')
+        flier_size: Size for outliers (default: 5)
+        flier_alpha: Alpha for outliers (default: 0.6)
+        flier_edgecolor: Edge color for outliers (default: 'none')
+        
+        # Scatter points (jittered data points)
+        show_scatter: Whether to show individual data points (default: False)
+        scatter_color: Color for scatter points (default: 'darkgray')
+        scatter_alpha: Alpha for scatter points (default: 0.5)
+        scatter_size: Size for scatter points (default: 20)
+        scatter_jitter: Amount of horizontal jitter for scatter (default: 0.05)
+        scatter_marker: Marker style for scatter (default: 'o')
+        scatter_use_box_color: Whether to use box color for scatter points (default: False)
+        
+        # Background appearance
+        bg_alpha: Alpha for background regions (default: 0.15)
+        bg_extend: Extend background beyond box positions (default: 0.4)
+        
+        # Notch (confidence interval visualization)
+        show_notch: Whether to show notch for confidence interval (default: False)
+        
+        # Violin overlay
+        show_violin: Whether to overlay violin plot (default: False)
+        violin_alpha: Alpha for violin plot (default: 0.2)
+        violin_color: Color for violin (default: same as box or 'lightgray')
+        violin_width: Width of violin (default: 0.8)
+        
+        # Statistical annotations
+        show_stats: Whether to show stats annotations (default: False)
+        stats_fontsize: Font size for stats text (default: 8)
+        stats_format: Format string for stats (default: 'median: {median:.2f}\nmean: {mean:.2f}')
+        
+        # Labels and display
+        xlabel: X-axis label (default: '')
+        ylabel: Y-axis label (default: '')
+        title: Plot title (default: '')
+        label_size: Font size for axis labels (default: 12)
+        title_size: Font size for title (default: 14)
+        tick_size: Font size for tick labels (default: 10)
+        tick_rotation: Rotation for x-axis tick labels (default: 0)
+        hide_labels: Whether to hide axis labels (default: False)
+        hide_spines: List of spines to hide (default: ['top', 'right'])
+        
+        # Grid
+        show_grid: Whether to show grid (default: False)
+        grid_alpha: Alpha for grid lines (default: 0.3)
+        grid_axis: Axis for grid ('y', 'x', 'both') (default: 'y')
+        
+        # Other
+        show: Whether to display the plot (default: True)
+        ax: Existing axis to plot on (default: None, creates new figure)
+        
+    Returns:
+        fig: matplotlib Figure object
+        ax: matplotlib Axes object
+        bp: Box plot artist (returned by ax.boxplot)
+        
+    Examples:
+        # Basic usage with list of DataFrames
+        box_plot([df1, df2, df3], 'metric_column', 
+                 labels=['Scenario A', 'Scenario B', 'Scenario C'])
+        
+        # With custom box colors and background colors
+        box_plot([df1, df2, df3, df4], 'value',
+                 labels=['A', 'B', 'C', 'D'],
+                 box_colors=['#8dadc3', '#ce5759', '#7fbf7b', '#af8dc3'],
+                 bg_colors=['#f0f0f0', '#e8e8e8', '#f0f0f0', '#e8e8e8'])
+        
+        # With scatter points and mean markers
+        box_plot(data_list, 'score', show_scatter=True, show_mean=True,
+                 scatter_use_box_color=True, mean_color='darkgreen')
+        
+        # With violin overlay
+        box_plot(data_list, 'distribution', show_violin=True, violin_alpha=0.3)
+        
+        # With statistical annotations
+        box_plot(data_list, 'values', show_stats=True, 
+                 stats_format='μ={mean:.1f}')
+        
+        # With all lines matching box color
+        box_plot(data_list, 'metric', use_box_color_for_lines=True,
+                 box_colors=['#8dadc3', '#ce5759', '#7fbf7b'])
+    """
+    import matplotlib.patches as patches
+    
+    # Extract kwargs with defaults
+    # Box appearance
+    box_alpha = kwargs.get('box_alpha', 0.7)
+    box_linewidth = kwargs.get('box_linewidth', 1.5)
+    box_edgecolor = kwargs.get('box_edgecolor', 'black')
+    use_box_color_for_lines = kwargs.get('use_box_color_for_lines', False)
+    
+    # Median and mean
+    show_median = kwargs.get('show_median', True)
+    median_color = kwargs.get('median_color', 'red')
+    median_linewidth = kwargs.get('median_linewidth', 2)
+    show_mean = kwargs.get('show_mean', False)
+    mean_marker = kwargs.get('mean_marker', 'D')
+    mean_color = kwargs.get('mean_color', 'green')
+    mean_size = kwargs.get('mean_size', 8)
+    
+    # Whisker and cap
+    whisker_color = kwargs.get('whisker_color', 'black')
+    whisker_linewidth = kwargs.get('whisker_linewidth', 1.5)
+    whisker_linestyle = kwargs.get('whisker_linestyle', '-')
+    cap_color = kwargs.get('cap_color', 'black')
+    cap_linewidth = kwargs.get('cap_linewidth', 1.5)
+    
+    # Outliers (fliers)
+    show_fliers = kwargs.get('show_fliers', True)
+    flier_marker = kwargs.get('flier_marker', 'o')
+    flier_color = kwargs.get('flier_color', 'gray')
+    flier_size = kwargs.get('flier_size', 5)
+    flier_alpha = kwargs.get('flier_alpha', 0.6)
+    flier_edgecolor = kwargs.get('flier_edgecolor', 'none')
+    
+    # Scatter points
+    show_scatter = kwargs.get('show_scatter', False)
+    scatter_color = kwargs.get('scatter_color', 'darkgray')
+    scatter_alpha = kwargs.get('scatter_alpha', 0.5)
+    scatter_size = kwargs.get('scatter_size', 20)
+    scatter_jitter = kwargs.get('scatter_jitter', 0.05)
+    scatter_marker = kwargs.get('scatter_marker', 'o')
+    scatter_use_box_color = kwargs.get('scatter_use_box_color', False)
+    
+    # Background
+    bg_alpha = kwargs.get('bg_alpha', 0.15)
+    bg_extend = kwargs.get('bg_extend', 0.4)
+    
+    # Notch
+    show_notch = kwargs.get('show_notch', False)
+    
+    # Violin
+    show_violin = kwargs.get('show_violin', False)
+    violin_alpha = kwargs.get('violin_alpha', 0.2)
+    violin_color = kwargs.get('violin_color', None)
+    violin_width = kwargs.get('violin_width', 0.8)
+    
+    # Stats annotations
+    show_stats = kwargs.get('show_stats', False)
+    stats_fontsize = kwargs.get('stats_fontsize', 8)
+    stats_format = kwargs.get('stats_format', 'median: {median:.2f}\nmean: {mean:.2f}')
+    
+    # Labels and display
+    xlabel = kwargs.get('xlabel', '')
+    ylabel = kwargs.get('ylabel', '')
+    title = kwargs.get('title', '')
+    label_size = kwargs.get('label_size', 12)
+    title_size = kwargs.get('title_size', 14)
+    tick_size = kwargs.get('tick_size', 10)
+    tick_rotation = kwargs.get('tick_rotation', 0)
+    hide_labels = kwargs.get('hide_labels', False)
+    hide_spines = kwargs.get('hide_spines', ['top', 'right'])
+    
+    # Grid
+    show_grid = kwargs.get('show_grid', False)
+    grid_alpha = kwargs.get('grid_alpha', 0.3)
+    grid_axis = kwargs.get('grid_axis', 'y')
+    
+    # Other
+    show = kwargs.get('show', True)
+    ax = kwargs.get('ax', None)
+    
+    # Prepare data
+    plot_data = []
+    for item in data_list:
+        if hasattr(item, 'columns'):  # DataFrame
+            if col_name not in item.columns:
+                raise ValueError(f"Column '{col_name}' not found in DataFrame.")
+            data = item[col_name].dropna().values
+        else:  # Series or array-like
+            data = np.array(item)
+            data = data[~np.isnan(data)]
+        plot_data.append(data)
+    
+    n_boxes = len(plot_data)
+    
+    # Set default labels
+    if labels is None:
+        labels = [f'Box {i+1}' for i in range(n_boxes)]
+    
+    # Set default box colors
+    if box_colors is None:
+        box_colors = sns.color_palette('husl', n_boxes)
+    
+    # Create figure if not provided
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figure_size, dpi=dpi)
+    else:
+        fig = ax.figure
+    
+    # Box positions (1-indexed for matplotlib boxplot)
+    positions = list(range(1, n_boxes + 1))
+    
+    # Draw background regions FIRST (behind everything)
+    if bg_colors is not None:
+        y_min, y_max = ax.get_ylim()
+        # Pre-calculate y limits from data
+        all_data = np.concatenate(plot_data)
+        data_min, data_max = np.min(all_data), np.max(all_data)
+        data_range = data_max - data_min
+        y_min = data_min - 0.1 * data_range
+        y_max = data_max + 0.1 * data_range
+        
+        # Calculate equal-width non-overlapping background regions
+        # Each box gets exactly the same background width
+        bg_width = 1.0  # Each background region has equal width of 1.0 (same as box spacing)
+        
+        for i, (pos, bg_color) in enumerate(zip(positions, bg_colors)):
+            if bg_color is not None:
+                # Each box has equal background width centered on the box position
+                left = pos - bg_width / 2
+                right = pos + bg_width / 2
+                
+                rect = patches.Rectangle(
+                    (left, y_min),
+                    right - left,
+                    y_max - y_min,
+                    facecolor=bg_color,
+                    alpha=bg_alpha,
+                    edgecolor='none',
+                    zorder=0
+                )
+                ax.add_patch(rect)
+        
+        # Set y limits to ensure background is visible
+        ax.set_ylim(y_min, y_max)
+    
+    # Draw violin plot if requested (behind boxes)
+    if show_violin:
+        parts = ax.violinplot(plot_data, positions=positions, 
+                              widths=violin_width, showmeans=False, 
+                              showmedians=False, showextrema=False)
+        for i, pc in enumerate(parts['bodies']):
+            v_color = violin_color if violin_color else box_colors[i]
+            pc.set_facecolor(v_color)
+            pc.set_alpha(violin_alpha)
+            pc.set_edgecolor('none')
+    
+    # Create box plot
+    bp = ax.boxplot(
+        plot_data,
+        positions=positions,
+        tick_labels=labels,
+        patch_artist=True,
+        notch=show_notch,
+        showfliers=show_fliers,
+        showmeans=show_mean,
+        meanprops=dict(
+            marker=mean_marker,
+            markerfacecolor=mean_color,
+            markeredgecolor=mean_color,
+            markersize=mean_size
+        ),
+        medianprops=dict(
+            color=median_color if show_median else 'none',
+            linewidth=median_linewidth
+        ),
+        whiskerprops=dict(
+            color=whisker_color,
+            linewidth=whisker_linewidth,
+            linestyle=whisker_linestyle
+        ),
+        capprops=dict(
+            color=cap_color,
+            linewidth=cap_linewidth
+        ),
+        flierprops=dict(
+            marker=flier_marker,
+            markerfacecolor=flier_color,
+            markersize=flier_size,
+            alpha=flier_alpha,
+            markeredgecolor=flier_edgecolor
+        )
+    )
+    
+    # Set box colors
+    for i, (box, color) in enumerate(zip(bp['boxes'], box_colors)):
+        box.set_facecolor(color)
+        box.set_alpha(box_alpha)
+        box.set_linewidth(box_linewidth)
+        
+        if use_box_color_for_lines:
+            # Use darkened box color for box edges, whiskers, caps, and fliers
+            # Note: median and mean keep their own specified colors
+            line_color = darken_color(color, 0.7)
+            box.set_edgecolor(line_color)
+            
+            # Each box has 2 whiskers (top and bottom)
+            bp['whiskers'][i*2].set_color(line_color)
+            bp['whiskers'][i*2 + 1].set_color(line_color)
+            
+            # Each box has 2 caps
+            bp['caps'][i*2].set_color(line_color)
+            bp['caps'][i*2 + 1].set_color(line_color)
+            
+            # Fliers (outliers) - use box color
+            if show_fliers and i < len(bp['fliers']):
+                bp['fliers'][i].set_markerfacecolor(color)
+                bp['fliers'][i].set_markeredgecolor(line_color)
+        else:
+            box.set_edgecolor(box_edgecolor)
+    
+    # Add scatter points if requested
+    if show_scatter:
+        for i, (data, pos) in enumerate(zip(plot_data, positions)):
+            # Add jitter
+            jitter = np.random.uniform(-scatter_jitter, scatter_jitter, size=len(data))
+            x_jittered = pos + jitter
+            
+            s_color = box_colors[i] if scatter_use_box_color else scatter_color
+            ax.scatter(x_jittered, data, 
+                      c=[s_color], 
+                      alpha=scatter_alpha, 
+                      s=scatter_size,
+                      marker=scatter_marker,
+                      edgecolors='white',
+                      linewidth=0.5,
+                      zorder=3)
+    
+    # Add stats annotations if requested
+    if show_stats:
+        for i, (data, pos) in enumerate(zip(plot_data, positions)):
+            median_val = np.median(data)
+            mean_val = np.mean(data)
+            stats_text = stats_format.format(median=median_val, mean=mean_val, 
+                                             std=np.std(data), n=len(data),
+                                             min=np.min(data), max=np.max(data))
+            ax.annotate(stats_text, xy=(pos, np.max(data)), 
+                       xytext=(0, 5), textcoords='offset points',
+                       ha='center', va='bottom', fontsize=stats_fontsize,
+                       bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
+    
+    # Hide spines
+    for spine in hide_spines:
+        ax.spines[spine].set_visible(False)
+    
+    # Set labels
+    if not hide_labels:
+        ax.set_xlabel(xlabel, fontsize=label_size, fontweight='bold')
+        ax.set_ylabel(ylabel, fontsize=label_size, fontweight='bold')
+    
+    if title:
+        ax.set_title(title, fontsize=title_size, fontweight='bold')
+    
+    # Set tick properties
+    ax.tick_params(axis='x', labelsize=tick_size, rotation=tick_rotation)
+    ax.tick_params(axis='y', labelsize=tick_size)
+    
+    # Grid
+    if show_grid:
+        ax.grid(True, axis=grid_axis, alpha=grid_alpha, linestyle='--')
+    
+    plt.tight_layout()
+    
+    # Save figure if path provided
+    if figure_folder is not None and filename is not None:
+        save_path = Path(figure_folder) / filename
+        plt.savefig(str(save_path), bbox_inches='tight', pad_inches=0, transparent=True)
+    
+    if show:
+        plt.show()
+    
+    return fig, ax, bp
