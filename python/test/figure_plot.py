@@ -2012,3 +2012,553 @@ def network_locations_plot(network=None,
         plt.show()
 
     return fig, ax
+
+
+def nested_donut_chart(
+    data_dict: dict,
+    group_col: str,
+    count_col: str = None,
+    agg_func: str = 'count',
+    inner_colors: list = None,
+    outer_colors: dict = None,
+    outer_cmap: str = 'Blues',
+    outer_color_list: list = None,
+    figsize: tuple = (10, 10),
+    hole_radius: float = 0.2,
+    inner_radius: float = 0.4,
+    outer_width: float = 0.3,
+    inner_width: float = 0.3,
+    title: str = None,
+    title_size: int = 14,
+    inner_label_size: int = 11,
+    outer_label_size: int = 9,
+    show_inner_ring: bool = True,
+    show_inner_labels: bool = True,
+    show_outer_labels: bool = True,
+    show_outer_values: bool = True,
+    show_inner_pct: bool = True,
+    show_outer_pct: bool = True,
+    show_outer_count: bool = False,
+    inner_label_format: str = '{label}',
+    outer_label_format: str = '{value}',
+    pct_format: str = '{pct:.1f}%',
+    legend_loc: str = 'upper right',
+    legend_fontsize: int = 10,
+    show_legend: bool = True,
+    startangle: float = 90,
+    edgecolor: str = 'white',
+    edge_linewidth: float = 1.5,
+    center_text: str = None,
+    center_text_size: int = 12,
+    transparent_bg: bool = False,
+    ax: object = None,
+    figure_folder: str = None,
+    filename: str = None,
+    dpi: int = 300,
+    show: bool = True
+):
+    """
+    Create a nested (hierarchical) donut chart for visualizing grouped frequency data.
+    
+    The inner ring is divided equally based on the number of input DataFrames/scenarios,
+    and the outer ring shows the distribution of a grouped variable (e.g., fleet_size counts)
+    for each scenario.
+    
+    Args:
+        data_dict: Dictionary where keys are scenario labels and values are DataFrames.
+            Example: {'Center-Clustered': df1, 'Center-Dispersed': df2, ...}
+        group_col: Column name to group by (e.g., 'final_fleet_size').
+        count_col: Column to count/aggregate. If None, counts rows.
+        agg_func: Aggregation function ('count', 'sum', 'mean'). Default: 'count'.
+        inner_colors: List of colors for inner ring segments (one per scenario).
+            If None, uses a default palette.
+        outer_colors: Dict mapping group values to colors for outer ring.
+            If None, uses gradient based on outer_cmap or outer_color_list.
+        outer_cmap: Colormap name for outer ring gradient (default: 'Blues').
+            Ignored if outer_color_list is provided.
+        outer_color_list: List of colors for outer ring segments by group value.
+            If provided, overrides outer_cmap. Colors are assigned in sorted order of group values.
+        figsize: Figure size (width, height).
+        hole_radius: Radius of the center hole (empty space in the middle). Default: 0.2.
+        inner_radius: Radius of the inner ring's inner edge. This is calculated from
+            hole_radius if not explicitly larger. Default: 0.4.
+        outer_width: Width of the outer ring.
+        inner_width: Width of the inner ring.
+        title: Chart title.
+        title_size: Font size for title.
+        inner_label_size: Font size for inner ring labels.
+        outer_label_size: Font size for outer ring labels.
+        show_inner_ring: Whether to show the inner ring at all. Default: True.
+        show_inner_labels: Whether to show labels on inner ring.
+        show_outer_labels: Whether to show labels on outer ring.
+        show_outer_values: Whether to show group values on outer ring labels. Default: True.
+        show_inner_pct: Whether to show percentage on inner ring.
+        show_outer_pct: Whether to show percentage on outer ring.
+        show_outer_count: Whether to show count on outer ring labels.
+        inner_label_format: Format string for inner labels. Use {label}, {pct}.
+        outer_label_format: Format string for outer labels. Use {value}, {count}, {pct}.
+        pct_format: Format string for percentage display.
+        legend_loc: Legend location.
+        legend_fontsize: Font size for legend.
+        show_legend: Whether to show legend.
+        startangle: Starting angle for the chart (default: 90, top).
+        edgecolor: Edge color between segments.
+        edge_linewidth: Line width of edges.
+        center_text: Text to display in the center of the donut.
+        center_text_size: Font size for center text.
+        ax: Optional matplotlib axes.
+        figure_folder: Folder to save figure.
+        filename: Filename for saving.
+        dpi: Resolution for saving.
+        show: Whether to display the figure.
+    
+    Returns:
+        Tuple of (fig, ax) matplotlib objects.
+    
+    Examples:
+        # Basic usage with 4 scenarios
+        data_dict = {
+            'Center-Clustered': ins_center_clustered_specific_anls_df,
+            'Center-Dispersed': ins_center_dispersed_specific_anls_df,
+            'Outside-Clustered': ins_outside_clustered_specific_anls_df,
+            'Outside-Dispersed': ins_outside_dispersed_specific_anls_df
+        }
+        
+        fig, ax = nested_donut_chart(
+            data_dict,
+            group_col='final_fleet_size',
+            title='Fleet Size Distribution by Scenario'
+        )
+        
+        # With custom colors
+        fig, ax = nested_donut_chart(
+            data_dict,
+            group_col='final_fleet_size',
+            inner_colors=['#e41a1c', '#377eb8', '#4daf4a', '#984ea3'],
+            outer_cmap='viridis'
+        )
+    """
+    import matplotlib.patches as mpatches
+    from matplotlib.cm import get_cmap
+    
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.figure
+    
+    n_scenarios = len(data_dict)
+    
+    # Default inner colors
+    if inner_colors is None:
+        default_palette = ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3', 
+                          '#ff7f00', '#ffff33', '#a65628', '#f781bf']
+        inner_colors = default_palette[:n_scenarios]
+    
+    # Prepare data for each scenario
+    scenario_data = {}
+    all_group_values = set()
+    
+    for label, df in data_dict.items():
+        if count_col is None:
+            # Count rows per group
+            grouped = df.groupby(group_col).size().reset_index(name='count')
+            grouped.columns = [group_col, 'value']
+        else:
+            if agg_func == 'count':
+                grouped = df.groupby(group_col).agg({count_col: 'count'}).reset_index()
+            elif agg_func == 'sum':
+                grouped = df.groupby(group_col).agg({count_col: 'sum'}).reset_index()
+            elif agg_func == 'mean':
+                grouped = df.groupby(group_col).agg({count_col: 'mean'}).reset_index()
+            else:
+                grouped = df.groupby(group_col).agg({count_col: agg_func}).reset_index()
+            grouped.columns = [group_col, 'value']
+        
+        scenario_data[label] = grouped
+        all_group_values.update(grouped[group_col].unique())
+    
+    # Sort group values
+    all_group_values = sorted(all_group_values)
+    
+    # Generate outer colors if not provided
+    if outer_colors is None:
+        n_values = len(all_group_values)
+        if outer_color_list is not None:
+            # Use custom color list
+            if len(outer_color_list) < n_values:
+                # Cycle through colors if not enough
+                outer_color_list = (outer_color_list * ((n_values // len(outer_color_list)) + 1))[:n_values]
+            outer_colors = {v: outer_color_list[i] for i, v in enumerate(all_group_values)}
+        else:
+            # Use colormap
+            cmap = get_cmap(outer_cmap)
+            outer_colors = {v: cmap(0.3 + 0.6 * i / max(n_values - 1, 1)) 
+                           for i, v in enumerate(all_group_values)}
+    
+    # Use hole_radius to control the center empty space
+    # inner_radius parameter is deprecated in favor of hole_radius
+    actual_inner_radius = hole_radius
+    
+    # Calculate total for each scenario (for percentage)
+    scenario_totals = {label: grouped['value'].sum() 
+                       for label, grouped in scenario_data.items()}
+    grand_total = sum(scenario_totals.values())
+    
+    # ----- Inner Ring (equal segments for each scenario) -----
+    inner_sizes = [1] * n_scenarios  # Equal sizes
+    inner_labels = list(data_dict.keys())
+    
+    # Calculate inner ring radii
+    # The inner ring starts at hole_radius and extends by inner_width
+    inner_outer_radius = actual_inner_radius + inner_width
+    
+    # Create inner ring (only if show_inner_ring is True)
+    if show_inner_ring:
+        inner_wedges, inner_texts = ax.pie(
+            inner_sizes,
+            radius=inner_outer_radius,
+            colors=inner_colors,
+            startangle=startangle,
+            wedgeprops=dict(width=inner_width, edgecolor=edgecolor, linewidth=edge_linewidth),
+            labels=None  # We'll add labels manually for better control
+        )
+    
+    # Add inner labels
+    if show_inner_ring and show_inner_labels:
+        angle_per_scenario = 360 / n_scenarios
+        for i, label in enumerate(inner_labels):
+            # Calculate angle for label placement
+            # matplotlib pie draws counter-clockwise from startangle
+            # So we ADD angles for subsequent wedges
+            angle = startangle + i * angle_per_scenario + angle_per_scenario / 2
+            angle_rad = np.radians(angle)
+            
+            # Position label at the middle of the inner ring
+            label_radius = actual_inner_radius + inner_width / 2
+            x = label_radius * np.cos(angle_rad)
+            y = label_radius * np.sin(angle_rad)
+            
+            # Format label
+            pct = scenario_totals[label] / grand_total * 100 if grand_total > 0 else 0
+            if show_inner_pct:
+                label_text = f"{label}\n{pct_format.format(pct=pct)}"
+            else:
+                label_text = inner_label_format.format(label=label)
+            
+            ax.annotate(
+                label_text,
+                xy=(x, y),
+                ha='center',
+                va='center',
+                fontsize=inner_label_size,
+                fontweight='bold',
+                color='white' if sum(mcolors.to_rgb(inner_colors[i])) < 1.5 else 'black'
+            )
+    
+    # ----- Outer Ring (proportional segments based on group values) -----
+    outer_sizes = []
+    outer_colors_list = []
+    outer_labels_data = []
+    
+    # Calculate the angle each scenario occupies
+    angle_per_scenario = 360 / n_scenarios
+    
+    # IMPORTANT: Iterate scenarios and group values in consistent order
+    # Each scenario should have the same group value order for proper color alignment
+    for i, (label, grouped) in enumerate(scenario_data.items()):
+        scenario_total = scenario_totals[label]
+        
+        # Create a lookup dict for this scenario's counts
+        scenario_counts = grouped.set_index(group_col)['value'].to_dict()
+        
+        # Iterate through ALL group values in sorted order (consistent across scenarios)
+        for group_value in all_group_values:
+            count = scenario_counts.get(group_value, 0)
+            
+            # Size proportional within the scenario's segment
+            # Each scenario gets equal arc, subdivided by group proportions
+            if scenario_total > 0:
+                proportion_in_scenario = count / scenario_total
+            else:
+                proportion_in_scenario = 0
+            
+            # Size is proportion of the scenario's equal share
+            size = proportion_in_scenario * (1 / n_scenarios)
+            outer_sizes.append(size)
+            
+            # Color based on group value - now guaranteed to match legend
+            outer_colors_list.append(outer_colors.get(group_value, '#cccccc'))
+            
+            # Store data for labels
+            outer_labels_data.append({
+                'scenario': label,
+                'group_value': group_value,
+                'count': count,
+                'pct_in_scenario': proportion_in_scenario * 100,
+                'pct_total': (count / grand_total * 100) if grand_total > 0 else 0
+            })
+    
+    # Calculate outer ring radii
+    outer_inner_radius = inner_outer_radius
+    outer_outer_radius = outer_inner_radius + outer_width
+    
+    # Create outer ring
+    if sum(outer_sizes) > 0:
+        outer_wedges, _ = ax.pie(
+            outer_sizes,
+            radius=outer_outer_radius,
+            colors=outer_colors_list,
+            startangle=startangle,
+            wedgeprops=dict(width=outer_width, edgecolor=edgecolor, linewidth=edge_linewidth * 0.5),
+            labels=None
+        )
+        
+        # Add outer labels
+        if show_outer_labels:
+            cumulative_angle = startangle
+            for j, (size, data) in enumerate(zip(outer_sizes, outer_labels_data)):
+                # Calculate angle (counter-clockwise from startangle)
+                segment_angle = size * 360
+                angle = cumulative_angle + segment_angle / 2
+                
+                # Only draw label if segment is large enough and has data
+                if size >= 0.015 and data['count'] > 0:
+                    angle_rad = np.radians(angle)
+                    
+                    label_radius = outer_inner_radius + outer_width / 2
+                    x = label_radius * np.cos(angle_rad)
+                    y = label_radius * np.sin(angle_rad)
+                    
+                    # Format label
+                    label_parts = []
+                    if show_outer_values:
+                        label_parts.append(str(data['group_value']))
+                    if show_outer_count:
+                        label_parts.append(f"n={int(data['count'])}")
+                    if show_outer_pct:
+                        label_parts.append(pct_format.format(pct=data['pct_in_scenario']))
+                    
+                    label_text = '\n'.join(label_parts) if label_parts else str(data['group_value'])
+                    
+                    ax.annotate(
+                        label_text,
+                        xy=(x, y),
+                        ha='center',
+                        va='center',
+                        fontsize=outer_label_size,
+                        color='white' if sum(mcolors.to_rgb(outer_colors_list[j])) < 1.5 else 'black'
+                    )
+                
+                # Always update cumulative angle (counter-clockwise = add)
+                cumulative_angle += segment_angle
+    
+    # Center text
+    if center_text:
+        ax.text(0, 0, center_text, ha='center', va='center', 
+                fontsize=center_text_size, fontweight='bold')
+    
+    # Legend for group values
+    if show_legend:
+        legend_patches = [mpatches.Patch(color=outer_colors[v], label=f'{group_col}={v}') 
+                         for v in all_group_values]
+        ax.legend(handles=legend_patches, loc=legend_loc, fontsize=legend_fontsize)
+    
+    # Title
+    if title:
+        ax.set_title(title, fontsize=title_size, fontweight='bold', pad=20)
+    
+    ax.set_aspect('equal')
+    
+    # Set transparent background if requested
+    if transparent_bg:
+        fig.patch.set_alpha(0)
+        ax.patch.set_alpha(0)
+    
+    plt.tight_layout()
+    
+    # Save figure if path provided
+    if figure_folder is not None and filename is not None:
+        save_path = Path(figure_folder) / filename
+        plt.savefig(str(save_path), bbox_inches='tight', pad_inches=0.1, dpi=dpi,
+                    transparent=transparent_bg)
+    
+    if show:
+        plt.show()
+    
+    return fig, ax
+
+
+def nested_donut_chart_simple(
+    data_dict: dict,
+    group_col: str,
+    inner_colors: list = None,
+    outer_cmap: str = 'Blues',
+    figsize: tuple = (10, 10),
+    inner_radius: float = 0.35,
+    outer_width: float = 0.35,
+    inner_width: float = 0.25,
+    title: str = None,
+    show_values: bool = True,
+    show_legend: bool = True,
+    legend_title: str = None,
+    startangle: float = 90,
+    edgecolor: str = 'white',
+    ax: object = None,
+    figure_folder: str = None,
+    filename: str = None,
+    dpi: int = 300,
+    show: bool = True
+):
+    """
+    Simplified version of nested donut chart with cleaner defaults.
+    
+    Inner ring: Shows scenario labels (equal segments)
+    Outer ring: Shows distribution of group values within each scenario
+    
+    Args:
+        data_dict: Dict of {scenario_label: DataFrame}
+        group_col: Column to group by (e.g., 'final_fleet_size')
+        inner_colors: Colors for scenarios
+        outer_cmap: Colormap for group values
+        figsize: Figure size
+        inner_radius: Inner donut hole radius
+        outer_width: Width of outer ring
+        inner_width: Width of inner ring
+        title: Chart title
+        show_values: Show group values on outer ring
+        show_legend: Show legend for group values
+        legend_title: Title for legend
+        startangle: Starting angle
+        edgecolor: Edge color
+        ax: Matplotlib axes
+        figure_folder: Save folder
+        filename: Save filename
+        dpi: Save resolution
+        show: Display figure
+    
+    Returns:
+        (fig, ax) tuple
+    
+    Example:
+        data_dict = {
+            'Scenario A': df_a,
+            'Scenario B': df_b,
+            'Scenario C': df_c
+        }
+        fig, ax = nested_donut_chart_simple(data_dict, 'fleet_size')
+    """
+    import matplotlib.patches as mpatches
+    from matplotlib.cm import get_cmap
+    
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.figure
+    
+    n_scenarios = len(data_dict)
+    
+    # Default colors
+    if inner_colors is None:
+        inner_colors = sns.color_palette('husl', n_scenarios)
+    
+    # Collect all unique group values
+    all_values = set()
+    scenario_groups = {}
+    
+    for label, df in data_dict.items():
+        counts = df.groupby(group_col).size()
+        scenario_groups[label] = counts
+        all_values.update(counts.index)
+    
+    all_values = sorted(all_values)
+    n_values = len(all_values)
+    
+    # Generate outer colors
+    cmap = get_cmap(outer_cmap)
+    value_colors = {v: cmap(0.25 + 0.65 * i / max(n_values - 1, 1)) 
+                    for i, v in enumerate(all_values)}
+    
+    # Build outer ring data
+    outer_sizes = []
+    outer_colors_list = []
+    outer_labels = []
+    
+    for label, counts in scenario_groups.items():
+        total = counts.sum()
+        for value in all_values:
+            count = counts.get(value, 0)
+            # Proportion of total across all scenarios
+            prop = count / sum(sum(g) for g in scenario_groups.values()) if sum(sum(g) for g in scenario_groups.values()) > 0 else 0
+            outer_sizes.append(prop)
+            outer_colors_list.append(value_colors[value])
+            outer_labels.append({'value': value, 'count': count})
+    
+    # Inner ring (equal segments)
+    inner_sizes = [1] * n_scenarios
+    
+    # Plot inner ring
+    inner_wedges, _ = ax.pie(
+        inner_sizes,
+        radius=inner_radius + inner_width,
+        colors=inner_colors,
+        startangle=startangle,
+        wedgeprops=dict(width=inner_width, edgecolor=edgecolor, linewidth=1.5),
+        labels=None
+    )
+    
+    # Add scenario labels to inner ring
+    angle_step = 360 / n_scenarios
+    for i, label in enumerate(data_dict.keys()):
+        angle = np.radians(startangle - i * angle_step - angle_step / 2)
+        r = inner_radius + inner_width / 2
+        x, y = r * np.cos(angle), r * np.sin(angle)
+        color = 'white' if sum(mcolors.to_rgb(inner_colors[i])) < 1.5 else 'black'
+        ax.text(x, y, label, ha='center', va='center', fontsize=10, 
+                fontweight='bold', color=color)
+    
+    # Plot outer ring
+    if sum(outer_sizes) > 0:
+        outer_wedges, _ = ax.pie(
+            outer_sizes,
+            radius=inner_radius + inner_width + outer_width,
+            colors=outer_colors_list,
+            startangle=startangle,
+            wedgeprops=dict(width=outer_width, edgecolor=edgecolor, linewidth=0.8),
+            labels=None
+        )
+        
+        # Add value labels to outer ring
+        if show_values:
+            cumsum = 0
+            total_size = sum(outer_sizes)
+            for i, (size, info) in enumerate(zip(outer_sizes, outer_labels)):
+                if size < 0.03:  # Skip tiny segments
+                    cumsum += size
+                    continue
+                angle = np.radians(startangle - (cumsum + size/2) * 360 / total_size)
+                cumsum += size
+                r = inner_radius + inner_width + outer_width / 2
+                x, y = r * np.cos(angle), r * np.sin(angle)
+                color = 'white' if sum(mcolors.to_rgb(outer_colors_list[i])) < 1.5 else 'black'
+                ax.text(x, y, str(info['value']), ha='center', va='center', 
+                        fontsize=8, color=color)
+    
+    # Legend
+    if show_legend:
+        patches = [mpatches.Patch(color=value_colors[v], label=str(v)) for v in all_values]
+        legend_title = legend_title or group_col
+        ax.legend(handles=patches, title=legend_title, loc='upper right', fontsize=9)
+    
+    if title:
+        ax.set_title(title, fontsize=14, fontweight='bold', pad=15)
+    
+    ax.set_aspect('equal')
+    plt.tight_layout()
+    
+    if figure_folder and filename:
+        plt.savefig(Path(figure_folder) / filename, bbox_inches='tight', dpi=dpi)
+    
+    if show:
+        plt.show()
+    
+    return fig, ax
