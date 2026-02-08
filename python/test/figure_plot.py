@@ -15,6 +15,148 @@ from pathlib import Path
 ''' Set the matplotlib font globally as Arial '''
 plt.rcParams["font.family"] = "Arial"
 
+def generate_smooth_colors(input_colors, n_req_colors, colorspace='lab'):
+    """
+    Generate a list of smoothly interpolated hex colours from a set of
+    anchor colours.
+
+    The function builds a continuous gradient through the given
+    ``input_colors`` (in the chosen colour-space) and samples
+    ``n_req_colors`` evenly-spaced points along it, returning visually
+    smooth and distinguishable hex strings.
+
+    Args:
+        input_colors: List of anchor colours in any matplotlib-accepted
+                      format (hex strings, named colours, RGB tuples, etc.).
+                      At least 2 colours are required for interpolation.
+        n_req_colors: Number of output colours to generate.  Must be >= 1.
+        colorspace: Colour-space used for interpolation.  One of
+
+                    * ``'lab'`` (default) – perceptually uniform CIELAB;
+                      produces the smoothest visual transitions.
+                    * ``'rgb'`` – simple linear interpolation in sRGB;
+                      faster but may show uneven brightness jumps.
+
+    Returns:
+        List[str]: A list of ``n_req_colors`` hex colour strings
+                   (e.g. ``['#909E48', '#B07234', ...]``).
+
+    Raises:
+        ValueError: If fewer than 2 anchor colours are provided or
+                    ``n_req_colors < 1``.
+
+    Examples:
+        >>> generate_smooth_colors(['#2166ac', '#f4a582', '#b2182b'], 5)
+        ['#2166AC', '#6E8DB4', '#F4A582', '#D35E56', '#B2182B']
+
+        >>> generate_smooth_colors(['steelblue', 'salmon', 'darkred'], 8)
+
+        >>> # Use in plotting
+        >>> colors = generate_smooth_colors(['#1b7837', '#f7f7f7', '#762a83'], 6)
+        >>> plot_change_rate(pivot_df=df, colors=colors)
+    """
+    if len(input_colors) < 2:
+        raise ValueError("At least 2 anchor colours are required for interpolation.")
+    if n_req_colors < 1:
+        raise ValueError("n_req_colors must be >= 1.")
+
+    # Convert every anchor to RGB float tuple
+    anchors_rgb = [mcolors.to_rgb(c) for c in input_colors]
+
+    if n_req_colors == 1:
+        return [mcolors.to_hex(anchors_rgb[0]).upper()]
+
+    # ------------------------------------------------------------------
+    # Build interpolation in the chosen colour-space
+    # ------------------------------------------------------------------
+    if colorspace == 'lab':
+        # ---- CIELAB interpolation (perceptually uniform) ----
+        def _rgb_to_xyz(rgb):
+            """sRGB [0-1] → CIE XYZ (D65)."""
+            r, g, b = rgb
+            # Inverse sRGB companding
+            def _linearize(v):
+                return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
+            rl, gl, bl = _linearize(r), _linearize(g), _linearize(b)
+            # sRGB → XYZ (D65 matrix)
+            x = 0.4124564 * rl + 0.3575761 * gl + 0.1804375 * bl
+            y = 0.2126729 * rl + 0.7151522 * gl + 0.0721750 * bl
+            z = 0.0193339 * rl + 0.1191920 * gl + 0.9503041 * bl
+            return (x, y, z)
+
+        def _xyz_to_lab(xyz):
+            """CIE XYZ → CIELAB (D65 white point)."""
+            xn, yn, zn = 0.95047, 1.0, 1.08883  # D65
+            def _f(t):
+                delta = 6 / 29
+                return t ** (1 / 3) if t > delta ** 3 else t / (3 * delta ** 2) + 4 / 29
+            fx = _f(xyz[0] / xn)
+            fy = _f(xyz[1] / yn)
+            fz = _f(xyz[2] / zn)
+            L = 116 * fy - 16
+            a = 500 * (fx - fy)
+            b = 200 * (fy - fz)
+            return (L, a, b)
+
+        def _lab_to_xyz(lab):
+            """CIELAB → CIE XYZ (D65)."""
+            xn, yn, zn = 0.95047, 1.0, 1.08883
+            L, a, b = lab
+            fy = (L + 16) / 116
+            fx = a / 500 + fy
+            fz = fy - b / 200
+            delta = 6 / 29
+            def _finv(t):
+                return t ** 3 if t > delta else 3 * delta ** 2 * (t - 4 / 29)
+            return (_finv(fx) * xn, _finv(fy) * yn, _finv(fz) * zn)
+
+        def _xyz_to_rgb(xyz):
+            """CIE XYZ → sRGB [0-1] (D65)."""
+            x, y, z = xyz
+            rl =  3.2404542 * x - 1.5371385 * y - 0.4985314 * z
+            gl = -0.9692660 * x + 1.8760108 * y + 0.0415560 * z
+            bl =  0.0556434 * x - 0.2040259 * y + 1.0572252 * z
+            def _compand(v):
+                v = max(0.0, min(1.0, v))
+                return 12.92 * v if v <= 0.0031308 else 1.055 * v ** (1 / 2.4) - 0.055
+            return (_compand(rl), _compand(gl), _compand(bl))
+
+        anchors_lab = [_xyz_to_lab(_rgb_to_xyz(c)) for c in anchors_rgb]
+        anchors_np = np.array(anchors_lab)  # shape (n_anchors, 3)
+
+        def _interp_lab(t):
+            """Interpolate at position *t* ∈ [0, 1] along the anchor chain."""
+            n_seg = len(anchors_np) - 1
+            seg = min(int(t * n_seg), n_seg - 1)
+            local_t = t * n_seg - seg
+            lab = anchors_np[seg] * (1 - local_t) + anchors_np[seg + 1] * local_t
+            return _xyz_to_rgb(_lab_to_xyz(tuple(lab)))
+
+        positions = np.linspace(0, 1, n_req_colors)
+        result = [mcolors.to_hex(_interp_lab(t)).upper() for t in positions]
+
+    elif colorspace == 'rgb':
+        # ---- Simple RGB interpolation ----
+        anchors_np = np.array(anchors_rgb)  # (n_anchors, 3)
+
+        def _interp_rgb(t):
+            n_seg = len(anchors_np) - 1
+            seg = min(int(t * n_seg), n_seg - 1)
+            local_t = t * n_seg - seg
+            rgb = anchors_np[seg] * (1 - local_t) + anchors_np[seg + 1] * local_t
+            return tuple(np.clip(rgb, 0, 1))
+
+        positions = np.linspace(0, 1, n_req_colors)
+        result = [mcolors.to_hex(_interp_rgb(t)).upper() for t in positions]
+
+    else:
+        raise ValueError(
+            f"Unknown colorspace '{colorspace}'. Use 'lab' or 'rgb'."
+        )
+
+    return result
+
+
 def darken_color(color, factor=0.7):
     """
     Darken a color by a given factor.
@@ -1233,10 +1375,11 @@ def stacked_proportion_plot(data_df,
         bin_col: Column name to bin/group (e.g., 'collaboration_rate')
         value_col: Column name for value categories to show proportions (e.g., 'diff_fleet_size')
         n_bins: Number of bins to create (default: 4)
-        bin_method: Method for binning - 'quantile', 'equal', or 'custom' (default: 'quantile')
+        bin_method: Method for binning - 'quantile', 'equal', 'custom', or 'unique' (default: 'quantile')
             - 'quantile': Equal frequency bins (each bin has ~same number of samples)
             - 'equal': Equal width bins (evenly spaced)
             - 'custom': Use custom_bins parameter
+            - 'unique': Use each unique value in bin_col directly as a category (no aggregation)
         custom_bins: List of bin edges for 'custom' method (e.g., [0, 0.4, 0.6, 0.8, 1.0])
         figure_size: Figure size as tuple (width, height) (default: (10, 6))
         dpi: Figure resolution (default: 350)
@@ -1281,6 +1424,17 @@ def stacked_proportion_plot(data_df,
         bin_label_format: Format for bin labels - 'range', 'midpoint', or custom callable
             (default: 'range')
         bin_decimal: Decimal places for bin labels (default: 2)
+        
+        # X-tick customization options
+        xtick_labels: List of custom x-tick labels (must match number of bins).
+            Overrides auto-generated bin labels. (default: None)
+        xtick_rotation: Rotation angle for x-tick labels in degrees (default: 45)
+        xtick_fontsize: Font size for x-tick labels (default: None, uses matplotlib default)
+        xtick_ha: Horizontal alignment for x-tick labels, e.g. 'right', 'center', 'left'
+            (default: 'right')
+        xtick_va: Vertical alignment for x-tick labels (default: None, uses matplotlib default)
+        xtick_kwargs: Additional keyword arguments passed to ax.set_xticklabels() (default: {})
+        ytick_fontsize: Font size for y-tick labels (default: None, uses matplotlib default)
         
         show: Whether to display the plot (default: True)
 
@@ -1341,6 +1495,14 @@ def stacked_proportion_plot(data_df,
     bin_label_format = kwargs.get('bin_label_format', 'range')
     bin_decimal = kwargs.get('bin_decimal', 2)
     
+    xtick_labels_custom = kwargs.get('xtick_labels', None)
+    xtick_rotation = kwargs.get('xtick_rotation', 45)
+    xtick_fontsize = kwargs.get('xtick_fontsize', None)
+    xtick_ha = kwargs.get('xtick_ha', 'right')
+    xtick_va = kwargs.get('xtick_va', None)
+    xtick_extra = kwargs.get('xtick_kwargs', {})
+    ytick_fontsize = kwargs.get('ytick_fontsize', None)
+    
     show = kwargs.get('show', True)
 
     # Validate columns
@@ -1355,7 +1517,12 @@ def stacked_proportion_plot(data_df,
     # Create bins
     # Note: include_lowest=True makes the first interval left-inclusive [a, b] instead of (a, b]
     # This ensures boundary values like exactly 0.4 are included when custom_bins=[0.4, 0.6, ...]
-    if bin_method == 'quantile':
+    _use_unique = False
+    if bin_method == 'unique':
+        _use_unique = True
+        sorted_unique_bins = sorted(df[bin_col].unique())
+        df['bin'] = pd.Categorical(df[bin_col], categories=sorted_unique_bins, ordered=True)
+    elif bin_method == 'quantile':
         df['bin'], bin_edges = pd.qcut(df[bin_col], q=n_bins, retbins=True, duplicates='drop')
     elif bin_method == 'equal':
         df['bin'], bin_edges = pd.cut(df[bin_col], bins=n_bins, retbins=True, include_lowest=True)
@@ -1364,25 +1531,30 @@ def stacked_proportion_plot(data_df,
             raise ValueError("custom_bins must be provided when bin_method='custom'")
         df['bin'], bin_edges = pd.cut(df[bin_col], bins=custom_bins, retbins=True, include_lowest=True)
     else:
-        raise ValueError(f"Unknown bin_method: {bin_method}. Use 'quantile', 'equal', or 'custom'.")
+        raise ValueError(f"Unknown bin_method: {bin_method}. Use 'quantile', 'equal', 'custom', or 'unique'.")
     
     # Get unique values in value_col (sorted)
     unique_values = sorted(df[value_col].dropna().unique())
     n_values = len(unique_values)
     
     # Create bin labels
-    bin_categories = df['bin'].cat.categories
-    n_actual_bins = len(bin_categories)
-    
-    if callable(bin_label_format):
-        bin_labels = [bin_label_format(interval) for interval in bin_categories]
-    elif bin_label_format == 'range':
-        bin_labels = [f'{interval.left:.{bin_decimal}f}-{interval.right:.{bin_decimal}f}' 
-                     for interval in bin_categories]
-    elif bin_label_format == 'midpoint':
-        bin_labels = [f'{interval.mid:.{bin_decimal}f}' for interval in bin_categories]
+    if _use_unique:
+        bin_categories = sorted_unique_bins
+        n_actual_bins = len(bin_categories)
+        bin_labels = [str(cat) for cat in bin_categories]
     else:
-        bin_labels = [str(interval) for interval in bin_categories]
+        bin_categories = df['bin'].cat.categories
+        n_actual_bins = len(bin_categories)
+        
+        if callable(bin_label_format):
+            bin_labels = [bin_label_format(interval) for interval in bin_categories]
+        elif bin_label_format == 'range':
+            bin_labels = [f'{interval.left:.{bin_decimal}f}-{interval.right:.{bin_decimal}f}' 
+                         for interval in bin_categories]
+        elif bin_label_format == 'midpoint':
+            bin_labels = [f'{interval.mid:.{bin_decimal}f}' for interval in bin_categories]
+        else:
+            bin_labels = [str(interval) for interval in bin_categories]
     
     # Calculate proportions
     crosstab = pd.crosstab(df['bin'], df[value_col], normalize='index') * 100
@@ -1441,7 +1613,17 @@ def stacked_proportion_plot(data_df,
     
     # Styling
     ax.set_xticks(x_positions)
-    ax.set_xticklabels(bin_labels, rotation=45, ha='right')
+    # Use custom x-tick labels if provided, otherwise use auto-generated bin_labels
+    _final_xtick_labels = xtick_labels_custom if xtick_labels_custom is not None else bin_labels
+    _xtick_kw = dict(rotation=xtick_rotation, ha=xtick_ha)
+    if xtick_fontsize is not None:
+        _xtick_kw['fontsize'] = xtick_fontsize
+    if xtick_va is not None:
+        _xtick_kw['va'] = xtick_va
+    _xtick_kw.update(xtick_extra)
+    ax.set_xticklabels(_final_xtick_labels, **_xtick_kw)
+    if ytick_fontsize is not None:
+        ax.tick_params(axis='y', labelsize=ytick_fontsize)
     ax.set_ylim(0, 110 if show_counts else 105)
     ax.set_xlim(-0.5, n_actual_bins - 0.5)
     
@@ -2005,7 +2187,7 @@ def network_locations_plot(network=None,
         save_path = Path(figure_folder) / filename
         plt.savefig(str(save_path),
                     bbox_inches='tight',
-                    pad_inches=0,
+                    pad_inches=0.05,
                     dpi=dpi)
 
     if show:
@@ -2566,6 +2748,7 @@ def nested_donut_chart_simple(
 
 def box_plot(data_list,
              col_name,
+             cat_col=None,
              labels=None,
              box_colors=None,
              bg_colors=None,
@@ -2577,11 +2760,26 @@ def box_plot(data_list,
     """
     Plot box plots for multiple DataFrames/Series with customizable colors and background regions.
     
+    Supports two usage modes:
+      1. **List mode** (existing): pass a list of DataFrames/Series as ``data_list``.
+      2. **Single-DataFrame mode** (new): pass one DataFrame as ``data_list`` together
+         with ``cat_col`` – the name of the categorical column used to split the data
+         into groups.  Each unique value in ``cat_col`` becomes one box.
+    
     Args:
-        data_list: List of DataFrames or Series. If DataFrames, col_name is used to extract data.
-                   If Series, col_name is ignored for data extraction.
-        col_name: Name of the column to plot (used when data_list contains DataFrames)
-        labels: List of labels for each box (default: auto-generated 'Box 1', 'Box 2', ...)
+        data_list: List of DataFrames or Series **or** a single DataFrame.
+                   - If a list, each element produces one box; col_name extracts the
+                     numeric column from each DataFrame.
+                   - If a single DataFrame, ``cat_col`` must be specified; the DataFrame
+                     is grouped by ``cat_col`` and each group produces one box.
+        col_name: Name of the numeric column to plot.
+        cat_col: (Optional) Name of the categorical column used to group the data when
+                 ``data_list`` is a single DataFrame.  Ignored when ``data_list`` is a list.
+                 The unique values of this column (sorted) are used as box labels unless
+                 ``labels`` is explicitly provided.
+        labels: List of labels for each box (default: auto-generated).
+                - In list mode: 'Box 1', 'Box 2', …
+                - In single-DataFrame mode: the sorted unique values of ``cat_col``.
         box_colors: List of colors for each box (default: seaborn color palette)
         bg_colors: List of background colors for each box region (default: None, no background)
                    Set to a list of colors to add alternating/custom background strips behind boxes.
@@ -2678,6 +2876,10 @@ def box_plot(data_list,
         # Basic usage with list of DataFrames
         box_plot([df1, df2, df3], 'metric_column', 
                  labels=['Scenario A', 'Scenario B', 'Scenario C'])
+        
+        # Single DataFrame with a categorical column
+        box_plot(df, 'collaboration_rate', cat_col='penalty',
+                 ylabel='Collaboration Rate', title='Rate by Penalty')
         
         # With custom box colors and background colors
         box_plot([df1, df2, df3, df4], 'value',
@@ -2781,8 +2983,33 @@ def box_plot(data_list,
     ax = kwargs.get('ax', None)
     
     # Prepare data
+    import pandas as pd
+    
+    # --- Normalise input: single DataFrame + cat_col → list of sub-DataFrames ---
+    if isinstance(data_list, pd.DataFrame):
+        if cat_col is None:
+            raise ValueError(
+                "When 'data_list' is a single DataFrame, 'cat_col' must be specified "
+                "to indicate the categorical column used for grouping."
+            )
+        if cat_col not in data_list.columns:
+            raise ValueError(f"Categorical column '{cat_col}' not found in DataFrame.")
+        if col_name not in data_list.columns:
+            raise ValueError(f"Value column '{col_name}' not found in DataFrame.")
+        
+        # Sort categories so the order is deterministic
+        sorted_cats = sorted(data_list[cat_col].dropna().unique())
+        grouped = data_list.groupby(cat_col)
+        data_list_internal = [grouped.get_group(cat) for cat in sorted_cats]
+        
+        # Auto-generate labels from category values when not explicitly given
+        if labels is None:
+            labels = [str(cat) for cat in sorted_cats]
+    else:
+        data_list_internal = data_list
+    
     plot_data = []
-    for item in data_list:
+    for item in data_list_internal:
         if hasattr(item, 'columns'):  # DataFrame
             if col_name not in item.columns:
                 raise ValueError(f"Column '{col_name}' not found in DataFrame.")
@@ -2860,7 +3087,7 @@ def box_plot(data_list,
     bp = ax.boxplot(
         plot_data,
         positions=positions,
-        tick_labels=labels,
+        labels=labels,
         patch_artist=True,
         notch=show_notch,
         showfliers=show_fliers,
@@ -2981,3 +3208,1241 @@ def box_plot(data_list,
         plt.show()
     
     return fig, ax, bp
+
+
+def heatmap_plot(data_df,
+                 x_col,
+                 y_col,
+                 value_col,
+                 agg_method='mean',
+                 pivot_df=None,
+                 figure_size=(10, 6),
+                 dpi=350,
+                 figure_folder=None,
+                 filename=None,
+                 **kwargs):
+    """
+    Plot a heatmap from a DataFrame by grouping, aggregating, and unstacking.
+
+    The function performs ``data_df.groupby([y_col, x_col])[value_col].agg(agg_method).unstack()``
+    to produce a 2-D pivot table, then renders it as a heatmap.  Alternatively, a
+    pre-computed pivot DataFrame can be passed directly via ``pivot_df``.
+
+    Args:
+        data_df: Source DataFrame (ignored when ``pivot_df`` is provided).
+        x_col: Column name for the x-axis (columns of the pivot table).
+        y_col: Column name for the y-axis (index/rows of the pivot table).
+        value_col: Column name whose values are aggregated and displayed.
+        agg_method: Aggregation method – any string accepted by ``DataFrame.agg()``
+                    (e.g. ``'mean'``, ``'median'``, ``'sum'``, ``'std'``, ``'count'``),
+                    or a callable.  Default: ``'mean'``.
+        pivot_df: (Optional) Pre-computed pivot DataFrame.  When provided,
+                  ``data_df``, ``x_col``, ``y_col``, ``value_col`` and ``agg_method``
+                  are ignored for data preparation; the pivot is used as-is.
+        figure_size: Figure size as ``(width, height)`` tuple (default: ``(10, 6)``).
+        dpi: Figure resolution (default: 350).
+        figure_folder: Folder path to save figure (optional).
+        filename: Filename to save figure (optional).
+
+    Keyword Args:
+        # Colormap & color bar
+        cmap: Matplotlib colormap name or instance (default: ``'YlOrRd'``).
+        vmin: Minimum value for color scaling (default: auto).
+        vmax: Maximum value for color scaling (default: auto).
+        center: Value at which to center the colormap (default: ``None``).
+        robust: If ``True``, use percentile-based vmin/vmax (default: ``False``).
+        cbar: Whether to draw the colour bar (default: ``True``).
+        cbar_label: Label for the colour bar (default: ``''``).
+        cbar_label_size: Font size for colour-bar label (default: ``12``).
+        cbar_tick_size: Font size for colour-bar tick labels (default: ``10``).
+        cbar_orientation: ``'vertical'`` or ``'horizontal'`` (default: ``'vertical'``).
+        cbar_shrink: Fraction by which to shrink the colour bar (default: ``1.0``).
+        cbar_aspect: Aspect ratio of the colour bar (default: ``20``).
+
+        # Cell annotation
+        annot: Whether to annotate each cell with its value (default: ``True``).
+        annot_fmt: Format string for annotations (default: ``'.2f'``).
+        annot_size: Font size for annotations (default: ``10``).
+        annot_color: Override annotation text colour (default: auto by seaborn).
+        annot_fontweight: Font weight for annotations (default: ``'normal'``).
+
+        # Line appearance
+        linewidths: Width of lines between cells (default: ``0.5``).
+        linecolor: Colour of lines between cells (default: ``'white'``).
+
+        # Labels & title
+        xlabel: X-axis label (default: ``x_col``).
+        ylabel: Y-axis label (default: ``y_col``).
+        title: Plot title (default: ``''``).
+        label_size: Font size for axis labels (default: ``12``).
+        title_size: Font size for title (default: ``14``).
+
+        # Tick labels
+        tick_size: Font size for tick labels (default: ``10``).
+        x_tick_rotation: Rotation angle for x-tick labels (default: ``0``).
+        y_tick_rotation: Rotation angle for y-tick labels (default: ``0``).
+        x_tick_labels: Custom x-tick labels list or ``False`` to hide (default: auto).
+        y_tick_labels: Custom y-tick labels list or ``False`` to hide (default: auto).
+        tick_label_map: Dict mapping original tick values to display strings.
+                        Applied to **both** x and y ticks whose original values
+                        appear as keys.
+
+        # Spines & grid
+        hide_spines: List of spines to hide (default: ``[]``).
+
+        # Cell highlighting (cap_value)
+        cap_value: Threshold value.  Cells whose value ``>=`` (or other
+                   comparison via ``cap_compare``) this threshold are
+                   highlighted with a prominent border (default: ``None``).
+        cap_compare: Comparison operator string: ``'>='``, ``'>'``, ``'<='``,
+                     ``'<'``, ``'=='``, ``'!='`` (default: ``'>='``).
+        cap_edgecolor: Border colour for highlighted cells (default: ``'red'``).
+        cap_linewidth: Border width for highlighted cells (default: ``2.5``).
+        cap_linestyle: Border linestyle (default: ``'-'``).
+        cap_fill: Whether to add a translucent fill to highlighted cells
+                  (default: ``False``).
+        cap_fill_color: Fill colour when ``cap_fill=True`` (default: same as
+                        ``cap_edgecolor``).
+        cap_fill_alpha: Fill alpha (default: ``0.12``).
+        cap_outer_only: When ``True``, draw only the outer boundary of
+                        contiguous highlighted regions instead of framing
+                        every individual cell (default: ``False``).
+
+        # Axis & display
+        square: Whether to force square cells (default: ``False``).
+        invert_yaxis: Whether to invert the y-axis (default: ``False``).
+        ax: Existing Axes to plot on (default: ``None`` → new figure).
+        show: Whether to call ``plt.show()`` (default: ``True``).
+
+    Returns:
+        fig: matplotlib Figure object.
+        ax: matplotlib Axes object.
+        pivot_table: The 2-D pivot DataFrame used for plotting.
+
+    Examples:
+        # Basic: mean collaboration rate by allocation_factor × penalty
+        heatmap_plot(df, x_col='penalty', y_col='allocation_factor',
+                     value_col='collaboration_rate')
+
+        # Median with custom colour map and annotation format
+        heatmap_plot(df, 'penalty', 'allocation_factor', 'VKT_km',
+                     agg_method='median', cmap='coolwarm', annot_fmt='.1f')
+
+        # Pre-computed pivot
+        pivot = df.groupby(['af', 'penalty'])['rate'].mean().unstack()
+        heatmap_plot(None, None, None, None, pivot_df=pivot, cmap='Blues')
+    """
+    import pandas as pd
+
+    # --- Build pivot table ------------------------------------------------
+    if pivot_df is not None:
+        pivot_table = pivot_df.copy()
+    else:
+        if data_df is None:
+            raise ValueError("Either 'data_df' or 'pivot_df' must be provided.")
+        for col in (x_col, y_col, value_col):
+            if col not in data_df.columns:
+                raise ValueError(f"Column '{col}' not found in DataFrame.")
+        pivot_table = (
+            data_df
+            .groupby([y_col, x_col])[value_col]
+            .agg(agg_method)
+            .unstack()
+        )
+
+    # --- Extract kwargs ---------------------------------------------------
+    # Colormap & colour bar
+    cmap = kwargs.get('cmap', 'YlOrRd')
+    vmin = kwargs.get('vmin', None)
+    vmax = kwargs.get('vmax', None)
+    center = kwargs.get('center', None)
+    robust = kwargs.get('robust', False)
+    cbar = kwargs.get('cbar', True)
+    cbar_label = kwargs.get('cbar_label', '')
+    cbar_label_size = kwargs.get('cbar_label_size', 12)
+    cbar_tick_size = kwargs.get('cbar_tick_size', 10)
+    cbar_orientation = kwargs.get('cbar_orientation', 'vertical')
+    cbar_shrink = kwargs.get('cbar_shrink', 1.0)
+    cbar_aspect = kwargs.get('cbar_aspect', 20)
+
+    # Cell annotation
+    annot = kwargs.get('annot', True)
+    annot_fmt = kwargs.get('annot_fmt', '.2f')
+    annot_size = kwargs.get('annot_size', 10)
+    annot_color = kwargs.get('annot_color', None)
+    annot_fontweight = kwargs.get('annot_fontweight', 'normal')
+
+    # Lines
+    linewidths = kwargs.get('linewidths', 0.5)
+    linecolor = kwargs.get('linecolor', 'white')
+
+    # Labels & title
+    xlabel = kwargs.get('xlabel', x_col if x_col else '')
+    ylabel = kwargs.get('ylabel', y_col if y_col else '')
+    title = kwargs.get('title', '')
+    label_size = kwargs.get('label_size', 12)
+    title_size = kwargs.get('title_size', 14)
+
+    # Ticks
+    tick_size = kwargs.get('tick_size', 10)
+    x_tick_rotation = kwargs.get('x_tick_rotation', 0)
+    y_tick_rotation = kwargs.get('y_tick_rotation', 0)
+    x_tick_labels = kwargs.get('x_tick_labels', None)
+    y_tick_labels = kwargs.get('y_tick_labels', None)
+    tick_label_map = kwargs.get('tick_label_map', None)
+
+    # Spines
+    hide_spines = kwargs.get('hide_spines', [])
+
+    # Cell highlighting (cap_value)
+    cap_value = kwargs.get('cap_value', None)
+    cap_compare = kwargs.get('cap_compare', '>=')
+    cap_edgecolor = kwargs.get('cap_edgecolor', 'red')
+    cap_linewidth = kwargs.get('cap_linewidth', 2.5)
+    cap_linestyle = kwargs.get('cap_linestyle', '-')
+    cap_fill = kwargs.get('cap_fill', False)
+    cap_fill_color = kwargs.get('cap_fill_color', None)
+    cap_fill_alpha = kwargs.get('cap_fill_alpha', 0.12)
+    cap_outer_only = kwargs.get('cap_outer_only', False)
+
+    # Misc
+    square = kwargs.get('square', False)
+    invert_yaxis = kwargs.get('invert_yaxis', False)
+    ax = kwargs.get('ax', None)
+    show = kwargs.get('show', True)
+
+    # --- Create figure ----------------------------------------------------
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figure_size, dpi=dpi)
+    else:
+        fig = ax.figure
+
+    # --- Build annotation kwargs ------------------------------------------
+    annot_kws = {'size': annot_size, 'fontweight': annot_fontweight}
+    if annot_color is not None:
+        annot_kws['color'] = annot_color
+
+    # --- Colour-bar kwargs ------------------------------------------------
+    cbar_kws = {
+        'label': cbar_label,
+        'orientation': cbar_orientation,
+        'shrink': cbar_shrink,
+        'aspect': cbar_aspect,
+    }
+
+    # --- Draw heatmap -----------------------------------------------------
+    # Pass annot=False; we draw annotations manually below for reliability.
+    sns.heatmap(
+        pivot_table,
+        ax=ax,
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
+        center=center,
+        robust=robust,
+        annot=False,
+        linewidths=linewidths,
+        linecolor=linecolor,
+        square=square,
+        cbar=cbar,
+        cbar_kws=cbar_kws,
+    )
+
+    # --- Manual cell annotations (avoids seaborn rendering bugs) ----------
+    if annot:
+        import matplotlib.colors as mcolors
+        # Determine effective vmin / vmax from the drawn QuadMesh
+        mesh = ax.collections[0]
+        norm = mesh.norm
+        colormap = mesh.cmap
+        for i in range(pivot_table.shape[0]):
+            for j in range(pivot_table.shape[1]):
+                val = pivot_table.iloc[i, j]
+                if pd.notna(val):
+                    txt = format(val, annot_fmt)
+                    # Pick text colour: white on dark cells, black on light
+                    if annot_color is not None:
+                        txt_color = annot_color
+                    else:
+                        rgba = colormap(norm(val))
+                        lum = 0.2126 * rgba[0] + 0.7152 * rgba[1] + 0.0722 * rgba[2]
+                        txt_color = 'white' if lum < 0.5 else 'black'
+                    ax.text(
+                        j + 0.5, i + 0.5, txt,
+                        ha='center', va='center',
+                        fontsize=annot_size,
+                        fontweight=annot_fontweight,
+                        color=txt_color,
+                    )
+
+    # --- Highlight cells meeting cap_value condition ---------------------
+    if cap_value is not None:
+        import operator
+        _ops = {
+            '>=': operator.ge, '>': operator.gt,
+            '<=': operator.le, '<': operator.lt,
+            '==': operator.eq, '!=': operator.ne,
+        }
+        cmp_fn = _ops.get(cap_compare)
+        if cmp_fn is None:
+            raise ValueError(
+                f"Unknown cap_compare '{cap_compare}'. "
+                f"Use one of {list(_ops.keys())}.")
+        fill_c = cap_fill_color if cap_fill_color is not None else cap_edgecolor
+        from matplotlib.patches import Rectangle
+        nrows, ncols = pivot_table.shape
+
+        if cap_outer_only:
+            # Build boolean mask of highlighted cells
+            mask = np.zeros((nrows, ncols), dtype=bool)
+            for i in range(nrows):
+                for j in range(ncols):
+                    val = pivot_table.iloc[i, j]
+                    if pd.notna(val) and cmp_fn(val, cap_value):
+                        mask[i, j] = True
+            # Optional translucent fill (no edge)
+            if cap_fill:
+                for i in range(nrows):
+                    for j in range(ncols):
+                        if mask[i, j]:
+                            ax.add_patch(Rectangle(
+                                (j, i), 1, 1, linewidth=0,
+                                edgecolor='none', facecolor=fill_c,
+                                alpha=cap_fill_alpha, zorder=5))
+            # Collect outer boundary edge segments, then merge
+            # collinear consecutive segments to avoid overlapping caps.
+            # h_edges[y] = list of x-starts (each segment spans x..x+1)
+            # v_edges[x] = list of y-starts (each segment spans y..y+1)
+            h_edges = {}
+            v_edges = {}
+            for i in range(nrows):
+                for j in range(ncols):
+                    if not mask[i, j]:
+                        continue
+                    if i == 0 or not mask[i - 1, j]:
+                        h_edges.setdefault(i, []).append(j)
+                    if i == nrows - 1 or not mask[i + 1, j]:
+                        h_edges.setdefault(i + 1, []).append(j)
+                    if j == 0 or not mask[i, j - 1]:
+                        v_edges.setdefault(j, []).append(i)
+                    if j == ncols - 1 or not mask[i, j + 1]:
+                        v_edges.setdefault(j + 1, []).append(i)
+
+            def _merge_and_draw(edge_dict, horizontal):
+                """Merge consecutive unit segments and draw."""
+                for coord, starts in edge_dict.items():
+                    starts.sort()
+                    seg_s = starts[0]
+                    seg_e = starts[0] + 1
+                    for s in starts[1:]:
+                        if s == seg_e:
+                            seg_e = s + 1
+                        else:
+                            _draw_seg(coord, seg_s, seg_e, horizontal)
+                            seg_s = s
+                            seg_e = s + 1
+                    _draw_seg(coord, seg_s, seg_e, horizontal)
+
+            def _draw_seg(coord, s, e, horizontal):
+                if horizontal:
+                    ax.plot([s, e], [coord, coord],
+                            color=cap_edgecolor, lw=cap_linewidth,
+                            linestyle=cap_linestyle, zorder=6,
+                            solid_capstyle='projecting',
+                            clip_on=False)
+                else:
+                    ax.plot([coord, coord], [s, e],
+                            color=cap_edgecolor, lw=cap_linewidth,
+                            linestyle=cap_linestyle, zorder=6,
+                            solid_capstyle='projecting',
+                            clip_on=False)
+
+            _merge_and_draw(h_edges, horizontal=True)
+            _merge_and_draw(v_edges, horizontal=False)
+        else:
+            for i in range(nrows):
+                for j in range(ncols):
+                    val = pivot_table.iloc[i, j]
+                    if pd.notna(val) and cmp_fn(val, cap_value):
+                        rect = Rectangle(
+                            (j, i), 1, 1,
+                            linewidth=cap_linewidth,
+                            edgecolor=cap_edgecolor,
+                            linestyle=cap_linestyle,
+                            facecolor=fill_c if cap_fill else 'none',
+                            alpha=cap_fill_alpha if cap_fill else 1.0,
+                            zorder=5,
+                        )
+                        ax.add_patch(rect)
+
+    # --- Colour-bar tick font size ----------------------------------------
+    if cbar and ax.collections:
+        cb = ax.collections[0].colorbar
+        if cb is not None:
+            cb.ax.tick_params(labelsize=cbar_tick_size)
+            if cbar_label:
+                cb.set_label(cbar_label, fontsize=cbar_label_size, fontweight='bold')
+
+    # --- Tick labels ------------------------------------------------------
+    # x ticks
+    if x_tick_labels is not None:
+        if x_tick_labels is False:
+            ax.set_xticklabels([])
+        else:
+            ax.set_xticklabels(x_tick_labels)
+    elif tick_label_map is not None:
+        current = [t.get_text() for t in ax.get_xticklabels()]
+        mapped = [str(tick_label_map.get(_try_numeric(lbl), lbl)) for lbl in current]
+        ax.set_xticklabels(mapped)
+
+    # y ticks
+    if y_tick_labels is not None:
+        if y_tick_labels is False:
+            ax.set_yticklabels([])
+        else:
+            ax.set_yticklabels(y_tick_labels)
+    elif tick_label_map is not None:
+        current = [t.get_text() for t in ax.get_yticklabels()]
+        mapped = [str(tick_label_map.get(_try_numeric(lbl), lbl)) for lbl in current]
+        ax.set_yticklabels(mapped)
+
+    ax.tick_params(axis='x', labelsize=tick_size, rotation=x_tick_rotation)
+    ax.tick_params(axis='y', labelsize=tick_size, rotation=y_tick_rotation)
+
+    # --- Labels & title ---------------------------------------------------
+    ax.set_xlabel(xlabel, fontsize=label_size, fontweight='bold')
+    ax.set_ylabel(ylabel, fontsize=label_size, fontweight='bold')
+    if title:
+        ax.set_title(title, fontsize=title_size, fontweight='bold')
+
+    # --- Spines -----------------------------------------------------------
+    for spine in hide_spines:
+        ax.spines[spine].set_visible(False)
+
+    # --- Invert y-axis ----------------------------------------------------
+    if invert_yaxis:
+        ax.invert_yaxis()
+
+    plt.tight_layout()
+
+    # --- Save -------------------------------------------------------------
+    if figure_folder is not None and filename is not None:
+        save_path = Path(figure_folder) / filename
+        plt.savefig(str(save_path), bbox_inches='tight', pad_inches=0, transparent=True)
+
+    if show:
+        plt.show()
+
+    return fig, ax, pivot_table
+
+
+def plot_change_rate(
+        pivot_df=None,
+        data_df=None,
+        group_col=None,
+        x_col=None,
+        value_col=None,
+        agg_method='mean',
+        figure_size=(8, 5),
+        dpi=350,
+        figure_folder=None,
+        filename=None,
+        **kwargs):
+    """
+    Plot multi-line chart where each row of a pivot table is a separate line,
+    with the pivot columns as the x-axis.
+
+    Supports two input modes:
+
+    1.  **Pre-computed pivot** – pass ``pivot_df`` directly (e.g. ``change_value_df``
+        or ``collab_value_df``).  Each *row* becomes a line; the index values
+        are used as legend labels and the column values are the x-axis.
+
+    2.  **Raw DataFrame** – pass ``data_df`` together with ``group_col``,
+        ``x_col``, ``value_col`` and optionally ``agg_method``.  The function
+        internally performs::
+
+            data_df.groupby([group_col, x_col])[value_col].agg(agg_method).unstack()
+
+        which produces the same kind of pivot table.
+
+    Args:
+        pivot_df: Pre-computed pivot DataFrame (rows = lines, columns = x-axis).
+        data_df: Raw DataFrame to aggregate (ignored when ``pivot_df`` is given).
+        group_col: Column name used to define each line (groupby key 1).
+        x_col: Column name for the x-axis (groupby key 2 / pivot columns).
+        value_col: Column name whose aggregated values are plotted.
+        agg_method: Aggregation method (default ``'mean'``).
+        figure_size: ``(width, height)`` in inches (default ``(8, 5)``).
+        dpi: Figure resolution (default ``350``).
+        figure_folder: Folder path for saving the figure (optional).
+        filename: Filename for saving the figure (optional).
+
+    Keyword Args:
+        # --- Colour & line style ---
+        colors: List of colours for the lines.  If ``None``, defaults to
+                a Matplotlib colour-cycle palette (tab10).
+        linewidth / lw: Line width (default ``1.8``).
+        linestyle / ls: A single linestyle or a list of linestyles per line
+                        (default ``'-'``).
+        alpha: Line alpha (default ``1.0``).
+
+        # --- Markers ---
+        marker: Marker style or list of marker styles (default ``'o'``).
+        markersize / ms: Marker size (default ``5``).
+        markeredgecolor: Marker edge colour (default ``None`` → auto).
+        markerfacecolor: Marker face colour (default ``None`` → line colour).
+
+        # --- Fill between ---
+        fill_between: Whether to shade the area under each line (default
+                      ``False``).
+        fill_alpha: Alpha for the shaded area (default ``0.15``).
+
+        # --- Labels & title ---
+        xlabel: X-axis label (default ``''``).
+        ylabel: Y-axis label (default ``''``).
+        title: Figure title (default ``''``).
+        label_size: Font size for axis labels (default ``12``).
+        title_size: Font size for title (default ``14``).
+        label_fontweight: Font weight for labels (default ``'bold'``).
+
+        # --- Legend ---
+        show_legend: Whether to show the legend (default ``True``).
+        legend_title: Title text for the legend (default ``None``).
+        legend_loc: Legend location (default ``'best'``).
+        legend_fontsize: Legend item font size (default ``10``).
+        legend_title_fontsize: Legend title font size (default ``11``).
+        legend_ncol: Number of legend columns (default ``1``).
+        legend_frameon: Draw legend frame (default ``True``).
+        legend_bbox_to_anchor: Bbox anchor for legend placement (default ``None``).
+        legend_labels: Custom labels list for legend items, in the same
+                       order as the pivot rows (default ``None`` → index values).
+
+        # --- Tick labels ---
+        tick_size: Font size for tick labels (default ``10``).
+        x_tick_rotation: X-tick-label rotation (default ``0``).
+        y_tick_rotation: Y-tick-label rotation (default ``0``).
+        x_tick_labels: Custom x-tick labels list (default ``None`` → column values).
+        tick_label_map: Dict mapping original tick values to display strings.
+
+        # --- Grid ---
+        show_grid: Whether to show grid lines (default ``True``).
+        grid_axis: ``'both'``, ``'x'``, or ``'y'`` (default ``'y'``).
+        grid_alpha: Grid line alpha (default ``0.3``).
+        grid_linestyle: Grid linestyle (default ``'--'``).
+
+        # --- Spines ---
+        hide_spines: List of spines to remove, e.g. ``['top', 'right']``
+                     (default ``['top', 'right']``).
+
+        # --- Reference lines ---
+        hlines: List of y-values at which to draw horizontal reference lines
+                (default ``[]``).
+        hline_colors: Colour(s) for ``hlines`` (default ``'grey'``).
+        hline_linestyles: Linestyle(s) for ``hlines`` (default ``'--'``).
+        hline_linewidths: Line-width(s) for ``hlines`` (default ``0.8``).
+
+        # --- Axes limits & scale ---
+        xlim: ``(xmin, xmax)`` or ``None`` (default ``None``).
+        ylim: ``(ymin, ymax)`` or ``None`` (default ``None``).
+
+        # --- Misc ---
+        ax: Existing Axes to draw on (default ``None`` → new figure).
+        show: Whether to call ``plt.show()`` (default ``True``).
+        tight_layout: Whether to apply tight layout (default ``True``).
+
+    Returns:
+        fig: matplotlib Figure.
+        ax: matplotlib Axes.
+        pivot_table: The 2-D pivot DataFrame used for plotting.
+
+    Examples:
+        # Mode 1 – pre-computed pivot
+        plot_change_rate(pivot_df=change_value_df,
+                         ylabel='Collaboration-rate Drop',
+                         xlabel='Penalty (€ / h)')
+
+        # Mode 2 – raw DataFrame
+        plot_change_rate(data_df=all_metrics_random_df,
+                         group_col='allocation_factor',
+                         x_col='penalty_std',
+                         value_col='collaboration_rate',
+                         agg_method='mean',
+                         ylabel='Mean Collaboration Rate')
+    """
+    import pandas as pd
+
+    # ── Build pivot table ─────────────────────────────────────────────────
+    if pivot_df is not None:
+        pivot_table = pivot_df.copy()
+    elif data_df is not None:
+        if group_col is None or x_col is None or value_col is None:
+            raise ValueError(
+                "When using 'data_df', 'group_col', 'x_col' and 'value_col' "
+                "must all be provided."
+            )
+        for col in (group_col, x_col, value_col):
+            if col not in data_df.columns:
+                raise ValueError(f"Column '{col}' not found in DataFrame.")
+        pivot_table = (
+            data_df
+            .groupby([group_col, x_col])[value_col]
+            .agg(agg_method)
+            .unstack()
+        )
+    else:
+        raise ValueError("Either 'pivot_df' or 'data_df' must be provided.")
+
+    # ── Extract kwargs ────────────────────────────────────────────────────
+    # Colours & line style
+    colors = kwargs.get('colors', None)
+    linewidth = kwargs.get('linewidth', kwargs.get('lw', 1.8))
+    linestyle = kwargs.get('linestyle', kwargs.get('ls', '-'))
+    alpha = kwargs.get('alpha', 1.0)
+
+    # Markers
+    marker = kwargs.get('marker', 'o')
+    markersize = kwargs.get('markersize', kwargs.get('ms', 5))
+    markeredgecolor = kwargs.get('markeredgecolor', None)
+    markerfacecolor = kwargs.get('markerfacecolor', None)
+
+    # Fill
+    fill_between = kwargs.get('fill_between', False)
+    fill_alpha = kwargs.get('fill_alpha', 0.15)
+
+    # Labels & title
+    xlabel = kwargs.get('xlabel', '')
+    ylabel = kwargs.get('ylabel', '')
+    title = kwargs.get('title', '')
+    label_size = kwargs.get('label_size', 12)
+    title_size = kwargs.get('title_size', 14)
+    label_fontweight = kwargs.get('label_fontweight', 'bold')
+
+    # Legend
+    show_legend = kwargs.get('show_legend', True)
+    legend_title = kwargs.get('legend_title', None)
+    legend_loc = kwargs.get('legend_loc', 'best')
+    legend_fontsize = kwargs.get('legend_fontsize', 10)
+    legend_title_fontsize = kwargs.get('legend_title_fontsize', 11)
+    legend_ncol = kwargs.get('legend_ncol', 1)
+    legend_frameon = kwargs.get('legend_frameon', True)
+    legend_bbox_to_anchor = kwargs.get('legend_bbox_to_anchor', None)
+    legend_labels = kwargs.get('legend_labels', None)
+
+    # Ticks
+    tick_size = kwargs.get('tick_size', 10)
+    x_tick_rotation = kwargs.get('x_tick_rotation', 0)
+    y_tick_rotation = kwargs.get('y_tick_rotation', 0)
+    x_tick_labels = kwargs.get('x_tick_labels', None)
+    tick_label_map = kwargs.get('tick_label_map', None)
+
+    # Grid
+    show_grid = kwargs.get('show_grid', True)
+    grid_axis = kwargs.get('grid_axis', 'y')
+    grid_alpha = kwargs.get('grid_alpha', 0.3)
+    grid_linestyle = kwargs.get('grid_linestyle', '--')
+
+    # Spines
+    hide_spines = kwargs.get('hide_spines', ['top', 'right'])
+
+    # Reference lines
+    hlines = kwargs.get('hlines', [])
+    hline_colors = kwargs.get('hline_colors', 'grey')
+    hline_linestyles = kwargs.get('hline_linestyles', '--')
+    hline_linewidths = kwargs.get('hline_linewidths', 0.8)
+
+    # Axes limits
+    xlim = kwargs.get('xlim', None)
+    ylim = kwargs.get('ylim', None)
+
+    # Misc
+    ax = kwargs.get('ax', None)
+    show = kwargs.get('show', True)
+    tight_layout = kwargs.get('tight_layout', True)
+
+    # ── Create figure ─────────────────────────────────────────────────────
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figure_size, dpi=dpi)
+    else:
+        fig = ax.figure
+
+    n_lines = len(pivot_table)
+    x_values = pivot_table.columns.values
+
+    # Resolve colours
+    if colors is None:
+        cmap_tab = plt.get_cmap('tab10')
+        colors = [cmap_tab(i % 10) for i in range(n_lines)]
+    elif len(colors) < n_lines:
+        colors = list(colors) + [plt.get_cmap('tab10')(i % 10)
+                                  for i in range(len(colors), n_lines)]
+
+    # Resolve per-line linestyle / marker lists
+    if isinstance(linestyle, str):
+        linestyle = [linestyle] * n_lines
+    if isinstance(marker, str) or marker is None:
+        marker = [marker] * n_lines
+
+    # ── Plot lines ────────────────────────────────────────────────────────
+    for idx, (row_label, row_data) in enumerate(pivot_table.iterrows()):
+        label = (legend_labels[idx]
+                 if legend_labels is not None and idx < len(legend_labels)
+                 else str(row_label))
+        c = colors[idx]
+        ls = linestyle[idx] if idx < len(linestyle) else '-'
+        mk = marker[idx] if idx < len(marker) else 'o'
+
+        ax.plot(
+            x_values, row_data.values,
+            color=c,
+            linewidth=linewidth,
+            linestyle=ls,
+            alpha=alpha,
+            marker=mk,
+            markersize=markersize,
+            markeredgecolor=markeredgecolor if markeredgecolor else c,
+            markerfacecolor=markerfacecolor if markerfacecolor else c,
+            label=label,
+        )
+
+        if fill_between:
+            ax.fill_between(x_values, row_data.values, alpha=fill_alpha, color=c)
+
+    # ── Horizontal reference lines ────────────────────────────────────────
+    if hlines:
+        if isinstance(hline_colors, str):
+            hline_colors = [hline_colors] * len(hlines)
+        if isinstance(hline_linestyles, str):
+            hline_linestyles = [hline_linestyles] * len(hlines)
+        if isinstance(hline_linewidths, (int, float)):
+            hline_linewidths = [hline_linewidths] * len(hlines)
+        for yval, hc, hls, hlw in zip(hlines, hline_colors,
+                                       hline_linestyles, hline_linewidths):
+            ax.axhline(y=yval, color=hc, linestyle=hls, linewidth=hlw)
+
+    # ── X-tick labels ─────────────────────────────────────────────────────
+    ax.set_xticks(x_values)
+    if x_tick_labels is not None:
+        ax.set_xticklabels(x_tick_labels)
+    elif tick_label_map is not None:
+        ax.set_xticklabels([str(tick_label_map.get(_try_numeric(v), v))
+                            for v in x_values])
+    else:
+        ax.set_xticklabels([str(v) for v in x_values])
+
+    ax.tick_params(axis='x', labelsize=tick_size, rotation=x_tick_rotation)
+    ax.tick_params(axis='y', labelsize=tick_size, rotation=y_tick_rotation)
+
+    # ── Labels & title ────────────────────────────────────────────────────
+    ax.set_xlabel(xlabel, fontsize=label_size, fontweight=label_fontweight)
+    ax.set_ylabel(ylabel, fontsize=label_size, fontweight=label_fontweight)
+    if title:
+        ax.set_title(title, fontsize=title_size, fontweight='bold')
+
+    # ── Legend ────────────────────────────────────────────────────────────
+    if show_legend:
+        legend_kw = dict(
+            loc=legend_loc,
+            fontsize=legend_fontsize,
+            frameon=legend_frameon,
+            ncol=legend_ncol,
+        )
+        if legend_title is not None:
+            legend_kw['title'] = legend_title
+            legend_kw['title_fontsize'] = legend_title_fontsize
+        if legend_bbox_to_anchor is not None:
+            legend_kw['bbox_to_anchor'] = legend_bbox_to_anchor
+        ax.legend(**legend_kw)
+
+    # ── Grid ──────────────────────────────────────────────────────────────
+    if show_grid:
+        ax.grid(True, axis=grid_axis, alpha=grid_alpha, linestyle=grid_linestyle)
+
+    # ── Spines ────────────────────────────────────────────────────────────
+    for spine in hide_spines:
+        ax.spines[spine].set_visible(False)
+
+    # ── Axes limits ───────────────────────────────────────────────────────
+    if xlim is not None:
+        ax.set_xlim(xlim)
+    if ylim is not None:
+        ax.set_ylim(ylim)
+
+    # ── Layout & save ─────────────────────────────────────────────────────
+    if tight_layout:
+        plt.tight_layout()
+
+    if figure_folder is not None and filename is not None:
+        save_path = Path(figure_folder) / filename
+        plt.savefig(str(save_path), bbox_inches='tight',
+                    pad_inches=0, transparent=True)
+
+    if show:
+        plt.show()
+
+    return fig, ax, pivot_table
+
+
+def quadrant_donut_chart(
+    data_dict: dict,
+    value_col: str,
+    figsize: tuple = (8, 8),
+    dpi: int = 350,
+    figure_folder: str = None,
+    filename: str = None,
+    show: bool = True,
+    **kwargs
+):
+    """
+    Create a donut chart divided into 4 equal quadrants (90° each), with
+    coordinate-axes arrows separating the quadrants and customisable labels
+    at the four arrow tips.
+
+    Each quadrant corresponds to one item in *data_dict*. Within each 90°
+    sector the space is subdivided proportionally by the value_counts of
+    *value_col* in the associated DataFrame.
+
+    The data_dict must contain **exactly 4** items.  The quadrant layout
+    (counter-clockwise from the top-right, standard math convention with
+    ``startangle=90``) is::
+
+        Q1 (top-right)      ← 1st dict item
+        Q2 (top-left)       ← 2nd dict item
+        Q3 (bottom-left)    ← 3rd dict item
+        Q4 (bottom-right)   ← 4th dict item
+
+    Args:
+        data_dict : dict
+            ``{scenario_label: DataFrame}`` – exactly 4 entries.
+        value_col : str
+            Column whose ``value_counts()`` determines sub-sector sizes
+            inside each quadrant.
+        figsize : tuple
+            Figure size ``(width, height)``.
+        dpi : int
+            Figure resolution.
+        figure_folder : str | Path, optional
+            Directory to save the figure.
+        filename : str, optional
+            Filename (with extension) for saving.
+        show : bool
+            Whether to call ``plt.show()``.
+
+    Keyword Args:
+        # ── Hole (centre) ──────────────────────────────────────────────
+        hole_radius : float
+            Radius of the empty centre hole (0–1 scale, default 0.35).
+        hole_color : str
+            Fill colour of the hole (default ``'white'``).
+        hole_edgecolor : str
+            Edge colour of the hole circle (default ``'white'``).
+        hole_linewidth : float
+            Edge line width of the hole circle (default 0).
+
+        # ── Outer radius ──────────────────────────────────────────────
+        outer_radius : float
+            Outer radius of the donut (default 1.0).
+
+        # ── Explode ───────────────────────────────────────────────────
+        explode : float | list[float]
+            Distance each *quadrant group* is pulled away from centre.
+            A single float applies to all 4 quadrants; a list of 4 floats
+            sets each one individually (default 0).
+
+        # ── Colours ───────────────────────────────────────────────────
+        quadrant_colors : list[list[str]] | None
+            Nested list of colours for each quadrant's sub-sectors.
+            ``quadrant_colors[i]`` is a list of colours for quadrant *i*.
+            If None, auto-generated from *cmap*.
+        cmap : str
+            Colormap name used when ``quadrant_colors`` is None
+            (default ``'tab10'``).
+        edgecolor : str
+            Edge colour between sub-sectors (default ``'white'``).
+        edge_linewidth : float
+            Edge line width between sub-sectors (default 1.5).
+
+        # ── Percentage labels on sectors ──────────────────────────────
+        show_pct : bool
+            Show percentage text on sub-sectors (default True).
+        pct_threshold : float
+            Minimum percentage to display a label (default 5).
+        pct_fontsize : int
+            Font size for percentage labels (default 9).
+        pct_color : str
+            Font colour for percentage labels (default ``'white'``).
+
+        # ── Quadrant title labels ─────────────────────────────────────
+        show_quadrant_labels : bool
+            Show scenario names near each quadrant (default True).
+        quadrant_label_fontsize : int
+            Font size for quadrant labels (default 11).
+        quadrant_label_offset : float
+            Radial offset factor from outer_radius (default 1.15).
+        quadrant_label_fontweight : str
+            Font weight for quadrant labels (default ``'bold'``).
+
+        # ── Axes / arrows ─────────────────────────────────────────────
+        show_axes : bool
+            Draw the X and Y coordinate arrows (default True).
+        axis_color : str
+            Colour of the axis arrows (default ``'black'``).
+        axis_linewidth : float
+            Line width of axis arrows (default 1.5).
+        axis_arrow_style : str
+            ``FancyArrowPatch`` arrowstyle (default ``'->'``).
+        axis_arrow_mutation : int
+            Arrow mutation scale (default 15).
+        axis_extend : float
+            How far beyond *outer_radius* the arrows extend
+            (default 0.15).
+
+        # ── Axis labels (arrow-tip labels) ────────────────────────────
+        xlabel_right : str
+            Label at the right arrow tip (default ``''``).
+        xlabel_left : str
+            Label at the left arrow tip (default ``''``).
+        ylabel_top : str
+            Label at the top arrow tip (default ``''``).
+        ylabel_bottom : str
+            Label at the bottom arrow tip (default ``''``).
+        axis_label_fontsize : int
+            Font size for axis labels (default 12).
+        axis_label_fontweight : str
+            Font weight for axis labels (default ``'bold'``).
+        axis_label_offset : float
+            Extra offset from the arrow tip for labels (default 0.06).
+
+        # ── Legend ────────────────────────────────────────────────────
+        show_legend : bool
+            Show a legend for the sub-sectors (default True).
+        legend_title : str
+            Legend title (default *value_col*).
+        legend_loc : str
+            Legend location (default ``'upper right'``).
+        legend_bbox : tuple | None
+            ``bbox_to_anchor`` for legend placement (default None).
+        legend_fontsize : int
+            Font size for legend entries (default 10).
+        legend_ncol : int
+            Number of legend columns (default 1).
+
+        # ── Title ─────────────────────────────────────────────────────
+        title : str
+            Chart title (default ``''``).
+        title_size : int
+            Title font size (default 14).
+
+        # ── Misc ──────────────────────────────────────────────────────
+        startangle : float
+            Start angle of the pie in degrees (default 90, i.e. 12-o'clock).
+        transparent_bg : bool
+            Set figure background to transparent (default False).
+
+    Returns:
+        (fig, ax) : tuple of matplotlib Figure and Axes objects.
+
+    Examples:
+        >>> data_dict = {
+        ...     'Center-Clustered': df1,
+        ...     'Center-Dispersed': df2,
+        ...     'Outside-Clustered': df3,
+        ...     'Outside-Dispersed': df4
+        ... }
+        >>> fig, ax = quadrant_donut_chart(
+        ...     data_dict, 'final_fleet_size',
+        ...     hole_radius=0.4,
+        ...     xlabel_right='Dispersed →',
+        ...     xlabel_left='← Clustered',
+        ...     ylabel_top='Center ↑',
+        ...     ylabel_bottom='↓ Outside',
+        ... )
+    """
+    import matplotlib.patches as mpatches
+    from matplotlib.patches import FancyArrowPatch
+    import pandas as pd
+
+    # ── Validate ──────────────────────────────────────────────────────────
+    if len(data_dict) != 4:
+        raise ValueError(
+            f"data_dict must contain exactly 4 items, got {len(data_dict)}."
+        )
+
+    # ── Extract kwargs ────────────────────────────────────────────────────
+    # Hole
+    hole_radius      = kwargs.get('hole_radius', 0.35)
+    hole_color       = kwargs.get('hole_color', 'white')
+    hole_edgecolor   = kwargs.get('hole_edgecolor', 'white')
+    hole_linewidth   = kwargs.get('hole_linewidth', 0)
+    outer_radius     = kwargs.get('outer_radius', 1.0)
+
+    # Explode
+    _explode_raw = kwargs.get('explode', 0)
+    if isinstance(_explode_raw, (int, float)):
+        explode_per_quad = [float(_explode_raw)] * 4
+    else:
+        explode_per_quad = list(_explode_raw)
+        if len(explode_per_quad) != 4:
+            raise ValueError("explode list must have length 4.")
+
+    # Colours
+    quadrant_colors  = kwargs.get('quadrant_colors', None)
+    cmap_name        = kwargs.get('cmap', 'tab10')
+    edgecolor        = kwargs.get('edgecolor', 'white')
+    edge_linewidth   = kwargs.get('edge_linewidth', 1.5)
+
+    # Percentage labels
+    show_pct         = kwargs.get('show_pct', True)
+    pct_threshold    = kwargs.get('pct_threshold', 5)
+    pct_fontsize     = kwargs.get('pct_fontsize', 9)
+    pct_color        = kwargs.get('pct_color', 'white')
+
+    # Quadrant labels
+    show_quadrant_labels     = kwargs.get('show_quadrant_labels', True)
+    quadrant_label_fontsize  = kwargs.get('quadrant_label_fontsize', 11)
+    quadrant_label_offset    = kwargs.get('quadrant_label_offset', 1.15)
+    quadrant_label_fontweight = kwargs.get('quadrant_label_fontweight', 'bold')
+
+    # Axes / arrows
+    show_axes          = kwargs.get('show_axes', True)
+    axis_color         = kwargs.get('axis_color', 'black')
+    axis_linewidth     = kwargs.get('axis_linewidth', 1.5)
+    axis_arrow_style   = kwargs.get('axis_arrow_style', '->')
+    axis_arrow_mutation = kwargs.get('axis_arrow_mutation', 15)
+    axis_extend        = kwargs.get('axis_extend', 0.15)
+
+    # Axis labels
+    xlabel_right          = kwargs.get('xlabel_right', '')
+    xlabel_left           = kwargs.get('xlabel_left', '')
+    ylabel_top            = kwargs.get('ylabel_top', '')
+    ylabel_bottom         = kwargs.get('ylabel_bottom', '')
+    axis_label_fontsize   = kwargs.get('axis_label_fontsize', 12)
+    axis_label_fontweight = kwargs.get('axis_label_fontweight', 'bold')
+    axis_label_offset     = kwargs.get('axis_label_offset', 0.06)
+
+    # Legend
+    show_legend      = kwargs.get('show_legend', True)
+    legend_title     = kwargs.get('legend_title', value_col)
+    legend_loc       = kwargs.get('legend_loc', 'upper right')
+    legend_bbox      = kwargs.get('legend_bbox', None)
+    legend_fontsize  = kwargs.get('legend_fontsize', 10)
+    legend_ncol      = kwargs.get('legend_ncol', 1)
+
+    # Title
+    chart_title      = kwargs.get('title', '')
+    title_size       = kwargs.get('title_size', 14)
+
+    # Misc
+    startangle       = kwargs.get('startangle', 90)
+    transparent_bg   = kwargs.get('transparent_bg', False)
+
+    # ── Prepare data ──────────────────────────────────────────────────────
+    scenario_names = list(data_dict.keys())
+    all_categories = set()
+    for df in data_dict.values():
+        all_categories.update(df[value_col].dropna().unique())
+    all_categories = sorted(all_categories)
+    n_categories = len(all_categories)
+
+    # Build per-quadrant proportions – each quadrant gets exactly 90°
+    quad_sector_angles = []   # flat list of wedge sizes (degrees)
+    quad_sector_colors = []   # flat list of colours
+    quad_sector_labels = []   # flat list of (pct, quadrant_index)
+    explode_flat = []         # flat list of explode values
+
+    # Generate a colour map for categories if not provided
+    if quadrant_colors is None:
+        base_cmap = plt.cm.get_cmap(cmap_name)
+        _auto_colors = [base_cmap(i) for i in range(n_categories)]
+    else:
+        _auto_colors = None
+
+    for qi, (scenario, df) in enumerate(data_dict.items()):
+        vc = df[value_col].value_counts()
+        total = vc.sum()
+        for ci, cat in enumerate(all_categories):
+            count = vc.get(cat, 0)
+            pct_of_quad = (count / total * 100) if total > 0 else 0
+            angle = 90.0 * (count / total) if total > 0 else 0
+            quad_sector_angles.append(angle)
+            quad_sector_labels.append(pct_of_quad)
+            explode_flat.append(explode_per_quad[qi])
+
+            if quadrant_colors is not None:
+                quad_sector_colors.append(quadrant_colors[qi][ci % len(quadrant_colors[qi])])
+            else:
+                quad_sector_colors.append(_auto_colors[ci])
+
+    # ── Create figure ─────────────────────────────────────────────────────
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    ax.set_aspect('equal')
+
+    if transparent_bg:
+        fig.patch.set_alpha(0)
+        ax.patch.set_alpha(0)
+
+    # ── Draw the pie (donut wedges) ───────────────────────────────────────
+    wedges, _ = ax.pie(
+        quad_sector_angles,
+        radius=outer_radius,
+        startangle=startangle,
+        colors=quad_sector_colors,
+        explode=explode_flat,
+        wedgeprops=dict(
+            width=outer_radius - hole_radius,
+            edgecolor=edgecolor,
+            linewidth=edge_linewidth,
+        ),
+        counterclock=True,
+    )
+
+    # ── Percentage labels on wedges ───────────────────────────────────────
+    if show_pct:
+        for idx, (wedge, pct_val) in enumerate(zip(wedges, quad_sector_labels)):
+            if pct_val < pct_threshold:
+                continue
+            # Compute label position at the mid-angle, mid-radius of the wedge
+            theta1 = np.radians(wedge.theta1)
+            theta2 = np.radians(wedge.theta2)
+            mid_angle = (theta1 + theta2) / 2
+            mid_r = (hole_radius + outer_radius) / 2
+
+            # Account for explode offset
+            exp = explode_flat[idx]
+            cx = exp * np.cos(mid_angle)
+            cy = exp * np.sin(mid_angle)
+
+            x = cx + mid_r * np.cos(mid_angle)
+            y = cy + mid_r * np.sin(mid_angle)
+            ax.text(x, y, f'{pct_val:.1f}%',
+                    ha='center', va='center',
+                    fontsize=pct_fontsize, color=pct_color,
+                    fontweight='bold')
+
+    # ── Centre hole ───────────────────────────────────────────────────────
+    centre_circle = plt.Circle(
+        (0, 0), hole_radius,
+        fc=hole_color, ec=hole_edgecolor, linewidth=hole_linewidth,
+        zorder=5
+    )
+    ax.add_patch(centre_circle)
+
+    # ── Quadrant scenario labels ──────────────────────────────────────────
+    if show_quadrant_labels:
+        # Mid-angles for quadrant centres (counter-clockwise from startangle)
+        # With startangle=90: Q1 centre ≈ 135°, Q2 ≈ 225°, Q3 ≈ 315°, Q4 ≈ 45°
+        # Actually with startangle=90 and counter-clockwise:
+        #   Q1 starts at 90° and spans to 180° → mid = 135°
+        #   Q2 starts at 180° and spans to 270° → mid = 225°
+        #   Q3 starts at 270° and spans to 360° → mid = 315°
+        #   Q4 starts at 0° and spans to 90° → mid = 45°  (but displayed as 360→450, mid=405≡45)
+        quad_mid_angles_deg = [
+            startangle + 45 + i * 90 for i in range(4)
+        ]
+        for qi, (name, mid_deg) in enumerate(zip(scenario_names, quad_mid_angles_deg)):
+            rad = np.radians(mid_deg)
+            r = outer_radius * quadrant_label_offset
+            x = r * np.cos(rad) + explode_per_quad[qi] * np.cos(rad)
+            y = r * np.sin(rad) + explode_per_quad[qi] * np.sin(rad)
+            ax.text(x, y, name,
+                    ha='center', va='center',
+                    fontsize=quadrant_label_fontsize,
+                    fontweight=quadrant_label_fontweight)
+
+    # ── Coordinate axes (arrows) ──────────────────────────────────────────
+    if show_axes:
+        arrow_len = outer_radius + axis_extend
+        # X-axis (horizontal)
+        ax.annotate('', xy=(arrow_len, 0), xytext=(-arrow_len, 0),
+                    arrowprops=dict(arrowstyle=axis_arrow_style,
+                                   color=axis_color,
+                                   lw=axis_linewidth,
+                                   mutation_scale=axis_arrow_mutation))
+        # Y-axis (vertical)
+        ax.annotate('', xy=(0, arrow_len), xytext=(0, -arrow_len),
+                    arrowprops=dict(arrowstyle=axis_arrow_style,
+                                   color=axis_color,
+                                   lw=axis_linewidth,
+                                   mutation_scale=axis_arrow_mutation))
+
+        # Axis labels at arrow tips
+        lbl_r = arrow_len + axis_label_offset
+        if xlabel_right:
+            ax.text(lbl_r, 0, xlabel_right,
+                    ha='left', va='center',
+                    fontsize=axis_label_fontsize,
+                    fontweight=axis_label_fontweight)
+        if xlabel_left:
+            ax.text(-lbl_r, 0, xlabel_left,
+                    ha='right', va='center',
+                    fontsize=axis_label_fontsize,
+                    fontweight=axis_label_fontweight)
+        if ylabel_top:
+            ax.text(0, lbl_r, ylabel_top,
+                    ha='center', va='bottom',
+                    fontsize=axis_label_fontsize,
+                    fontweight=axis_label_fontweight)
+        if ylabel_bottom:
+            ax.text(0, -lbl_r, ylabel_bottom,
+                    ha='center', va='top',
+                    fontsize=axis_label_fontsize,
+                    fontweight=axis_label_fontweight)
+
+    # ── Legend ────────────────────────────────────────────────────────────
+    if show_legend:
+        # One entry per category
+        if quadrant_colors is not None:
+            # Use first quadrant's colours as representative
+            _leg_colors = [quadrant_colors[0][ci % len(quadrant_colors[0])]
+                           for ci in range(n_categories)]
+        else:
+            _leg_colors = _auto_colors
+
+        legend_handles = [
+            mpatches.Patch(facecolor=_leg_colors[ci], edgecolor=edgecolor,
+                           label=str(cat))
+            for ci, cat in enumerate(all_categories)
+        ]
+        legend_kw = dict(
+            handles=legend_handles,
+            title=legend_title,
+            loc=legend_loc,
+            fontsize=legend_fontsize,
+            framealpha=0.9,
+            ncol=legend_ncol,
+        )
+        if legend_bbox is not None:
+            legend_kw['bbox_to_anchor'] = legend_bbox
+        ax.legend(**legend_kw)
+
+    # ── Title ─────────────────────────────────────────────────────────────
+    if chart_title:
+        ax.set_title(chart_title, fontsize=title_size, fontweight='bold')
+
+    # ── Clean up axes limits (account for explode + labels) ───────────────
+    margin = outer_radius * quadrant_label_offset + 0.3
+    ax.set_xlim(-margin, margin)
+    ax.set_ylim(-margin, margin)
+    ax.axis('off')
+
+    plt.tight_layout()
+
+    # ── Save ──────────────────────────────────────────────────────────────
+    if figure_folder is not None and filename is not None:
+        save_path = Path(figure_folder) / filename
+        plt.savefig(str(save_path), bbox_inches='tight',
+                    pad_inches=0, transparent=transparent_bg)
+
+    if show:
+        plt.show()
+
+    return fig, ax
+
+
+def _try_numeric(s):
+    """Try to convert a string to int or float; return original if impossible."""
+    try:
+        v = float(s)
+        return int(v) if v == int(v) else v
+    except (ValueError, TypeError):
+        return s
