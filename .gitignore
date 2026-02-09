@@ -19,6 +19,7 @@ matsim/src/main/java/Doxyfile
 output/
 data/freightChessboardRC/*
 data/chessboardCarrierReceiverCollabCorrect/
+data/chessboardCarrierReceiverCollabCorrectMoreAF/
 data/chessboardCarrierReceiverCollabMoreDispersed/
 data/chessboardCRCollabMoreDispersed/
 !data/freightChessboardRC/figures/

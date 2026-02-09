@@ -1204,6 +1204,9 @@ def aggregate_nni_from_clean_folder(
     study_area_by_distribution: Dict[str, float] = None,
     study_bounds: Tuple[float, float, float, float] = None,
     study_bounds_by_distribution: Dict[str, Tuple[float, float, float, float]] = None,
+    network_link_df: Optional[pd.DataFrame] = None,
+    network_node_df: Optional[pd.DataFrame] = None,
+    network_graph: Optional[nx.DiGraph] = None,
     verbose: bool = True
 ) -> pd.DataFrame:
     """
@@ -1228,6 +1231,14 @@ def aggregate_nni_from_clean_folder(
             Allows different study bounds for different distributions.
             e.g., {'CLUSTERED': (0, 0, 100, 100), 'DISPERSED': (0, 0, 200, 200)}
             Takes precedence over study_bounds if the distribution key exists.
+        network_link_df: Network links DataFrame with columns [link_id, from_node, to_node, length] (optional).
+            Required for computing network-based centroid-to-depot distance.
+            If None, network distance will be NaN.
+        network_node_df: Network nodes DataFrame with columns [node_id, x, y] (optional).
+            Required for computing centroid-to-depot distances.
+            If None, both Euclidean and network distances will be NaN.
+        network_graph: Pre-built NetworkX DiGraph (optional).
+            If None but network_link_df and network_node_df are provided, will be built automatically.
         verbose: Whether to show progress bar.
     
     Returns:
@@ -1245,6 +1256,8 @@ def aggregate_nni_from_clean_folder(
             - pattern: Distribution pattern ('clustered', 'random', 'dispersed')
             - n_receivers: Number of receiver points
             - study_area: Study area used in calculation
+            - centroid_to_depot_euclidean_km: Euclidean distance from receiver centroid to depot (km)
+            - centroid_to_depot_network_km: Network shortest-path distance from receiver centroid to depot (km)
     
     Examples:
         # Basic usage - study area estimated from bounding box
@@ -1288,6 +1301,20 @@ def aggregate_nni_from_clean_folder(
     
     if verbose:
         print(f"Found {len(scenario_folders)} scenario folders in {clean_folder_path}")
+    
+    # Prepare network mappings for centroid-to-depot distance computation
+    link_to_node = None
+    node_coords = None
+    if network_link_df is not None and network_node_df is not None:
+        link_to_node = get_link_to_node_mapping(network_link_df)
+        node_coords = get_node_coordinates(network_node_df)
+        # Auto-build network graph if not provided
+        if network_graph is None:
+            if verbose:
+                print("Building network graph for centroid-to-depot distance...")
+            network_graph = build_network_graph(network_link_df, network_node_df)
+            if verbose:
+                print(f"Graph built with {network_graph.number_of_nodes()} nodes and {network_graph.number_of_edges()} edges")
     
     results = []
     iterator = tqdm(scenario_folders, desc="Processing NNI") if verbose else scenario_folders
@@ -1363,6 +1390,67 @@ def aggregate_nni_from_clean_folder(
                 tqdm.write(f"Error computing NNI for {folder.name}: {e}, skipping...")
             continue
         
+        # ----- Compute centroid-to-depot distances -----
+        centroid_to_depot_euclidean_km = np.nan
+        centroid_to_depot_network_km = np.nan
+        
+        if node_coords is not None and link_to_node is not None:
+            # Get carrier (depot) points
+            carriers_gdf = gdf[gdf['type'] == 'carrier'].copy()
+            
+            if len(carriers_gdf) > 0 and len(receivers_gdf) > 0:
+                # Compute receiver centroid
+                centroid_x = receivers_gdf.geometry.x.mean()
+                centroid_y = receivers_gdf.geometry.y.mean()
+                
+                # Get depot coordinates from carrier link_ids
+                depot_coords_list = []
+                depot_node_ids = []
+                if 'link_id' in carriers_gdf.columns:
+                    for _, carrier_row in carriers_gdf.iterrows():
+                        depot_link = carrier_row.get('link_id')
+                        if depot_link and depot_link in link_to_node:
+                            depot_node = link_to_node[depot_link]
+                            if depot_node in node_coords:
+                                depot_coords_list.append(node_coords[depot_node])
+                                depot_node_ids.append(depot_node)
+                
+                # Fallback: use carrier geometry directly if link_id mapping unavailable
+                if not depot_coords_list:
+                    for _, carrier_row in carriers_gdf.iterrows():
+                        if carrier_row.geometry is not None:
+                            depot_coords_list.append((carrier_row.geometry.x, carrier_row.geometry.y))
+                
+                if depot_coords_list:
+                    # Euclidean distance from centroid to nearest depot
+                    min_eucl_dist = float('inf')
+                    nearest_depot_idx = 0
+                    for idx, (dx, dy) in enumerate(depot_coords_list):
+                        dist = compute_euclidean_distance(centroid_x, centroid_y, dx, dy)
+                        if dist < min_eucl_dist:
+                            min_eucl_dist = dist
+                            nearest_depot_idx = idx
+                    centroid_to_depot_euclidean_km = min_eucl_dist / 1000.0  # Convert to km
+                    
+                    # Network distance from centroid to nearest depot
+                    if network_graph is not None and depot_node_ids:
+                        # Find the nearest network node to the receiver centroid
+                        min_node_dist = float('inf')
+                        centroid_nearest_node = None
+                        for nid, (nx_, ny_) in node_coords.items():
+                            d = compute_euclidean_distance(centroid_x, centroid_y, nx_, ny_)
+                            if d < min_node_dist:
+                                min_node_dist = d
+                                centroid_nearest_node = nid
+                        
+                        if centroid_nearest_node is not None:
+                            min_net_dist = float('inf')
+                            for depot_nid in depot_node_ids:
+                                d = compute_network_distance(network_graph, depot_nid, centroid_nearest_node)
+                                min_net_dist = min(min_net_dist, d)
+                            if min_net_dist < float('inf'):
+                                centroid_to_depot_network_km = min_net_dist / 1000.0  # Convert to km
+        
         # Append result row
         results.append({
             'depot_location': depot,
@@ -1377,7 +1465,9 @@ def aggregate_nni_from_clean_folder(
             'p_value': nni_result['p_value'],
             'pattern': nni_result['pattern'],
             'n_receivers': nni_result['n_points'],
-            'study_area': nni_result['study_area']
+            'study_area': nni_result['study_area'],
+            'centroid_to_depot_euclidean_km': centroid_to_depot_euclidean_km,
+            'centroid_to_depot_network_km': centroid_to_depot_network_km
         })
     
     # Create DataFrame
@@ -1558,7 +1648,7 @@ def aggregate_collaborative_receivers_by_link(
     
     return instance_df, aggregated_df
 
-
+if __name__ == "__main__":
     print("Starting analysis of all scenarios...")
     repo_root = r'./'
     anls_path = os.path.join(repo_root, "data", "chessboardCarrierReceiverCollabCorrect")

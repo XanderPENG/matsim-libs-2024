@@ -1072,6 +1072,12 @@ def scatter_regression_plot(data_df,
         show_grid: Whether to show grid (default: True)
         grid_alpha: Alpha for grid (default: 0.3)
         show: Whether to display the plot (default: True)
+        
+        # Axis tick step options
+        y_tick_step: Step size for y-axis major ticks (default: None, auto)
+            e.g., 100 means one tick every 100 units.
+        x_tick_step: Step size for x-axis major ticks (default: None, auto)
+            e.g., 0.005 means one tick every 0.005 units.
 
     Returns:
         fig: matplotlib Figure object
@@ -1143,6 +1149,8 @@ def scatter_regression_plot(data_df,
     show_grid = kwargs.get('show_grid', True)
     grid_alpha = kwargs.get('grid_alpha', 0.3)
     show = kwargs.get('show', True)
+    y_tick_step = kwargs.get('y_tick_step', None)
+    x_tick_step = kwargs.get('x_tick_step', None)
 
     # Validate columns
     if x_col not in data_df.columns:
@@ -1334,6 +1342,14 @@ def scatter_regression_plot(data_df,
     
     if show_legend:
         ax.legend(loc=legend_loc, framealpha=0.9)
+
+    # Apply custom tick steps
+    if y_tick_step is not None:
+        from matplotlib.ticker import MultipleLocator
+        ax.yaxis.set_major_locator(MultipleLocator(y_tick_step))
+    if x_tick_step is not None:
+        from matplotlib.ticker import MultipleLocator
+        ax.xaxis.set_major_locator(MultipleLocator(x_tick_step))
 
     plt.tight_layout()
 
