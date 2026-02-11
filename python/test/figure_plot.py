@@ -6,6 +6,7 @@ Description: Provide some functions for figure plotting
 """
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+from matplotlib.colors import TwoSlopeNorm
 import seaborn as sns
 import numpy as np
 from scipy import stats
@@ -4462,3 +4463,345 @@ def _try_numeric(s):
         return int(v) if v == int(v) else v
     except (ValueError, TypeError):
         return s
+
+def _inv_std(x_std, j, scaler):
+    """Inverse-standardise feature *j* using (mean, std) stored in *scaler*."""
+    mu, sd = scaler[j]
+    return x_std * sd + mu
+
+
+def _make_diverging_norm(Z):
+    """TwoSlopeNorm centred at 0; returns None when Z is constant."""
+    vmax = max(abs(Z.min()), abs(Z.max()))
+    if vmax == 0:
+        return None
+    return TwoSlopeNorm(vmin=-vmax, vcenter=0, vmax=vmax)
+
+
+def _build_diverging_cmap(neg_colors, pos_colors, name="custom_div", n_bins=256):
+    """Build a diverging ``LinearSegmentedColormap`` from two colour lists.
+
+    Parameters
+    ----------
+    neg_colors : list[str | tuple]
+        Colours for the *negative* half, ordered from most-negative → 0.
+        E.g. ``["darkblue", "lightblue"]``.
+    pos_colors : list[str | tuple]
+        Colours for the *positive* half, ordered from 0 → most-positive.
+        E.g. ``["lightyellow", "darkred"]``.
+    n_bins : int
+        Total number of discrete colour steps.
+    """
+    from matplotlib.colors import LinearSegmentedColormap
+    all_colors = list(neg_colors) + list(pos_colors)
+    return LinearSegmentedColormap.from_list(name, all_colors, N=n_bins)
+
+
+def _resolve_cmap(cmap):
+    """Accept a string / Colormap *or* a ``(neg_colors, pos_colors)`` tuple."""
+    if isinstance(cmap, (list, tuple)) and len(cmap) == 2:
+        first, second = cmap
+        # If both elements are lists (of colours), build a diverging cmap.
+        if isinstance(first, (list, tuple)) and isinstance(second, (list, tuple)):
+            return _build_diverging_cmap(first, second)
+    # Otherwise pass through (string name or Colormap instance).
+    return cmap
+
+
+def plot_partial_dependence(
+    gam,
+    feature_names,
+    scaler=None,
+    *,
+    # ---------- feature selection ----------
+    features=None,           # int | str | list  → None = all non-intercept terms
+    # ---------- shared ----------
+    ci_width=0.95,
+    ylabel=None,             # None → auto "s(feature_name)"; str; or list[str] per term
+    title_suffix="partial dependence (log-odds)",
+    figsize_1d=(6, 4),
+    # ---------- 1-D curve ----------
+    line_color="tab:blue",
+    line_width=2.0,
+    line_label="partial dep.",
+    ci_color="tab:blue",
+    ci_alpha=0.2,
+    ci_label="95 % CI",
+    show_legend=True,        # False → hide legend on 1-D plots
+    show_title=True,         # False → suppress all subplot / suptitle titles
+    # ---------- 2-D / 3-D contour ----------
+    cmap="RdBu_r",          # str | Colormap | (neg_colors, pos_colors)
+    contour_levels=20,
+    colorbar_label="effect on log-odds",
+    colorbar_shrink=0.8,
+    figsize_2d=(7, 5),
+    figsize_3d_per_slice=5,
+    figsize_3d_height=4,
+    max_slices=6,
+    # ---------- axis limits ----------
+    xlim=None,               # (xmin, xmax) or None
+    ylim=None,               # (ymin, ymax) or None
+    # ---------- font sizes ----------
+    title_fontsize=14,
+    label_fontsize=12,
+    label_fontweight="normal",   # "bold" to make axis labels bold
+    tick_fontsize=10,
+    suptitle_fontsize=14,
+    # ---------- display ----------
+    dpi=100,                 # figure screen dpi (plt.subplots dpi)
+    # ---------- output / save ----------
+    output_dir=None,         # str | Path  → directory for saved figures; None = don't save
+    file_prefix="pdep",      # prefix for auto-generated filenames
+    file_format="png",       # "png", "pdf", "svg", …
+    save_dpi=300,            # resolution for saved figures
+):
+    """Plot GAM partial-dependence curves / surfaces.
+
+    Parameters
+    ----------
+    gam : pygam GAM object
+        Fitted GAM model.
+    feature_names : list[str]
+        Names for each feature column, in the same order as the training data.
+    scaler : dict | None
+        ``{feature_index: (mean, std)}`` used to inverse-standardise axes.
+        Pass ``None`` to skip de-standardisation.
+    features : int | str | list | None
+        Which term(s) to plot.
+        * ``None`` – plot every non-intercept term.
+        * ``int``  – term index (position in ``gam.terms``).
+        * ``str``  – feature name (looked up in *feature_names*).
+        * ``list`` – a list mixing ints and/or strs.
+    ci_width : float
+        Width of the confidence interval (0–1).
+    ylabel : None | str | list[str]
+        Y-axis label for 1-D plots.
+
+        * ``None`` (default) – auto-generate ``"s(feature_name)"``.
+        * ``str``  – use the same label for every 1-D plot.
+        * ``list[str]`` – one label per plotted 1-D term (in plotting order).
+    title_suffix : str
+        Suffix appended to figure titles.
+    show_legend : bool
+        Whether to show the legend on 1-D plots.
+    show_title : bool
+        Whether to display titles (subplot titles and suptitles).
+    xlim, ylim : tuple | None
+        Axis limits ``(min, max)`` applied to every subplot.
+    dpi : int
+        Screen resolution for displayed figures.
+    figsize_1d, figsize_2d : tuple
+        Figure sizes for 1-D and 2-D plots.
+    figsize_3d_per_slice, figsize_3d_height : float
+        Per-slice width and height for 3-D sliced contour grids.
+    max_slices : int
+        Max number of slices shown for 3-D tensor terms.
+    line_color, line_width, line_label : str/float
+        Styling of the 1-D partial-dependence curve.
+    ci_color, ci_alpha, ci_label : str/float
+        Shaded confidence-interval styling.
+    cmap : str | Colormap | tuple[list, list]
+        Colormap for 2-D / 3-D contour plots.  Can be:
+
+        * a Matplotlib colormap name (``"RdBu_r"``) or ``Colormap`` object,
+        * **a tuple of two colour-lists** ``(neg_colors, pos_colors)``
+          to create a custom diverging colormap.  ``neg_colors`` runs from
+          most-negative → 0; ``pos_colors`` from 0 → most-positive.
+          Example: ``(["#2166ac", "#f7f7f7"], ["#f7f7f7", "#b2182b"])``.
+    contour_levels : int
+        Number of contour levels.
+    colorbar_label : str
+        Label shown beside the colour bar.
+    colorbar_shrink : float
+        Colour-bar shrink factor.
+    title_fontsize, label_fontsize, tick_labelsize, suptitle_fontsize : int
+        Font sizes.
+    label_fontweight : str
+        Font weight for axis labels (``"normal"``, ``"bold"``, etc.).
+    output_dir : str | pathlib.Path | None
+        Directory where figures are saved.  ``None`` (default) → don't save,
+        only display.  The directory is created automatically if it does not
+        exist.
+    file_prefix : str
+        Prefix prepended to every saved filename
+        (e.g. ``"pdep"`` → ``"pdep_cost.png"``).
+    file_format : str
+        File extension / format passed to ``fig.savefig``
+        (``"png"``, ``"pdf"``, ``"svg"``, …).
+    save_dpi : int
+        Resolution (dots per inch) for raster formats.
+    """
+    if scaler is None:
+        scaler = {}
+
+    # ---- resolve ylabel into an iterator ----
+    # _ylabel_iter will be consumed one element at a time for each 1-D term.
+    if ylabel is None:
+        _ylabel_mode = "auto"     # will build "s(feature_name)" on the fly
+        _ylabel_iter = iter([])   # unused sentinel
+    elif isinstance(ylabel, str):
+        _ylabel_mode = "fixed"
+        _ylabel_fixed = ylabel
+        _ylabel_iter = iter([])   # unused sentinel
+    else:
+        _ylabel_mode = "list"
+        _ylabel_iter = iter(ylabel)
+
+    # ---- resolve cmap (accept two colour lists) ----
+    cmap = _resolve_cmap(cmap)
+
+    # ---- prepare output directory ----
+    if output_dir is not None:
+        from pathlib import Path
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+    # ---- resolve *features* to a list of term indices ----
+    if features is None:
+        term_indices = list(range(len(gam.terms)))
+    else:
+        if not isinstance(features, (list, tuple)):
+            features = [features]
+        term_indices = []
+        for f in features:
+            if isinstance(f, str):
+                term_indices.append(feature_names.index(f))
+            else:
+                term_indices.append(int(f))
+
+    figs = []
+
+    for term_i in term_indices:
+        term = gam.terms[term_i]
+        if term.isintercept:
+            continue
+
+        XX = gam.generate_X_grid(term=term_i)
+        pdep, confi = gam.partial_dependence(term=term_i, X=XX, width=ci_width)
+        idx = term.feature
+
+        # ============================================================
+        #  3-D tensor term  →  sliced contour plots
+        # ============================================================
+        if isinstance(idx, (list, tuple, np.ndarray)) and len(idx) == 3:
+            x1, x2, x3 = XX[:, idx[0]], XX[:, idx[1]], XX[:, idx[2]]
+            u1, u2, u3 = np.unique(x1), np.unique(x2), np.unique(x3)
+            Z_full = pdep.reshape(len(u1), len(u2), len(u3))
+
+            x1_plot = _inv_std(u1, idx[0], scaler) if idx[0] in scaler else u1
+            x2_plot = _inv_std(u2, idx[1], scaler) if idx[1] in scaler else u2
+            x3_plot = _inv_std(u3, idx[2], scaler) if idx[2] in scaler else u3
+
+            norm = _make_diverging_norm(Z_full)
+            n_slices = min(len(u3), max_slices)
+            slice_indices = np.linspace(0, len(u3) - 1, n_slices, dtype=int)
+
+            fig, axes = plt.subplots(
+                1, n_slices,
+                figsize=(figsize_3d_per_slice * n_slices, figsize_3d_height),
+                dpi=dpi, squeeze=False,
+            )
+            for si, s_idx in enumerate(slice_indices):
+                ax = axes[0, si]
+                Z_slice = Z_full[:, :, s_idx]
+                cf = ax.contourf(x2_plot, x1_plot, Z_slice,
+                                 cmap=cmap, norm=norm, levels=contour_levels)
+                ax.set_xlabel(feature_names[idx[1]], fontsize=label_fontsize, fontweight=label_fontweight)
+                ax.set_ylabel(feature_names[idx[0]], fontsize=label_fontsize, fontweight=label_fontweight)
+                if show_title:
+                    ax.set_title(f"{feature_names[idx[2]]}={x3_plot[s_idx]:.2f}",
+                                 fontsize=title_fontsize)
+                ax.tick_params(labelsize=tick_fontsize)
+                if xlim is not None:
+                    ax.set_xlim(xlim)
+                if ylim is not None:
+                    ax.set_ylim(ylim)
+
+            if show_title:
+                fig.suptitle(
+                    f"te({idx[0]},{idx[1]},{idx[2]}) {title_suffix}",
+                    y=1.02, fontsize=suptitle_fontsize,
+                )
+            fig.colorbar(cf, ax=axes.ravel().tolist(),
+                         label=colorbar_label, shrink=colorbar_shrink)
+            plt.tight_layout()
+            if output_dir is not None:
+                fname = f"{file_prefix}_te{'_'.join(str(i) for i in idx)}.{file_format}"
+                fig.savefig(output_dir / fname, dpi=save_dpi, bbox_inches="tight")
+            figs.append(fig)
+            plt.show()
+
+        # ============================================================
+        #  2-D tensor term  →  single contour plot
+        # ============================================================
+        elif isinstance(idx, (list, tuple, np.ndarray)) and len(idx) == 2:
+            x1, x2 = XX[:, idx[0]], XX[:, idx[1]]
+            u1, u2 = np.unique(x1), np.unique(x2)
+            Z = pdep.reshape(len(u1), len(u2))
+
+            x1_plot = _inv_std(u1, idx[0], scaler) if idx[0] in scaler else u1
+            x2_plot = _inv_std(u2, idx[1], scaler) if idx[1] in scaler else u2
+
+            norm = _make_diverging_norm(Z)
+            fig, ax = plt.subplots(figsize=figsize_2d, dpi=dpi)
+            cf = ax.contourf(x2_plot, x1_plot, Z,
+                             cmap=cmap, norm=norm, levels=contour_levels)
+            ax.set_xlabel(feature_names[idx[1]], fontsize=label_fontsize, fontweight=label_fontweight)
+            ax.set_ylabel(feature_names[idx[0]], fontsize=label_fontsize, fontweight=label_fontweight)
+            if show_title:
+                ax.set_title(f"te({idx[0]},{idx[1]}) {title_suffix}",
+                             fontsize=title_fontsize)
+            ax.tick_params(labelsize=tick_fontsize)
+            if xlim is not None:
+                ax.set_xlim(xlim)
+            if ylim is not None:
+                ax.set_ylim(ylim)
+            fig.colorbar(cf, ax=ax, label=colorbar_label, shrink=colorbar_shrink)
+            plt.tight_layout()
+            if output_dir is not None:
+                fname = f"{file_prefix}_te{'_'.join(str(i) for i in idx)}.{file_format}"
+                fig.savefig(output_dir / fname, dpi=save_dpi, bbox_inches="tight")
+            figs.append(fig)
+            plt.show()
+
+        # ============================================================
+        #  1-D smooth  →  curve + shaded CI
+        # ============================================================
+        else:
+            x = XX[:, idx]
+            x_plot = _inv_std(x, idx, scaler) if idx in scaler else x
+
+            # ---- resolve y-label for this term ----
+            if _ylabel_mode == "auto":
+                _cur_ylabel = f"s({feature_names[idx]})"
+            elif _ylabel_mode == "fixed":
+                _cur_ylabel = _ylabel_fixed
+            else:  # list
+                _cur_ylabel = next(_ylabel_iter, f"s({feature_names[idx]})")
+
+            fig, ax = plt.subplots(figsize=figsize_1d, dpi=dpi)
+            ax.plot(x_plot, pdep,
+                    color=line_color, linewidth=line_width, label=line_label)
+            ax.fill_between(
+                x_plot, confi[:, 0], confi[:, 1],
+                color=ci_color, alpha=ci_alpha, label=ci_label,
+            )
+            ax.set_xlabel(feature_names[idx], fontsize=label_fontsize, fontweight=label_fontweight)
+            ax.set_ylabel(_cur_ylabel, fontsize=label_fontsize, fontweight=label_fontweight)
+            if show_title:
+                ax.set_title(f"{term} {title_suffix}", fontsize=title_fontsize)
+            ax.tick_params(labelsize=tick_fontsize)
+            if xlim is not None:
+                ax.set_xlim(xlim)
+            if ylim is not None:
+                ax.set_ylim(ylim)
+            if show_legend:
+                ax.legend(fontsize=label_fontsize)
+            plt.tight_layout()
+            if output_dir is not None:
+                fname = f"{file_prefix}_{feature_names[idx]}.{file_format}"
+                fig.savefig(output_dir / fname, dpi=save_dpi, bbox_inches="tight")
+            figs.append(fig)
+            plt.show()
+
+    return figs

@@ -26,3 +26,4 @@ data/chessboardCRCollabMoreDispersed/
 !data/freightChessboardRC/figures/**
 #ignore pycache
 **/__pycache__/
+.DS_Store
