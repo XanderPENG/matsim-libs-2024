@@ -419,7 +419,7 @@ public class Run20ReceiversWithDistantSingleDepot {
 
 		VehicleType lightVanType = CarrierVehicleType.Builder.newInstance(Id.create("light", VehicleType.class))
 			.setCapacity(3000)
-			.setFixCost(300)
+			.setFixCost(100)
 			.setMaxVelocity(25 / 3.6)
 			.setCostPerDistanceUnit(8.5E-4)
 			.setCostPerTimeUnit(0.0125)
@@ -428,7 +428,7 @@ public class Run20ReceiversWithDistantSingleDepot {
 
 		VehicleType heavyVanType = CarrierVehicleType.Builder.newInstance(Id.create("heavy", VehicleType.class))
 			.setCapacity(5000)
-			.setFixCost(500)
+			.setFixCost(150)
 			.setMaxVelocity(25 / 3.6)
 			.setCostPerDistanceUnit(1.22E-3)
 			.setCostPerTimeUnit(0.0167)
@@ -443,14 +443,14 @@ public class Run20ReceiversWithDistantSingleDepot {
 					Id.createVehicleId("lightVan_" + carrierIdStr),
 					depotLinkId,
 					lightVanType)
-				.setEarliestStart(5 * 60 * 60)
+				.setEarliestStart(6 * 60 * 60)
 				.build();
 
 			CarrierVehicle heavyVan = CarrierVehicle.Builder.newInstance(
 					Id.createVehicleId("heavyVan_" + carrierIdStr),
 					depotLinkId,
 					heavyVanType)
-				.setEarliestStart(5 * 60 * 60)
+				.setEarliestStart(6 * 60 * 60)
 				.build();
 
 			CarrierCapabilities carrierCapabilities = CarrierCapabilities.Builder.newInstance()
@@ -602,13 +602,13 @@ public class Run20ReceiversWithDistantSingleDepot {
 
 		ReceiverProduct receiverProduct = ReceiverProduct.Builder.newInstance()
 			.setProductType(productType)
-			.setReorderingPolicy(ReceiverUtils.createSSReorderPolicy(100, 200))
+			.setReorderingPolicy(ReceiverUtils.createSSReorderPolicy(100, 500))
 			.build();
 		receiver.addProduct(receiverProduct);
 
 		Collection<Order> orders = new ArrayList<>();
 		Order order = Order.Builder.newInstance(Id.create("Order" + receiver.getId(), Order.class), receiver, receiverProduct)
-			.setServiceTime(15 * 60)
+			.setServiceTime(20 * 60)
 			.buildWithCalculatedOrderQuantity();
 		orders.add(order);
 
@@ -616,7 +616,7 @@ public class Run20ReceiversWithDistantSingleDepot {
 
 		ReceiverPlan receiverPlan = ReceiverPlan.Builder.newInstance(receiver, true)
 			.addReceiverOrder(receiverOrder)
-			.addTimeWindow(TimeWindow.newInstance(6 * 60 * 60, 8 * 60 * 60))
+			.addTimeWindow(TimeWindow.newInstance(6 * 60 * 60, 7 * 60 * 60))
 			.build();
 
 		receiver.addPlan(receiverPlan);
