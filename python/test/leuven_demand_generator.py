@@ -95,6 +95,7 @@ from shapely.geometry import LineString, MultiLineString, Point, Polygon
 from shapely.ops import nearest_points
 from shapely.strtree import STRtree
 from sklearn.neighbors import NearestNeighbors
+from tqdm.auto import tqdm   # `auto` = notebook widget in Jupyter, text bar in terminals
 
 # ---------------------------------------------------------------------------
 # Module-level logger
@@ -1596,30 +1597,31 @@ def run_instances(specs: Iterable[dict]) -> List[dict]:
     return [run_instance(**spec) for spec in specs]
 
 
-# ===========================================================================
-# 11. Optional: a minimal usage example when run as a script
-# ===========================================================================
-
-if __name__ == "__main__":
+def run_example_call_one(path_out=r"data/randomDemand20Receivers_nni"):
+    """Example Call 1: generate candidate depots only.
     # Example: Call 1 only — list candidate depots, no customers yet.
     # The user should then pick a subset of matched_link_id values and re-run
     # with depot_link_ids=[...] for Call 2.
-    example_out = "data/randomDemand20Receivers_nni"
-    # result = run_instance(
-    #     instance_id=0,
-    #     out_dir=example_out,
-    #     seed_depots=42,
-    # )
-    # On Call 1, result["demand_csv"] is None and result["depots_df"] holds
-    # the 40-row depot table for interactive inspection.
+    """
+    result = run_instance(
+        instance_id=0,
+        out_dir=path_out,
+        seed_depots=42,
+    )
+    return result
 
-    '''
-    Call 2 for generating customers and the demand CSV would look like this
-    '''
+def run_example_call_two(path_out=r"data/randomDemand20Receivers_nni"):
+    """Example Call 2: generate customers for a chosen subset of depots.
+
+    The user should first run Call 1 to get the list of candidate depots, then
+    pick some (e.g. 1-3) by their ``matched_link_id`` and pass them as
+    ``depot_link_ids=[...]`` here.
+    """ 
+
     picked_depots = ["3991683_6"]
     result = run_instance(
         instance_id=0,
-        out_dir=example_out,
+        out_dir=path_out,
         n_customers=20,
         target_nni=0.8,
         depot_link_ids=picked_depots,
@@ -1636,3 +1638,78 @@ if __name__ == "__main__":
         show_plot=True,
         save_plot=True,
     )
+    return result
+
+# ===========================================================================
+# 11. Optional: a minimal usage example when run as a script
+# ===========================================================================
+
+if __name__ == "__main__":
+    
+    path_out = r"data/randomDemand20Receivers_nni"
+    seed_depots = 42  # fixed seed to get the same depots across runs
+
+    ''' Run and generate 10 instances of customer distributions with different seeds across 40 depots, for a small NNI (0.8). '''
+    # Read the depot csv
+    depots_df = pd.read_csv(path_out + "/depots0.csv.gz")
+
+    # Outer bar: one tick per depot, stays visible the whole run.
+    outer = tqdm(depots_df.iterrows(), total=len(depots_df),
+                 desc="depots", unit="depot")
+    for idx, row in outer:
+        depot_id = row["depot_id"]
+        depot_link_id = row["matched_link_id"]
+        outer.set_postfix(depot=depot_id)
+
+        # Inner bar: advances ONLY when an instance succeeds, so the bar
+        # reaches 10/10 iff we actually wrote 10 valid demand CSVs for this
+        # depot. `leave=False` auto-clears the bar when this depot finishes.
+        N_VALID = 10           # how many valid instances we want per depot
+        MAX_ATTEMPTS = 100     # safety cap to avoid an infinite retry loop
+        success = 0            # number of valid instances written so far
+        attempt = 0            # total attempts (success + retries)
+        inner = tqdm(total=N_VALID, desc=f"{depot_id}", unit="inst", leave=False)
+        while success < N_VALID and attempt < MAX_ATTEMPTS:
+            # Use a fresh seed for every attempt so retries explore new POI samples.
+            # A monotonically increasing offset ensures no seed is reused across
+            # attempts within the same depot.
+            seed_customers = seed_depots + attempt + 1
+            instance_id = f"{success}"           # 0..9 across SUCCESSFUL runs
+            output_folder = f"{path_out}/{depot_id}/ins{success}"
+            attempt += 1
+            try:
+                result = run_instance(
+                    instance_id=instance_id,
+                    out_dir=output_folder,
+                    n_customers=20,
+                    target_nni=0.8,
+                    depot_link_ids=[depot_link_id],
+                    seed_depots=seed_depots,  # must match Call 1 to get the same depots
+                    seed_customers=seed_customers,
+                    seed_assignment=seed_customers,  # align assignment seed with customer seed for consistency
+                    assignment_mode="roundrobin",
+                    nni_tolerance=0.1,
+                    nni_max_iter=500,
+                    n_rings=10,
+                    inner_frac=0.1,
+                    sectors_deg=DEFAULT_SECTORS_DEG,
+                    sector_names=DEFAULT_SECTOR_NAMES,
+                    show_plot=False,  # Set to True if you want to see the plots
+                    save_plot=True,
+                )
+                success += 1
+                inner.update(1)
+                inner.set_postfix(nni=f"{result['achieved_nni']:.3f}",
+                                  attempts=attempt)
+            except ValueError as e:
+                # Infeasible NNI for this seed — retry with a different one.
+                logger.info("retrying %s ins%d (seed=%d failed: %s)",
+                            depot_id, success, seed_customers, e)
+                inner.set_postfix(retry=f"seed={seed_customers}",
+                                  attempts=attempt)
+        inner.close()
+        if success < N_VALID:
+            logger.warning(
+                "depot %s: only %d/%d valid instances after %d attempts",
+                depot_id, success, N_VALID, MAX_ATTEMPTS,
+            )

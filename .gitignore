@@ -27,3 +27,7 @@ data/chessboardCRCollabMoreDispersed/
 #ignore pycache
 **/__pycache__/
 .DS_Store
+/.claude
+/data/leuvenFreightCollabRC.qgz
+/data/randomDemand20Receivers_nni
+/data/randomDemand20ReceiversOutput
