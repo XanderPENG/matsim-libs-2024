@@ -1646,8 +1646,17 @@ def run_example_call_two(path_out=r"data/randomDemand20Receivers_nni"):
 
 if __name__ == "__main__":
     
-    path_out = r"data/randomDemand20Receivers_nni"
+    path_out = r"data/randomDemand15Receivers_nni"
     seed_depots = 42  # fixed seed to get the same depots across runs
+
+    ''' Check if there is depot CSV already, if not run Call 1 to generate depots. '''
+    depot_csv_path = pathlib.Path(path_out) / "depots0.csv.gz"
+    if not depot_csv_path.exists():
+        logger.info("Depot CSV not found at %s. Running Call 1 to generate depots.",
+                    depot_csv_path)
+        run_example_call_one(path_out=path_out)
+    else:
+        logger.info("Found existing depot CSV at %s. Skipping Call 1.", depot_csv_path)
 
     ''' Run and generate 10 instances of customer distributions with different seeds across 40 depots, for a small NNI (0.8). '''
     # Read the depot csv
@@ -1681,7 +1690,7 @@ if __name__ == "__main__":
                 result = run_instance(
                     instance_id=instance_id,
                     out_dir=output_folder,
-                    n_customers=20,
+                    n_customers=15,
                     target_nni=0.8,
                     depot_link_ids=[depot_link_id],
                     seed_depots=seed_depots,  # must match Call 1 to get the same depots
