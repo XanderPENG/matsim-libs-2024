@@ -80,9 +80,9 @@ import static org.matsim.freight.receiver.run.chessboard.ReceiverChessboardScena
 public class Run20ReceiversWithDistantSingleDepot {
 	private static final Logger logger = LogManager.getLogger(Run20ReceiversWithDistantSingleDepot.class);
 
-	private static final Path INPUT_BASE_DIR = Path.of("data", "randomDemand20Receivers_nni");
-	private static final Path OUTPUT_BASE_DIR = Path.of("data", "randomDemand20ReceiversOutput");
-	private static final String RUN_TAG = "leuvenCRCollab20Receivers";
+	private static final Path INPUT_BASE_DIR = Path.of("data", "randomDemand15Receivers_nni");
+	private static final Path OUTPUT_BASE_DIR = Path.of("data", "randomDemand15ReceiversOutput");
+	private static final String RUN_TAG = "leuvenCRCollab15Receivers";
 	private static final Pattern INSTANCE_DIR_PATTERN = Pattern.compile("ins(\\d+)");
 
 	private enum AllocationMethod {
