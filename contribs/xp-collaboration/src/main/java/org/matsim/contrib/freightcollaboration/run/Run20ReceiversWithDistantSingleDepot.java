@@ -246,7 +246,9 @@ public class Run20ReceiversWithDistantSingleDepot {
 		freightCollaborationConfigGroup.setSamplesRatio(0.4);
 		freightCollaborationConfigGroup.setMonteCarloSamples(10);
 		freightCollaborationConfigGroup.setStratifiedSamplesPerLevel(10);
-		freightCollaborationConfigGroup.setMaxStratifiedEvaluations(200);
+		freightCollaborationConfigGroup.setMaxStratifiedEvaluations(150);
+		freightCollaborationConfigGroup.setPsimScoringModeString(FreightCollaborationConfigGroup.PsimScoringMode.BASIC_COST.toString());
+		freightCollaborationConfigGroup.setIter0BaselineModeString(FreightCollaborationConfigGroup.Iter0BaselineMode.FEE_FREE.toString());
 		config.addModule(freightCollaborationConfigGroup);
 
 		Scenario scenario = ScenarioUtils.loadScenario(config);

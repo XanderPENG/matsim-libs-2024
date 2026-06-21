@@ -151,6 +151,9 @@ __all__ = [
     "plot_instance",
     "run_instance",
     "run_instances",
+    # Scenario read-back
+    "read_scenario_carriers_and_receivers",
+    "plot_scenario_positions",
 ]
 
 
@@ -1639,6 +1642,304 @@ def run_example_call_two(path_out=r"data/randomDemand20Receivers_nni"):
         save_plot=True,
     )
     return result
+
+# ===========================================================================
+# 12. Scenario read-back — carrier/receiver positions + position plot
+# ===========================================================================
+
+def _ring_index(ring_level) -> int:
+    """Numeric index of a ring token, e.g. ``'r8' -> 8``. Defaults to 0."""
+    digits = "".join(ch for ch in str(ring_level) if ch.isdigit())
+    return int(digits) if digits else 0
+
+
+def read_scenario_carriers_and_receivers(
+    clean_dir: str | os.PathLike,
+    geojson_name: str = "geo_data.geojson",
+    target_crs: str = DEFAULT_CRS,
+) -> Tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
+    """Read carrier (depot) and receiver positions from every scenario folder.
+
+    Expected layout (as written by
+    ``python/freightCollabLeuven/aggregate_matsim_outputs.py``)::
+
+        <clean_dir>/
+            r0_NE-approx_shapley_mc-af0.80-p0.0003-i00/geo_data.geojson
+            r0_NE-approx_shapley_mc-af0.80-p0.0008-i00/geo_data.geojson
+            ...                                        (one folder per scenario)
+
+    Each ``geo_data.geojson`` holds **one** carrier (the depot) feature plus the
+    receiver features, tagged with a ``type`` column (``'carrier'`` /
+    ``'receiver'``) and the scenario's ``ring_level`` / ``direction``.
+
+    The 40 depots (10 rings × 4 directions) repeat across scenarios that differ
+    only in allocation method / penalty, so carriers are **de-duplicated to one
+    row per (ring_level, direction)**. Because instance 0 is fixed, the receiver
+    layout is identical across scenarios and is **read only once** (from the
+    first scenario that contains receivers). To stay fast, files whose
+    ring/direction depot has already been captured are skipped without being
+    opened.
+
+    Parameters
+    ----------
+    clean_dir : path-like
+        Directory containing the per-scenario folders (e.g.
+        ``data/freightCollabLeuven15Receivers/clean``).
+    geojson_name : str, default ``'geo_data.geojson'``
+        Name of the per-scenario GeoJSON to read.
+    target_crs : str, default EPSG:31370
+        CRS the returned frames are reprojected to if they differ.
+
+    Returns
+    -------
+    (carriers_gdf, receivers_gdf)
+        ``carriers_gdf`` — columns ``['ring_level', 'direction', 'depot_id',
+        'link_id', 'x', 'y', 'geometry']``, up to 40 rows, sorted by ring index
+        then direction.
+        ``receivers_gdf`` — columns ``['id', 'link_id', 'x', 'y', 'geometry']``.
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``clean_dir`` does not exist or contains no matching GeoJSON files.
+    """
+    base = _resolve(clean_dir)
+    geojson_paths = sorted(base.glob(f"*/{geojson_name}"))
+    if not geojson_paths:
+        raise FileNotFoundError(
+            f"No '{geojson_name}' files found under {base}. Expected one per "
+            f"scenario folder (run aggregate_matsim_outputs.py first)."
+        )
+
+    carrier_rows: List[dict] = []
+    seen: set = set()                 # 'r{ring}_{dir}' prefixes already captured
+    receiver_rows: Optional[List[dict]] = None  # captured exactly once
+
+    for gj in geojson_paths:
+        prefix = gj.parent.name.split("-")[0]   # e.g. 'r0_NE'
+        need_carrier = prefix not in seen
+        need_receivers = receiver_rows is None
+        if not (need_carrier or need_receivers):
+            continue  # nothing new here -> skip the (relatively slow) file read
+
+        gdf = gpd.read_file(gj)
+        if gdf.crs is not None and str(gdf.crs).upper() != target_crs.upper():
+            gdf = gdf.to_crs(target_crs)
+
+        if need_carrier:
+            carriers = gdf[gdf["type"] == "carrier"]
+            if len(carriers) > 0:
+                c = carriers.iloc[0]
+                ring = str(c["ring_level"])
+                direction = str(c["direction"])
+                carrier_rows.append({
+                    "ring_level": ring,
+                    "direction": direction,
+                    "depot_id": f"{ring}_{direction}",
+                    "link_id": str(c.get("link_id", "")),
+                    "x": float(c.geometry.x),
+                    "y": float(c.geometry.y),
+                    "geometry": c.geometry,
+                })
+                seen.add(prefix)
+
+        if need_receivers:
+            receivers = gdf[gdf["type"] == "receiver"]
+            if len(receivers) > 0:
+                receiver_rows = [{
+                    "id": str(r["id"]),
+                    "link_id": str(r.get("link_id", "")),
+                    "x": float(r.geometry.x),
+                    "y": float(r.geometry.y),
+                    "geometry": r.geometry,
+                } for _, r in receivers.iterrows()]
+
+    if not carrier_rows:
+        raise FileNotFoundError(
+            f"Found GeoJSON files under {base} but none contained a 'carrier' "
+            f"feature — check the 'type' column."
+        )
+
+    carriers_gdf = gpd.GeoDataFrame(carrier_rows, geometry="geometry", crs=target_crs)
+    carriers_gdf["_ring_idx"] = carriers_gdf["ring_level"].map(_ring_index)
+    carriers_gdf = (
+        carriers_gdf.sort_values(["_ring_idx", "direction"])
+        .drop(columns="_ring_idx")
+        .reset_index(drop=True)
+    )
+
+    if receiver_rows:
+        receivers_gdf = gpd.GeoDataFrame(receiver_rows, geometry="geometry", crs=target_crs)
+    else:
+        receivers_gdf = gpd.GeoDataFrame(
+            columns=["id", "link_id", "x", "y", "geometry"],
+            geometry="geometry", crs=target_crs,
+        )
+
+    logger.info(
+        "Read %d unique depots and %d receivers from %d scenario folders under %s.",
+        len(carriers_gdf), len(receivers_gdf), len(geojson_paths), base,
+    )
+    return carriers_gdf, receivers_gdf
+
+
+def _as_str_list(value) -> Optional[List[str]]:
+    """Normalise a scalar / iterable / None into a list of strings (or None)."""
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple, set, pd.Series, np.ndarray)):
+        return [str(v) for v in value]
+    return [str(value)]
+
+
+def plot_scenario_positions(
+    carriers_gdf: gpd.GeoDataFrame,
+    receivers_gdf: Optional[gpd.GeoDataFrame],
+    network_gdf: gpd.GeoDataFrame,
+    *,
+    # ---- what to show ----
+    show_all_carriers: bool = True,
+    ring_level=None,                 # filter (str / list); used iff not show_all_carriers
+    direction=None,                  # filter (str / list); used iff not show_all_carriers
+    is_receiver: bool = True,        # whether to draw receivers
+    # ---- concentric rings (drawn by default only when showing all 40) ----
+    show_rings: Optional[bool] = None,   # None -> True iff show_all_carriers
+    center: Optional[Tuple[float, float]] = None,
+    ring_radii: Optional[Sequence[float]] = None,
+    ring_color: str = "lightgray",
+    ring_linestyle: str = "--",
+    ring_linewidth: float = 0.8,
+    ring_alpha: float = 0.8,
+    # ---- carrier (depot) markers ----
+    carrier_marker: str = "*",
+    carrier_size: float = 220.0,
+    carrier_color: str = "#d62728",
+    carrier_edgecolor: str = "black",
+    carrier_linewidth: float = 0.8,
+    annotate_carriers: bool = False,
+    # ---- receiver markers ----
+    receiver_marker: str = "o",
+    receiver_size: float = 40.0,
+    receiver_color: str = "#1f77b4",
+    receiver_edgecolor: str = "white",
+    receiver_linewidth: float = 0.5,
+    # ---- network ----
+    network_color: str = "lightgrey",
+    network_linewidth: float = 0.4,
+    network_linestyle: str = "-",
+    # ---- figure ----
+    figsize: Tuple[float, float] = (10.0, 10.0),
+    ax: Optional[plt.Axes] = None,
+    title: Optional[str] = None,
+) -> plt.Axes:
+    """Plot carrier (depot) and receiver positions over the road network.
+
+    Built to consume the two frames returned by
+    :func:`read_scenario_carriers_and_receivers`.
+
+    Selection
+    ---------
+    * ``show_all_carriers=True`` (default) draws all 40 depots and (by default)
+      the ten concentric rings that organise them.
+    * ``show_all_carriers=False`` draws only the depots matching the
+      ``ring_level`` / ``direction`` filters (``None`` = no filter on that
+      field). ``is_receiver`` toggles the receiver layer independently.
+
+    Rings
+    -----
+    When ``show_rings`` (default: on iff ``show_all_carriers``) the ten rings
+    are drawn as light-grey dashed circles. ``center`` defaults to the mean of
+    all depot coordinates (the 4 symmetric directions cancel out, so this
+    recovers the generation centre); each ring radius defaults to the mean
+    depot-to-centre distance for that ring level. All ring styling
+    (``ring_color``, ``ring_linestyle``, ``ring_linewidth``, ``ring_alpha``)
+    is user-adjustable, as are the marker styles/sizes, the network line
+    style/width, and ``figsize``.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        The axis drawn on (a new figure is created when ``ax is None``).
+    """
+    created_ax = ax is None
+    if created_ax:
+        _, ax = plt.subplots(figsize=figsize)
+
+    # ---- Layer 1: road network ----
+    if network_gdf is not None and len(network_gdf) > 0:
+        network_gdf.plot(
+            ax=ax, color=network_color, linewidth=network_linewidth,
+            linestyle=network_linestyle, zorder=1,
+        )
+
+    # ---- Select carriers to draw ----
+    shown = carriers_gdf
+    if not show_all_carriers:
+        rl = _as_str_list(ring_level)
+        dr = _as_str_list(direction)
+        if rl is not None:
+            shown = shown[shown["ring_level"].astype(str).isin(rl)]
+        if dr is not None:
+            shown = shown[shown["direction"].astype(str).isin(dr)]
+
+    # ---- Concentric rings (computed from the FULL depot set) ----
+    draw_rings = show_all_carriers if show_rings is None else show_rings
+    if draw_rings and len(carriers_gdf) > 0:
+        if center is None:
+            center = (float(carriers_gdf["x"].mean()), float(carriers_gdf["y"].mean()))
+        if ring_radii is None:
+            cx, cy = center
+            dist = np.hypot(carriers_gdf["x"] - cx, carriers_gdf["y"] - cy)
+            tmp = pd.DataFrame({"ring_level": carriers_gdf["ring_level"].values,
+                                "_r": dist.values})
+            radii = tmp.groupby("ring_level")["_r"].mean()
+            radii = radii.reindex(sorted(radii.index, key=_ring_index))
+            ring_radii = radii.tolist()
+        for r in ring_radii:
+            ax.add_patch(mpatches.Circle(
+                center, r, fill=False, linestyle=ring_linestyle,
+                linewidth=ring_linewidth, edgecolor=ring_color,
+                alpha=ring_alpha, zorder=2,
+            ))
+
+    # ---- Receivers ----
+    if is_receiver and receivers_gdf is not None and len(receivers_gdf) > 0:
+        ax.scatter(
+            receivers_gdf["x"], receivers_gdf["y"],
+            marker=receiver_marker, s=receiver_size, color=receiver_color,
+            edgecolors=receiver_edgecolor, linewidths=receiver_linewidth,
+            zorder=4, label=f"Receiver (n={len(receivers_gdf)})",
+        )
+
+    # ---- Carriers (depots) ----
+    if len(shown) > 0:
+        ax.scatter(
+            shown["x"], shown["y"],
+            marker=carrier_marker, s=carrier_size, color=carrier_color,
+            edgecolors=carrier_edgecolor, linewidths=carrier_linewidth,
+            zorder=6, label=f"Carrier depot (n={len(shown)})",
+        )
+        if annotate_carriers:
+            for _, row in shown.iterrows():
+                ax.annotate(
+                    row["depot_id"], (row["x"], row["y"]),
+                    fontsize=7, ha="center", va="bottom",
+                    xytext=(0, 8), textcoords="offset points", zorder=7,
+                )
+
+    # ---- Cosmetics ----
+    if title is None:
+        title = ("All depots (40) & receivers" if show_all_carriers
+                 else "Selected depots & receivers")
+    ax.set_title(title, fontsize=10)
+    ax.set_xlabel("X (m, EPSG:31370)")
+    ax.set_ylabel("Y (m, EPSG:31370)")
+    ax.set_aspect("equal")
+    ax.legend(loc="upper right", fontsize=8, framealpha=0.85)
+    if created_ax:
+        plt.tight_layout()
+    return ax
+
 
 # ===========================================================================
 # 11. Optional: a minimal usage example when run as a script
