@@ -101,21 +101,23 @@ public class RunCarrierReceiverCollabChessboardExample {
 		final Duration breakWindow = Duration.ofMinutes(15);
 		Instant windowStart = Instant.now();
 
-		List<Integer> instances = IntStream.range(0, 1).boxed().toList();
+		List<Integer> instances = IntStream.range(0, 10).boxed().toList();
 
 		/* Design 1 - finer penalty sweep: 0, 1, 2, 3, 5, 10, 20, 35, 50, 60, 80 100 euro/hr
 		 * which equals to approx. 0.0003, 0.0006, 0.0008, 0.0014, 0.0028, 0.0056, 0.0098, 0.014, 0.0167, 0.0222, 0.028 euro/sec
 		 */
-		double[] penaltySweep = {0, 0.0003, 0.0008, 0.0014, 0.0028, 0.0056, 0.0098, 0.014, 0.0167, 0.0222, 0.028};
+//		double[] penaltySweep = {0.0003, 0.0008, 0.0014, 0.0028, 0.0056, 0.0098, 0.014, 0.0167, 0.0222, 0.028};
+		double[] penaltySweep = {0.0333, 0.0417};
 //		double[] allocSweepShort = {0.6, 0.75, 0.9};
 //		double[] allocSweepShort = {0.5, 0.6, 0.7, 0.8, 0.9};
+//		double[] allocSweepShort = {0.1, 0.2, 0.3, 0.4};
 		double[] allocSweepShort = {0.8};
 		// Design 2: finer allocation factor sweep
 		double fixedPenalty = 0.005;
 		double[] allocSweepLong = IntStream.range(0, 12).mapToDouble(i -> 0.4 + 0.05 * i).toArray();
 		List<CustomerDistributionScenario> customerDistributionScenarios = List.of(
-//			CustomerDistributionScenario.FULLY_RANDOM,
-//			CustomerDistributionScenario.CLUSTERED,
+			CustomerDistributionScenario.FULLY_RANDOM,
+			CustomerDistributionScenario.CLUSTERED,
 			CustomerDistributionScenario.DISPERSED
 		);
 
@@ -281,7 +283,7 @@ public class RunCarrierReceiverCollabChessboardExample {
 		Config config = ConfigUtils.createConfig();
 		config.setContext(context);
 		config.network().setInputFile("grid9x9.xml");
-		config.controller().setOutputDirectory("output/chessboardCarrierReceiverCollabCorrectMoreDispersed/" + runId + "/");
+		config.controller().setOutputDirectory("output/chessboardCarrierReceiverCollabCorrectMorePen/" + runId + "/");
 		config.controller().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
 		config.controller().setFirstIteration(0);
 		config.controller().setLastIteration(30);

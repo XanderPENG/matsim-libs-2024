@@ -49,18 +49,15 @@ public final class CreateFreightChessboardNetwork {
 					new Coord(x * LINK_LENGTH, y * LINK_LENGTH));
 			}
 		}
-		NetworkUtils.createAndAddNode(network, Id.createNodeId("dummy1"), new Coord(-LINK_LENGTH, -LINK_LENGTH));
-		NetworkUtils.createAndAddNode(network, Id.createNodeId("dummy2"),
-			new Coord((gridSize + 1) * LINK_LENGTH, (gridSize + 1) * LINK_LENGTH));
 
 		for (int x = 1; x <= gridSize; x++) {
 			for (int y = 0; y <= gridSize; y++) {
-				addHorizontalLink(network, x, y);
+				addHorizontalLink(network, x, y, gridSize);
 			}
 		}
 		for (int x = 0; x <= gridSize; x++) {
 			for (int y = 1; y <= gridSize; y++) {
-				addVerticalLink(network, x, y);
+				addVerticalLink(network, x, y, gridSize);
 			}
 		}
 
@@ -91,26 +88,42 @@ public final class CreateFreightChessboardNetwork {
 		return "i(%d,%d)%s".formatted(x, y, y % 2 == 0 ? "" : "R");
 	}
 
+	public static String horizontalLinkId(int x, int y, int gridSize) {
+		return "i(%d,%d)%s".formatted(x, y, isHorizontalReverse(y, gridSize) ? "R" : "");
+	}
+
 	public static String verticalLinkId(int x, int y) {
 		return "j(%d,%d)%s".formatted(x, y, x % 2 == 0 ? "R" : "");
 	}
 
-	private static void addHorizontalLink(Network network, int x, int y) {
-		boolean reverse = y % 2 != 0;
+	public static String verticalLinkId(int x, int y, int gridSize) {
+		return "j(%d,%d)%s".formatted(x, y, isVerticalReverse(x, gridSize) ? "R" : "");
+	}
+
+	private static void addHorizontalLink(Network network, int x, int y, int gridSize) {
+		boolean reverse = isHorizontalReverse(y, gridSize);
 		Node fromNode = node(network, reverse ? x : x - 1, y);
 		Node toNode = node(network, reverse ? x - 1 : x, y);
-		Link link = NetworkUtils.createAndAddLink(network, Id.createLinkId(horizontalLinkId(x, y)), fromNode, toNode,
+		Link link = NetworkUtils.createAndAddLink(network, Id.createLinkId(horizontalLinkId(x, y, gridSize)), fromNode, toNode,
 			LINK_LENGTH, FREE_SPEED, CAPACITY, LANES);
 		link.setAllowedModes(CAR_MODE);
 	}
 
-	private static void addVerticalLink(Network network, int x, int y) {
-		boolean reverse = x % 2 == 0;
+	private static void addVerticalLink(Network network, int x, int y, int gridSize) {
+		boolean reverse = isVerticalReverse(x, gridSize);
 		Node fromNode = node(network, x, reverse ? y : y - 1);
 		Node toNode = node(network, x, reverse ? y - 1 : y);
-		Link link = NetworkUtils.createAndAddLink(network, Id.createLinkId(verticalLinkId(x, y)), fromNode, toNode,
+		Link link = NetworkUtils.createAndAddLink(network, Id.createLinkId(verticalLinkId(x, y, gridSize)), fromNode, toNode,
 			LINK_LENGTH, FREE_SPEED, CAPACITY, LANES);
 		link.setAllowedModes(CAR_MODE);
+	}
+
+	private static boolean isHorizontalReverse(int y, int gridSize) {
+		return y % 2 != 0 || gridSize % 2 == 0 && y == gridSize;
+	}
+
+	private static boolean isVerticalReverse(int x, int gridSize) {
+		return x % 2 == 0 && !(gridSize % 2 == 0 && x == gridSize);
 	}
 
 	private static Node node(Network network, int x, int y) {
