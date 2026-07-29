@@ -56,7 +56,7 @@ public class RunLeuvenCarrierReceiverCollabExample {
 	// Logger
 	private static final Logger logger = LogManager.getLogger(RunLeuvenCarrierReceiverCollabExample.class);
 
-	private static final String OUTPUT_BASE_DIR = "leuvenCarrierReceiverCollab60Receivers/";
+	private static final String OUTPUT_BASE_DIR = "leuvenCarrierReceiverCollab20Receivers/";
 	// Spatial distribution of receivers
 	private enum ReceiverSpatialDistribution {
 //		FULLY_RANDOM,
@@ -121,7 +121,7 @@ public class RunLeuvenCarrierReceiverCollabExample {
 
 	public static void main(String[] args) {
 
-		List<Integer> instances = IntStream.range(0, 10).boxed().toList();
+		List<Integer> instances = IntStream.range(0, 5).boxed().toList();
 //		int instance = 1;
 
 		double[] penaltySweep = {0, 0.0003, 0.0008, 0.0014, 0.0028, 0.0056, 0.0098, 0.014, 0.028};

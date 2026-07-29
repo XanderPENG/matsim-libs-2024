@@ -9,7 +9,10 @@ import org.matsim.core.config.ReflectiveConfigGroup.StringGetter;
 import org.matsim.core.config.ReflectiveConfigGroup.StringSetter;
 
 import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -35,7 +38,7 @@ public class CollaborationParamSet extends ReflectiveConfigGroup implements Mats
 	public CollaborationParamSet(CollaborationType collaborationType, Set<CollaborationStrategies> collaborationStrategies) {
 		super(GROUP_NAME);
 		this.COLLABORATION_TYPE = collaborationType;
-		this.COLLABORATION_STRATEGIES = collaborationStrategies;
+		setCollaborationStrategies(collaborationStrategies);
 	}
 
 	@StringGetter("COLLABORATION_TYPE")
@@ -106,17 +109,28 @@ public class CollaborationParamSet extends ReflectiveConfigGroup implements Mats
 			this.ADDITIONAL_PARAMS = Map.of();
 			return;
 		}
-		this.ADDITIONAL_PARAMS = Arrays.stream(params.split(";"))
+		Map<String, Set<String>> parsed = new LinkedHashMap<>();
+		for (String item : params.split(";")) {
+			String trimmed = item.trim();
+			if (trimmed.isEmpty()) {
+				continue;
+			}
+			String[] pair = trimmed.split("=", 2);
+			if (pair.length != 2 || pair[0].trim().isEmpty()) {
+				throw new IllegalArgumentException("Invalid ADDITIONAL_PARAMS entry '" + trimmed
+					+ "'. Expected key=value1|value2.");
+			}
+			String key = pair[0].trim();
+			if (parsed.containsKey(key)) {
+				throw new IllegalArgumentException("Duplicate ADDITIONAL_PARAMS key: " + key);
+			}
+			Set<String> values = Arrays.stream(pair[1].split("\\|"))
 				.map(String::trim)
-				.filter(s -> !s.isEmpty())
-				.map(s -> s.split("=", 2))
-				.collect(Collectors.toMap(
-						arr -> arr[0].trim(),
-						arr -> Arrays.stream(arr[1].split("\\|"))
-								.map(String::trim)
-								.filter(v -> !v.isEmpty())
-								.collect(Collectors.toSet())
-				));
+				.filter(v -> !v.isEmpty())
+				.collect(Collectors.toCollection(LinkedHashSet::new));
+			parsed.put(key, Set.copyOf(values));
+		}
+		this.ADDITIONAL_PARAMS = Map.copyOf(parsed);
 	}
 
 
@@ -138,21 +152,31 @@ public class CollaborationParamSet extends ReflectiveConfigGroup implements Mats
 	 * Get the set of CollaborationStrategies.
 	 */
 	public Set<CollaborationStrategies> getCollaborationStrategies() {
-		return COLLABORATION_STRATEGIES;
+		return COLLABORATION_STRATEGIES == null ? Set.of() : COLLABORATION_STRATEGIES;
 	}
 
 	/**
 	 * Set the set of CollaborationStrategies.
 	 */
 	public void setCollaborationStrategies(Set<CollaborationStrategies> collaborationStrategies) {
-		this.COLLABORATION_STRATEGIES = collaborationStrategies;
+		this.COLLABORATION_STRATEGIES = collaborationStrategies == null
+			? Set.of()
+			: Set.copyOf(collaborationStrategies);
 	}
 
 	public Map<String, Set<String>> getAdditionalParams() {
-		return ADDITIONAL_PARAMS;
+		return ADDITIONAL_PARAMS == null ? Map.of() : ADDITIONAL_PARAMS;
 	}
 
 	public void setAdditionalParams(Map<String, Set<String>> additionalParams) {
-		this.ADDITIONAL_PARAMS = additionalParams;
+		if (additionalParams == null || additionalParams.isEmpty()) {
+			this.ADDITIONAL_PARAMS = Map.of();
+			return;
+		}
+		Map<String, Set<String>> copy = new LinkedHashMap<>();
+		additionalParams.forEach((key, values) -> copy.put(
+			Objects.requireNonNull(key, "additional parameter key"),
+			values == null ? Set.of() : Set.copyOf(values)));
+		this.ADDITIONAL_PARAMS = Map.copyOf(copy);
 	}
 }

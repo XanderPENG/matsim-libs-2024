@@ -2,80 +2,99 @@ package org.matsim.contrib.freightcollaboration.allocation;
 
 import org.junit.jupiter.api.Test;
 import org.matsim.api.core.v01.Id;
+import org.matsim.contrib.freightcollaboration.CollaboratorKey;
+import org.matsim.contrib.freightcollaboration.CollaboratorRole;
+import org.matsim.contrib.freightcollaboration.FreightCollaborationTestFixtures;
+import org.matsim.contrib.freightcollaboration.MutableFreightCoalition;
 
-import java.util.*;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
+
 class AllocationModelShapleyValueTest {
+	private static final Id<Object> A = Id.create("a", Object.class);
+	private static final Id<Object> B = Id.create("b", Object.class);
 
-    @Test
-    void calculateShapleyValues() {
-		CollaborationDataStore dataStore = null;  // Placeholder, not used in this test
-        // Test implementation for calculateShapleyValues method
-        AllocationModelShapleyValue model = new AllocationModelShapleyValue(dataStore, 0.9);
+	@Test
+	void exactShapleySatisfiesAdditivitySymmetryDummyAndEfficiency() {
+		AllocationModelShapleyValue model =
+			new AllocationModelShapleyValue(FreightCollaborationTestFixtures.emptyDataStore(), 1.0);
 
-        Map<Set<Id<?>>, Double> coalitionAndScores = generateCoalitionsAndPositiveScores();
-        Map<Id<?>, Double> shapley = model.calculateShapleyValues(coalitionAndScores);
+		Map<Id<?>, Double> additive = model.calculateShapleyValues(game(0, 2, 3, 5));
+		assertEquals(2.0, additive.get(A), 1e-12);
+		assertEquals(3.0, additive.get(B), 1e-12);
+		assertEquals(5.0, additive.values().stream().mapToDouble(Double::doubleValue).sum(), 1e-12);
 
-		// Check for the positive scores case
-        assertNotNull(shapley);
-        // We expect three unique collaborators: a, b, c
-        assertEquals(3, shapley.size());
-		// Print the Shapley values for visual inspection
-		for (Map.Entry<Id<?>, Double> entry : shapley.entrySet()) {
-			System.out.println("Collaborator " + entry.getKey() + ": Shapley Value = " + entry.getValue());
-		}
+		Map<Id<?>, Double> synergy = model.calculateShapleyValues(game(0, 0, 0, 10));
+		assertEquals(5.0, synergy.get(A), 1e-12);
+		assertEquals(5.0, synergy.get(B), 1e-12);
 
-		// Test with negative scores
-		Map<Set<Id<?>>, Double> negativeCoalitionAndScores = generateCoalitionsAndNegativeScores();
-		Map<Id<?>, Double> negativeShapley = model.calculateShapleyValues(negativeCoalitionAndScores);
-		assertNotNull(negativeShapley);
-		assertEquals(3, negativeShapley.size());
-		// Print the Shapley values for visual inspection
-		for (Map.Entry<Id<?>, Double> entry : negativeShapley.entrySet()) {
-			System.out.println("Collaborator " + entry.getKey() + ": Negative Shapley Value = " + entry.getValue());
-		}
-    }
+		Map<Id<?>, Double> negativeDummy = model.calculateShapleyValues(game(0, -2, 3, 1));
+		assertEquals(-2.0, negativeDummy.get(A), 1e-12);
+		assertEquals(3.0, negativeDummy.get(B), 1e-12);
+	}
 
-    Map<Set<Id<?>>, Double> generateCoalitionsAndPositiveScores(){
-        // Build a map from coalitions (sets of Ids) to positive double scores.
-        Map<Set<Id<?>>, Double> coalitionAndScores = new HashMap<>();
+	@Test
+	void exactShapleyRejectsIncompleteOrNonFiniteGames() {
+		AllocationModelShapleyValue model =
+			new AllocationModelShapleyValue(FreightCollaborationTestFixtures.emptyDataStore(), 1.0);
+		Map<Set<Id<?>>, Double> missing = new LinkedHashMap<>(game(0, 1, 2, 3));
+		missing.remove(Set.of(A));
+		assertThrows(IllegalArgumentException.class, () -> model.calculateShapleyValues(missing));
 
-        // Create Id instances. Use Object.class as the generic type so they are Id<?> compatible.
-        Id<Object> a = Id.create("a", Object.class);
-        Id<Object> b = Id.create("b", Object.class);
-        Id<Object> c = Id.create("c", Object.class);
+		Map<Set<Id<?>>, Double> nonFinite = new LinkedHashMap<>(game(0, 1, 2, 3));
+		nonFinite.put(Set.of(A), Double.NaN);
+		assertThrows(IllegalArgumentException.class, () -> model.calculateShapleyValues(nonFinite));
+	}
 
-        coalitionAndScores.put(Collections.singleton(a), 50.0);
-        coalitionAndScores.put(Collections.singleton(b), 50.0);
-        coalitionAndScores.put(Collections.singleton(c), 50.0);
+	@Test
+	void costSavingsAllocationUsesRoleAwareKeysAndBalancesBudget() {
+		CollaborationDataStore store = FreightCollaborationTestFixtures.emptyDataStore();
+		MutableFreightCoalition coalition =
+			FreightCollaborationTestFixtures.carrierReceiverCoalition("same", "same");
+		Id<?> receiverId = coalition.getCollaboratorsSetByRole(CollaboratorRole.RECEIVER)
+			.iterator().next().getId();
+		store.addSimulatedCoalitionScores(coalition, Map.of(
+			Set.of(), 10.0,
+			Set.of(receiverId), 14.0));
 
-        coalitionAndScores.put(new HashSet<>(Arrays.asList(a, b)), 45.0);
-        coalitionAndScores.put(new HashSet<>(Arrays.asList(a, c)), 35.0);
-        coalitionAndScores.put(new HashSet<>(Arrays.asList(b, c)), 25.0);
-        coalitionAndScores.put(new HashSet<>(Arrays.asList(a, b, c)), 20.0);
+		new AllocationModelShapleyValue(store, 0.75).allocate(AllocationValueTypes.COST_SAVINGS);
 
-        return coalitionAndScores;
-    }
+		assertEquals(3.0,
+			store.getAllocatedValue(CollaboratorRole.RECEIVER, receiverId), 1e-12);
+		assertEquals(1.0,
+			store.getAllocatedValue(CollaboratorRole.CARRIER, Id.create("same", Object.class)), 1e-12);
+		assertEquals(2, store.getAllocatedValues().size());
+		assertEquals(4.0, store.getAllocatedValues().values().stream()
+			.mapToDouble(Double::doubleValue).sum(), 1e-12);
+	}
 
-	Map<Set<Id<?>>, Double> generateCoalitionsAndNegativeScores(){
-		// Build a map from coalitions (sets of Ids) to positive double scores.
-		Map<Set<Id<?>>, Double> coalitionAndScores = new HashMap<>();
+	@Test
+	void costAllocationUsesCharacteristicFunctionWithoutIdCollision() {
+		CollaborationDataStore store = FreightCollaborationTestFixtures.emptyDataStore();
+		MutableFreightCoalition coalition =
+			FreightCollaborationTestFixtures.carrierReceiverCoalition("carrier", "receiver");
+		Id<?> receiverId = coalition.getCollaboratorsSetByRole(CollaboratorRole.RECEIVER)
+			.iterator().next().getId();
+		store.addSimulatedCoalitionScores(coalition, Map.of(
+			Set.of(), 0.0,
+			Set.of(receiverId), 8.0));
 
-		// Create Id instances. Use Object.class as the generic type so they are Id<?> compatible.
-		Id<Object> a = Id.create("a", Object.class);
-		Id<Object> b = Id.create("b", Object.class);
-		Id<Object> c = Id.create("c", Object.class);
+		new AllocationModelShapleyValue(store, 0.75).allocate(AllocationValueTypes.COST);
 
-		coalitionAndScores.put(Collections.singleton(a), -50.0);
-		coalitionAndScores.put(Collections.singleton(b), -50.0);
-		coalitionAndScores.put(Collections.singleton(c), -50.0);
+		assertEquals(6.0, store.getAllocatedValue(CollaboratorRole.RECEIVER, receiverId), 1e-12);
+		assertEquals(2.0, store.getAllocatedValue(CollaboratorRole.CARRIER,
+			Id.create("carrier", Object.class)), 1e-12);
+	}
 
-		coalitionAndScores.put(new HashSet<>(Arrays.asList(a, b)), -45.0);
-		coalitionAndScores.put(new HashSet<>(Arrays.asList(a, c)), -35.0);
-		coalitionAndScores.put(new HashSet<>(Arrays.asList(b, c)), -25.0);
-		coalitionAndScores.put(new HashSet<>(Arrays.asList(a, b, c)), -20.0);
-
-		return coalitionAndScores;
+	private static Map<Set<Id<?>>, Double> game(double empty, double a, double b, double both) {
+		Map<Set<Id<?>>, Double> values = new LinkedHashMap<>();
+		values.put(Set.of(), empty);
+		values.put(Set.of(A), a);
+		values.put(Set.of(B), b);
+		values.put(Set.of(A, B), both);
+		return values;
 	}
 }

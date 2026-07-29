@@ -8,14 +8,14 @@ import org.matsim.freight.receiver.Receiver;
 
 public class FreightCollaboratorFactory {
 	public static <T extends HasPlansAndId<?, ?>> FreightCollaborator<T> createCollaborator(T delegate) {
+		if (delegate == null) {
+			throw new IllegalArgumentException("Delegate cannot be null.");
+		}
 		return switch (delegate) {
 			case Carrier carrier -> new FreightCollaboratorImpl<>(delegate, CollaboratorRole.CARRIER);
 			case LSP lsp -> new FreightCollaboratorImpl<>(delegate, CollaboratorRole.LSP);
 			case Receiver receiver -> new FreightCollaboratorImpl<>(delegate, CollaboratorRole.RECEIVER);
-			case null, default -> {
-				assert delegate != null;
-				throw new IllegalArgumentException("Unsupported delegate type: " + delegate.getClass().getName());
-			}
+			default -> throw new IllegalArgumentException("Unsupported delegate type: " + delegate.getClass().getName());
 		};
 	}
 }

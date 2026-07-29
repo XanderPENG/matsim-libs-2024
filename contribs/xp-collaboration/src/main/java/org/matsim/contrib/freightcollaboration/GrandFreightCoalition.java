@@ -14,7 +14,7 @@ import java.util.stream.Collectors;
  */
 public class GrandFreightCoalition implements FreightCoalition {
 	private final Attributes coalitionAttributes = new AttributesImpl();
-	private final Map<Id<?>, FreightCollaborator<?>> grandCoalitionCollaborators;
+	private final Map<CollaboratorKey, FreightCollaborator<?>> grandCoalitionCollaborators;
 	private final Set<CollaboratorRole> roles;
 
 	public GrandFreightCoalition(Collection<FreightCollaborator<?>> collaborators) {
@@ -23,12 +23,15 @@ public class GrandFreightCoalition implements FreightCoalition {
 		}
 
 		// Create immutable internal structures
-		Map<Id<?>, FreightCollaborator<?>> tempMap = new HashMap<>();
+		Map<CollaboratorKey, FreightCollaborator<?>> tempMap = new LinkedHashMap<>();
 		for (FreightCollaborator<?> collaborator : collaborators) {
 			if (collaborator == null) {
 				throw new IllegalArgumentException("Collaborator cannot be null");
 			}
-			tempMap.put(collaborator.getId(), collaborator);
+			FreightCollaborator<?> previous = tempMap.putIfAbsent(collaborator.getKey(), collaborator);
+			if (previous != null) {
+				throw new IllegalArgumentException("Duplicate collaborator key: " + collaborator.getKey());
+			}
 		}
 
 		this.grandCoalitionCollaborators = Collections.unmodifiableMap(tempMap);
@@ -43,13 +46,25 @@ public class GrandFreightCoalition implements FreightCoalition {
 	}
 
 	@Override
+	@Deprecated
 	public Map<Id<?>, FreightCollaborator<?>> getCollaboratorsMap() {
+		return legacyIdMap();
+	}
+
+	@Override
+	public Map<CollaboratorKey, FreightCollaborator<?>> getCollaboratorsByKey() {
 		return grandCoalitionCollaborators;
 	}
 
 	@Override
+	@Deprecated
 	public FreightCollaborator<?> getCollaborator(Id<?> id) {
-		return grandCoalitionCollaborators.get(id);
+		return findUnique(id);
+	}
+
+	@Override
+	public FreightCollaborator<?> getCollaborator(CollaboratorRole role, Id<?> id) {
+		return grandCoalitionCollaborators.get(new CollaboratorKey(role, id));
 	}
 
 	@Override
@@ -63,8 +78,14 @@ public class GrandFreightCoalition implements FreightCoalition {
 	}
 
 	@Override
+	@Deprecated
 	public boolean contains(Id<?> id) {
-		return grandCoalitionCollaborators.containsKey(id);
+		return findUnique(id) != null;
+	}
+
+	@Override
+	public boolean contains(CollaboratorRole role, Id<?> id) {
+		return grandCoalitionCollaborators.containsKey(new CollaboratorKey(role, id));
 	}
 
 	@Override
@@ -88,11 +109,35 @@ public class GrandFreightCoalition implements FreightCoalition {
 	public Map<Id<?>, FreightCollaborator<?>> getCollaboratorsMapByRole(CollaboratorRole role) {
 		return grandCoalitionCollaborators.values().stream()
 			.filter(c -> c.getRole() == role)
-			.collect(Collectors.toMap(FreightCollaborator::getId, c -> c));
+			.collect(Collectors.toUnmodifiableMap(FreightCollaborator::getId, c -> c));
 	}
 
 	@Override
 	public Attributes getAttributes() {
 		return coalitionAttributes;
+	}
+
+	private FreightCollaborator<?> findUnique(Id<?> id) {
+		Objects.requireNonNull(id, "id");
+		List<FreightCollaborator<?>> matches = grandCoalitionCollaborators.entrySet().stream()
+			.filter(entry -> entry.getKey().id().equals(id))
+			.map(Map.Entry::getValue)
+			.toList();
+		if (matches.size() > 1) {
+			throw new IllegalStateException("Ambiguous collaborator id '" + id
+				+ "' is used by multiple roles. Use a role-aware lookup.");
+		}
+		return matches.isEmpty() ? null : matches.getFirst();
+	}
+
+	private Map<Id<?>, FreightCollaborator<?>> legacyIdMap() {
+		Map<Id<?>, FreightCollaborator<?>> result = new LinkedHashMap<>();
+		for (FreightCollaborator<?> collaborator : grandCoalitionCollaborators.values()) {
+			if (result.putIfAbsent(collaborator.getId(), collaborator) != null) {
+				throw new IllegalStateException("Coalition contains the same collaborator id in multiple roles. "
+					+ "Use getCollaboratorsByKey().");
+			}
+		}
+		return Map.copyOf(result);
 	}
 }

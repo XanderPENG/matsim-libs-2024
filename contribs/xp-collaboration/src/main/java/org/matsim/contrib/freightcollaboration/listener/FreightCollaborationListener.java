@@ -25,89 +25,95 @@ import java.util.Set;
 
 public class FreightCollaborationListener implements IterationStartsListener, AfterMobsimListener {
 
-	@Inject
-	private EventsManager events;
-
-	@Inject
-	private Network network;
-
-	@Inject
-	private Config config;
-
-	@Inject
-	private Scenario scenario;
-
-	@Inject
-	private FreightCollaborators freightCollaborators;
-
-	@Inject
-	private CollaborationDataStore collaborationDataStore;
-
-	@Inject
-	FreightCoalitionManager freightCollaborationManager;
-
-	@Inject
-	CarrierScoringFunctionFactory carrierScoringFunctionFactory;
+	private final EventsManager events;
+	private final Network network;
+	private final Config config;
+	private final Scenario scenario;
+	private final FreightCollaborators freightCollaborators;
+	private final CollaborationDataStore collaborationDataStore;
+	private final FreightCoalitionManager freightCollaborationManager;
+	private final CarrierScoringFunctionFactory carrierScoringFunctionFactory;
+	private final CollaborationRunnerFactory collaborationRunnerFactory;
 
 	private TravelTimeCalculator ttc;
 
 	private static final Logger LOGGER = LogManager.getLogger(FreightCollaborationListener.class);
 
+	@Inject
+	public FreightCollaborationListener(EventsManager events, Network network, Config config, Scenario scenario,
+										FreightCollaborators freightCollaborators,
+										CollaborationDataStore collaborationDataStore,
+										FreightCoalitionManager freightCollaborationManager,
+										CarrierScoringFunctionFactory carrierScoringFunctionFactory) {
+		this(events, network, config, scenario, freightCollaborators, collaborationDataStore,
+			freightCollaborationManager, carrierScoringFunctionFactory,
+			(cfg, sc, collaborators, dataStore, coalitions, travelTime, scoringFactory) ->
+				() -> new FreightCollaborationEngine(cfg, sc, collaborators, dataStore, coalitions, travelTime,
+					scoringFactory).runCollaboration());
+	}
+
+	FreightCollaborationListener(EventsManager events, Network network, Config config, Scenario scenario,
+								 FreightCollaborators freightCollaborators,
+								 CollaborationDataStore collaborationDataStore,
+								 FreightCoalitionManager freightCollaborationManager,
+								 CarrierScoringFunctionFactory carrierScoringFunctionFactory,
+								 CollaborationRunnerFactory collaborationRunnerFactory) {
+		this.events = events;
+		this.network = network;
+		this.config = config;
+		this.scenario = scenario;
+		this.freightCollaborators = freightCollaborators;
+		this.collaborationDataStore = collaborationDataStore;
+		this.freightCollaborationManager = freightCollaborationManager;
+		this.carrierScoringFunctionFactory = carrierScoringFunctionFactory;
+		this.collaborationRunnerFactory = collaborationRunnerFactory;
+	}
+
 	@Override
 	public void notifyIterationStarts(IterationStartsEvent event) {
-		// Initialize TravelTimeCalculator
-		if (ttc != null) throw new IllegalStateException("TTC should be null at iteration start.");
-		/**
-		 * Create a TravelTimeCalculator to compute link travel times based on events.
-		 * Note: Currently, only a default TravelTimeCalculator without custom settings is created,
-		 * 	it could/should provide interface for custom settings?
-		 */
-		ttc = new TravelTimeCalculator.Builder(network)
-			.build();
-		// Register the TravelTimeCalculator as an event handler, to collect events and compute travel times later
-		events.addHandler(ttc);
+		if (ttc != null) {
+			throw new IllegalStateException("TTC should be null at iteration start.");
+		}
+		TravelTimeCalculator next = new TravelTimeCalculator.Builder(network).build();
+		events.addHandler(next);
+		ttc = next;
 	}
 
 	@Override
 	public void notifyAfterMobsim(AfterMobsimEvent event) {
-
-		// if this is the first iteration, skip the collaboration process
-		if (event.getIteration() == scenario.getConfig().controller().getFirstIteration()) {
-			// Remove the TravelTimeCalculator as an event handler, to avoid interference with next iteration
-			events.removeHandler(ttc);
-			ttc = null;
-			LOGGER.info("Skipping freight collaboration process at the first iteration.");
-			return;
+		TravelTimeCalculator current = ttc;
+		if (current == null) {
+			throw new IllegalStateException("TTC not initialized for this iteration.");
 		}
+		try {
+			if (event.getIteration() == scenario.getConfig().controller().getFirstIteration()) {
+				LOGGER.info("Skipping freight collaboration process at the first iteration.");
+				return;
+			}
 
-		// Reset the CollaborationDataStore for the new iteration
-		collaborationDataStore.reset();
+			collaborationDataStore.reset();
+			TravelTime travelTime = current.getLinkTravelTimes();
+			List<MutableFreightCoalition> coalitions = freightCollaborationManager.getMutableFreightCoalitions();
+			if (coalitions == null || coalitions.isEmpty()
+				|| coalitions.stream().allMatch(c -> c.size() == 1)) {
+				LOGGER.info("No existing freight coalitions found - skipping collaboration process for this iteration.");
+				return;
+			}
 
-		// Get the events-based TravelTime
-		if (ttc == null) throw new IllegalStateException("TTC not initialized for this iteration.");
-		TravelTime tt = ttc.getLinkTravelTimes();
-
-		/**
-		 * Use the TravelTime for the freight collaboration logic
-		 */
-		List<MutableFreightCoalition> mutableFreightCoalitions = freightCollaborationManager.getMutableFreightCoalitions();
-		// if there are no existing coalitions, skip the collaboration process
-		if (mutableFreightCoalitions == null || mutableFreightCoalitions.isEmpty() ||
-			mutableFreightCoalitions.stream().allMatch(c -> c.size() == 1)) {
-			LOGGER.info("No existing freight coalitions found - skipping collaboration process for this iteration.");
-			// Remove the TravelTimeCalculator as an event handler, to avoid interference with next iteration
-			events.removeHandler(ttc);
-			ttc = null;
-			return;
-		} else {
-			FreightCollaborationEngine collaborationEngine = new FreightCollaborationEngine(config, scenario, freightCollaborators,
-				collaborationDataStore, freightCollaborationManager.getMutableFreightCoalitions(), tt, carrierScoringFunctionFactory);
-			collaborationEngine.runCollaboration();
+			collaborationRunnerFactory.create(config, scenario, freightCollaborators, collaborationDataStore,
+				List.copyOf(coalitions), travelTime, carrierScoringFunctionFactory).run();
+		} finally {
+			events.removeHandler(current);
+			if (ttc == current) {
+				ttc = null;
+			}
 		}
-		// Remove the TravelTimeCalculator as an event handler, to avoid interference with next iteration
-		events.removeHandler(ttc);
-		ttc = null;
 	}
 
-
+	@FunctionalInterface
+	interface CollaborationRunnerFactory {
+		Runnable create(Config config, Scenario scenario, FreightCollaborators collaborators,
+						CollaborationDataStore dataStore, List<MutableFreightCoalition> coalitions,
+						TravelTime travelTime, CarrierScoringFunctionFactory scoringFunctionFactory);
+	}
 }

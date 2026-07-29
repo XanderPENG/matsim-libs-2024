@@ -97,7 +97,7 @@ public class ReRouteListener implements BeforeMobsimListener {
 		writeCollaboratorPlans(event.getIteration());
 	}
 
-	private void applyReplanInPlace(LSP originalLsp, LSP replannedLsp) {
+	void applyReplanInPlace(LSP originalLsp, LSP replannedLsp) {
 		// Map existing resources by id – the scheduler inside the LSP keeps a reference to these objects
 		Map<Id<LSPResource>, LSPResource> originalResources = originalLsp.getResources().stream()
 			.collect(Collectors.toMap(LSPResource::getId, Function.identity()));
@@ -159,7 +159,7 @@ public class ReRouteListener implements BeforeMobsimListener {
 		originalLsp.scheduleLogisticChains();
 	}
 
-	private LogisticChainElement findFirstElement(LogisticChain chain){
+	LogisticChainElement findFirstElement(LogisticChain chain){
 		for (LogisticChainElement el : chain.getLogisticChainElements()){
 			if (el.getPreviousElement() == null){
 				return el;

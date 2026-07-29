@@ -43,7 +43,6 @@ public class CollaborationModule extends AbstractModule {
 	@Override
 	public void install() {
 		this.addControlerListenerBinding().to(Iter0BaselineCarrierScoreListener.class);
-		this.addControlerListenerBinding().to(NotifyCoalitionInfoListener.class);
 		this.addControlerListenerBinding().to(FormFreightCoalitionListener.class);
 		this.addControlerListenerBinding().to(FreightCollaborationListener.class);
 		// Implement the allocation in the scoring function directly, so this listener is not needed anymore
@@ -70,7 +69,7 @@ public class CollaborationModule extends AbstractModule {
 		}
 	}
 
-	private CollaborationDataStore initCollaborationDataStore() {
+	CollaborationDataStore initCollaborationDataStore() {
         Map<CollaboratorRole, Map<Id<?>, ? extends BasicPlan>> originalPlans = new HashMap<>();
         List<CollaboratorRole> roles = List.of(CollaboratorRole.CARRIER, CollaboratorRole.RECEIVER, CollaboratorRole.LSP);
         for (CollaboratorRole role : roles) {
@@ -136,7 +135,7 @@ public class CollaborationModule extends AbstractModule {
 					this.addControlerListenerBinding().to(ReRouteListener.class);
 					break;
 				case CARRIER_RECEIVER:
-					return;
+					break;
 				default:
 					throw new IllegalStateException("Unexpected value: " + paramSet.getCollaborationType());
 			}

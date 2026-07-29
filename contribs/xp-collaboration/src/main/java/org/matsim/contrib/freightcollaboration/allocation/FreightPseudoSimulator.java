@@ -3,6 +3,7 @@ package org.matsim.contrib.freightcollaboration.allocation;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Id;
+import org.matsim.api.core.v01.Scenario;
 import org.matsim.api.core.v01.network.Network;
 import org.matsim.api.core.v01.population.Activity;
 import org.matsim.api.core.v01.population.Leg;
@@ -59,8 +60,7 @@ public class FreightPseudoSimulator {
 	private static Logger LOGGER = LogManager.getLogger(FreightPseudoSimulator.class);
 	/** Upper bound for jsprit iterations during sampling; keeps Shapley runs lightweight. */
 	private int vrpMaxIterations = 100;
-	/** Lighter bound used for sample/partial coalitions to speed approximate methods. */
-	private int vrpSampleIterations = 40;
+	private final CoalitionValueEvaluator coalitionValueEvaluator;
 
 //	FreightPseudoSimulator() {}
 
@@ -74,10 +74,17 @@ public class FreightPseudoSimulator {
 		this.freightCollaborators = freightCollaborators;
 		this.carrierScoringFunctionFactory = carrierScoringFunctionFactory;
 		this.freightConfig = freightConfig;
+		this.coalitionValueEvaluator = null;
 	}
 
-	void run() {
-
+	FreightPseudoSimulator(CoalitionValueEvaluator coalitionValueEvaluator) {
+		this.collaborationDataStore = null;
+		this.network = null;
+		this.freightCollaborators = null;
+		this.tt = null;
+		this.carrierScoringFunctionFactory = null;
+		this.freightConfig = null;
+		this.coalitionValueEvaluator = Objects.requireNonNull(coalitionValueEvaluator, "coalitionValueEvaluator");
 	}
 
 	/** Allow callers to trade accuracy for speed during sampling runs. */
@@ -86,18 +93,15 @@ public class FreightPseudoSimulator {
 			throw new IllegalArgumentException("vrpMaxIterations must be positive.");
 		}
 		this.vrpMaxIterations = vrpMaxIterations;
-		// Keep sample iterations proportionally lower unless user overrides later.
-		if (vrpSampleIterations >= vrpMaxIterations) {
-			this.vrpSampleIterations = Math.max(10, vrpMaxIterations / 2);
-		}
 	}
 
-	/** Optional override for sampling iterations (e.g., in Shapley Monte‑Carlo). */
+	/**
+	 * @deprecated Coalition values must be comparable, so partial and full coalitions use the
+	 * same solver budget. This method now sets the common budget.
+	 */
+	@Deprecated
 	public void setVrpSampleIterations(int vrpSampleIterations) {
-		if (vrpSampleIterations <= 0) {
-			throw new IllegalArgumentException("vrpSampleIterations must be positive.");
-		}
-		this.vrpSampleIterations = vrpSampleIterations;
+		setVrpMaxIterations(vrpSampleIterations);
 	}
 
 	/** Simulate all possible sub-coalitions of the given players and distributors
@@ -106,20 +110,26 @@ public class FreightPseudoSimulator {
 	Map<Set<Id<?>>, Double> runAllSubCoalitions(Map<Id<?>, FreightCollaborator<?>> distributors, Map<Id<?>, FreightCollaborator<?>> players) {
 		LOGGER.info("Starting Freight Pseudo Simulator");
 		// Generate all possible sub-coalitions of the given players
-		var subCoalitionScoreMap = AllocationUtils.generateSubsets(players);
-		ConcurrentHashMap<Set<Id<?>>, Double> result = new ConcurrentHashMap<>();
-		subCoalitionScoreMap.keySet().parallelStream()
-			.forEach(subCoalition -> result.put(Set.copyOf(subCoalition), simulateSubCoalition(distributors, players, subCoalition)));
+		int maxPlayers = freightConfig == null
+			? AllocationUtils.DEFAULT_MAX_EXACT_SHAPLEY_PLAYERS
+			: freightConfig.getMaxExactShapleyPlayers();
+		var subCoalitionScoreMap = AllocationUtils.generateSubsets(players, maxPlayers);
+		Map<Set<Id<?>>, Double> result = new LinkedHashMap<>();
+		for (Set<Id<?>> subCoalition : subCoalitionScoreMap.keySet()) {
+			result.put(subCoalition, simulateSubCoalition(distributors, players, subCoalition));
+		}
 		return result;
 	}
 
 	Map<Set<Id<?>>, Double> runSubCoalitions(Map<Id<?>, FreightCollaborator<?>> distributors,
 											 Map<Id<?>, FreightCollaborator<?>> players,
 											 Collection<Set<Id<?>>> subCoalitions) {
-		ConcurrentHashMap<Set<Id<?>>, Double> subCoalitionScoreMap = new ConcurrentHashMap<>();
-		subCoalitions.parallelStream()
-			.forEach(subCoalition -> subCoalitionScoreMap.put(Set.copyOf(subCoalition),
-				simulateSubCoalition(distributors, players, subCoalition)));
+		Map<Set<Id<?>>, Double> subCoalitionScoreMap = new LinkedHashMap<>();
+		for (Set<Id<?>> subCoalition : new LinkedHashSet<>(
+			Objects.requireNonNull(subCoalitions, "subCoalitions"))) {
+			Set<Id<?>> key = Set.copyOf(subCoalition);
+			subCoalitionScoreMap.put(key, simulateSubCoalition(distributors, players, key));
+		}
 		return subCoalitionScoreMap;
 	}
 
@@ -132,9 +142,15 @@ public class FreightPseudoSimulator {
 	private double simulateSubCoalition(Map<Id<?>, FreightCollaborator<?>> distributors,
 									   Map<Id<?>, FreightCollaborator<?>> players,
 									   Set<Id<?>> subCoalition) {
+		if (coalitionValueEvaluator != null) {
+			return coalitionValueEvaluator.evaluate(distributors, players, Set.copyOf(subCoalition));
+		}
 		// Deep copy the distributors and players maps for this sub-coalition, so that we can modify them safely
-		Map<Id<?>, FreightCollaborator<?>> copyDistributors = AllocationUtils.deepCopyCollaboratorsMap(distributors);
-		Map<Id<?>, FreightCollaborator<?>> copyPlayers = AllocationUtils.deepCopyCollaboratorsMap(players);
+		Scenario copyScenario = collaborationDataStore.getScenario();
+		Map<Id<?>, FreightCollaborator<?>> copyDistributors =
+			AllocationUtils.deepCopyCollaboratorsMap(distributors, copyScenario);
+		Map<Id<?>, FreightCollaborator<?>> copyPlayers =
+			AllocationUtils.deepCopyCollaboratorsMap(players, copyScenario);
 
 		Set<Id<?>> nonCollaboratingMembers;
 		if (subCoalition.isEmpty()) {
@@ -150,27 +166,23 @@ public class FreightPseudoSimulator {
 	@SuppressWarnings("unchecked")
 	private double runPSim(Map<Id<?>, FreightCollaborator<?>> copyDistributors, Map<Id<?>, FreightCollaborator<?>> copyPlayers,
 						   Set<Id<?>> collaboratingSubset) {
+		if (copyDistributors.isEmpty()) {
+			throw new IllegalArgumentException("A PSim coalition requires one distributor.");
+		}
+		if (copyPlayers.isEmpty()) {
+			throw new IllegalArgumentException("A PSim coalition requires at least one player.");
+		}
+		Scenario copyScenario = collaborationDataStore.getScenario();
 		var collaboratorRoleOfDistributors = copyDistributors.values().iterator().next().getRole();
 		var collaboratorRoleOfPlayers = copyPlayers.values().iterator().next().getRole();
 		// if it is carrier-receiver collaboration - runCarrierPSim
 		if (CollaborationTypes.CARRIER_RECEIVER.isCompatible(collaboratorRoleOfDistributors, collaboratorRoleOfPlayers)) {
 			var carrierCollaborator = (FreightCollaborator<Carrier>) copyDistributors.values().iterator().next();
-			if (collaboratingSubset.isEmpty() && freightConfig != null
-				&& freightConfig.getIter0BaselineMode() != FreightCollaborationConfigGroup.Iter0BaselineMode.DISABLED) {
-				Id<Carrier> carrierId = carrierCollaborator.getDelegate().getId();
-				Map<Id<Carrier>, Double> baselineMap = freightConfig.getIter0BaselineMode() ==
-					FreightCollaborationConfigGroup.Iter0BaselineMode.FEE_INCLUDED
-					? collaborationDataStore.getIter0CarrierBaselineFeeIncluded()
-					: collaborationDataStore.getIter0CarrierBaselineFeeFree();
-				if (baselineMap != null && baselineMap.containsKey(carrierId)) {
-					return baselineMap.get(carrierId);
-				}
-			}
 			var receiverCollaborators = new HashSet<>((Set<FreightCollaborator<Receiver>>) (Set<?>) Set.copyOf(copyPlayers.values()));
 			Set<FreightCollaborator<Receiver>> nonCollaboratingReceivers = new HashSet<>();
 			@SuppressWarnings("unchecked")
 			Map<Id<?>, FreightCollaborator<Receiver>> globalReceivers = (Map<Id<?>, FreightCollaborator<Receiver>>) (Map<?, ?>) freightCollaborators.getFreightCollaboratorsByRole(CollaboratorRole.RECEIVER);
-			var allReceivers = AllocationUtils.deepCopyCollaboratorsMap(globalReceivers);
+			var allReceivers = AllocationUtils.deepCopyCollaboratorsMap(globalReceivers, copyScenario);
 			allReceivers.values().forEach(receiverCollaborator -> {
 				// if this receiver is not in the collaborating players for this carrier, check whether it is a non-collaborating receiver for this carrier
 				if (!copyPlayers.containsKey(receiverCollaborator.getId())) {
@@ -188,10 +200,8 @@ public class FreightPseudoSimulator {
 			// merge the non-collaborating receivers and the collaborating ones
 			receiverCollaborators.addAll(nonCollaboratingReceivers);
 			// need to re-generate the carrier plan based on the new receiver plans/requests
-			boolean isFullCoalition = collaboratingSubset.size() == copyPlayers.size();
-			int iterations = isFullCoalition ? vrpMaxIterations : vrpSampleIterations;
 			LinkReceiverAndCarrier.receiversTriggerCarrierReplan(carrierCollaborator, receiverCollaborators,
-					network, tt, iterations
+					network, tt, vrpMaxIterations
 			);
 			// Then run the carrier PSim
 			var driverLegsAndActivitiesMap = runActivityBasedCarrierSimulation(carrierCollaborator.getDelegate());
@@ -219,7 +229,7 @@ public class FreightPseudoSimulator {
 				Set<FreightCollaborator<Receiver>> nonCollaboratingReceivers = new HashSet<>();
 				@SuppressWarnings("unchecked")
 				Map<Id<?>, FreightCollaborator<Receiver>> globalReceivers = (Map<Id<?>, FreightCollaborator<Receiver>>) (Map<?, ?>) freightCollaborators.getFreightCollaboratorsByRole(CollaboratorRole.RECEIVER);
-				var allReceivers = AllocationUtils.deepCopyCollaboratorsMap(globalReceivers);
+				var allReceivers = AllocationUtils.deepCopyCollaboratorsMap(globalReceivers, copyScenario);
 				allReceivers.values().forEach(receiverCollaborator -> {
 					// if this receiver is not in the collaborating players for this lsp, check whether it is a non-collaborating receiver for this lsp
 					if (!copyPlayers.containsKey(receiverCollaborator.getId())) {
@@ -259,7 +269,7 @@ public class FreightPseudoSimulator {
 	 * TODO: Currently, it seems that we do not need the LspScoringFunctionFact as only the carrier scores will change,
 	 * However, it should be kept here for future extension since the hub cost could change due to collaboration.
 	 */
-	private double runLspPseudoSimAndScoring(LSP lsp){
+	double runLspPseudoSimAndScoring(LSP lsp){
 		Set<Carrier> affiliatedCarriers = new HashSet<>();
 		lsp.getResources().forEach(r ->
 			{
@@ -297,8 +307,11 @@ public class FreightPseudoSimulator {
 	 * It will not generate events anymore, instead, it will process the carrierplan activities (i.e., activity is now the main/minimal entity),
 	 * and then it will output @FreightActivity and MATSim @Leg directly, for the sake of scoring.
 	 */
-	private Map<Integer, Tuple<List<FreightActivity>, List<Leg>>> runActivityBasedCarrierSimulation(Carrier carrier) {
+	Map<Integer, Tuple<List<FreightActivity>, List<Leg>>> runActivityBasedCarrierSimulation(Carrier carrier) {
 		CarrierPlan selectedPlan = carrier.getSelectedPlan();
+		if (selectedPlan == null) {
+			throw new IllegalStateException("Carrier " + carrier.getId() + " has no selected plan.");
+		}
 		// create a map to store the driver (fake) and their corresponding Legs and Activities
 		Map<Integer, Tuple<List<FreightActivity>, List<Leg>>> driverLegsAndActivities = new HashMap<>();
 		// for-loop to process each tour in the carrier plan
@@ -316,13 +329,18 @@ public class FreightPseudoSimulator {
 			for (var el : tour.getTour().getTourElements()) {
 				// if prevElement is TourActivity, this must be followed by a Leg
 				if (prevElement instanceof Tour.TourActivity lastAct){
-					assert el instanceof Tour.Leg thisLeg;
+					if (!(el instanceof Tour.Leg thisLeg)) {
+						throw new IllegalStateException("Expected a tour leg after activity but found "
+							+ el.getClass().getSimpleName());
+					}
 					// process the activity and leg
 					// Create a MATSim Leg with travel time = expected travel time (which is calculated based on tt during routing stage of the carrier plan generation)
 					Leg matsimLeg = PopulationUtils.createLeg(tour.getVehicle().getType().getNetworkMode());
-					matsimLeg.setDepartureTime(((Tour.Leg) el).getExpectedDepartureTime());
-					matsimLeg.setTravelTime(((Tour.Leg) el).getExpectedTransportTime());
-					NetworkRoute nRoute = (NetworkRoute) ((Tour.Leg) el).getRoute();
+					matsimLeg.setDepartureTime(thisLeg.getExpectedDepartureTime());
+					matsimLeg.setTravelTime(thisLeg.getExpectedTransportTime());
+					if (!(thisLeg.getRoute() instanceof NetworkRoute nRoute)) {
+						throw new IllegalStateException("Carrier tour leg must use a NetworkRoute.");
+					}
 					nRoute.setVehicleId(vehicleId);
 					matsimLeg.setRoute(nRoute);
 
@@ -332,7 +350,7 @@ public class FreightPseudoSimulator {
 					// create a FreightActivity based on lastAct and this leg time
 					Activity basicActivity = PopulationUtils.createActivityFromLinkId(lastAct.getActivityType(),
 							lastAct.getLocation());
-					double nextLegDeparture = ((Tour.Leg) el).getExpectedDepartureTime();
+					double nextLegDeparture = thisLeg.getExpectedDepartureTime();
 					double actDuration = lastAct.getDuration();
 					// In carrier routing, the next-leg departure equals activity end time.
 					// So activity start is end minus duration (this keeps time-window penalties consistent).
@@ -345,14 +363,17 @@ public class FreightPseudoSimulator {
 					// update the lastElement
 					prevElement = el;
 				} else if (prevElement instanceof Tour.Leg lastLeg) {
-					assert el instanceof Tour.TourActivity act;
+					if (!(el instanceof Tour.TourActivity)) {
+						throw new IllegalStateException("Expected a tour activity after leg but found "
+							+ el.getClass().getSimpleName());
+					}
 					prevElement = el;
 				} else {
 					throw new IllegalStateException("Unexpected tour element sequence: " + prevElement.getClass() + " followed by " + el.getClass());
 				}
 			}
-			driverIdCounter++;
 			driverLegsAndActivities.put(driverIdCounter, new Tuple<>(freightActivities, matsimLegs));
+			driverIdCounter++;
 		}
 		return  driverLegsAndActivities;
 	}
@@ -361,7 +382,8 @@ public class FreightPseudoSimulator {
 	/**
 	 * For the non-collaborating members, reset their plans to the original ones from the data store
 	 */
-	private void resetNonCollaboratingMembersPlans(Set<Id<?>> nonCollaboratingMembers, Map<Id<?>, FreightCollaborator<?>> copyPlayers){
+	void resetNonCollaboratingMembersPlans(Set<Id<?>> nonCollaboratingMembers,
+			Map<Id<?>, FreightCollaborator<?>> copyPlayers){
 		for (Id<?> nonCollaboratingMember : nonCollaboratingMembers) {
 			FreightCollaborator<?> collaborator = copyPlayers.get(nonCollaboratingMember);
 			if (collaborator == null) {

@@ -21,6 +21,15 @@ public class LspReceiverAfterRerouteListener implements BeforeMobsimListener {
 	@Inject
 	Scenario scenario;
 
+	public LspReceiverAfterRerouteListener() {
+	}
+
+	LspReceiverAfterRerouteListener(CollaborationDataStore collaborationDataStore,
+			Scenario scenario) {
+		this.collaborationDataStore = collaborationDataStore;
+		this.scenario = scenario;
+	}
+
 	@Override
 	public void notifyBeforeMobsim(BeforeMobsimEvent event) {
 		Carriers carriers = CarriersUtils.getCarriers(scenario);

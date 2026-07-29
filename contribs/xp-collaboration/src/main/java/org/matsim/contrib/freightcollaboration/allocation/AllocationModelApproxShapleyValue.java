@@ -3,8 +3,7 @@ package org.matsim.contrib.freightcollaboration.allocation;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Id;
-import org.matsim.contrib.freightcollaboration.CollaborationTypes;
-import org.matsim.contrib.freightcollaboration.CollaboratorRole;
+import org.matsim.contrib.freightcollaboration.CollaboratorKey;
 import org.matsim.contrib.freightcollaboration.FreightCollaborator;
 import org.matsim.contrib.freightcollaboration.MutableFreightCoalition;
 import org.matsim.contrib.freightcollaboration.utils.AllocationUtils;
@@ -45,19 +44,25 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 											 double allocationFactor,
 											 ExecutorService executor,
 											 int parallelism) {
-		this.collaborationDataStore = collaborationDataStore;
-		this.pseudoSimulatorSupplier = pseudoSimulatorSupplier;
-		this.coalitions = coalitions;
+		this.collaborationDataStore = Objects.requireNonNull(collaborationDataStore, "collaborationDataStore");
+		this.pseudoSimulatorSupplier = Objects.requireNonNull(pseudoSimulatorSupplier, "pseudoSimulatorSupplier");
+		this.coalitions = coalitions == null ? List.of() : List.copyOf(coalitions);
+		if (!Double.isFinite(allocationFactor) || allocationFactor < 0.0 || allocationFactor > 1.0) {
+			throw new IllegalArgumentException("allocationFactor must be in [0, 1].");
+		}
 		this.allocationFactor = allocationFactor;
 		this.executor = executor;
 		this.parallelism = Math.max(1, parallelism);
 	}
 
 	public void setApproximationMethod(ApproximationMethod approximationMethod) {
-		this.approximationMethod = approximationMethod;
+		this.approximationMethod = Objects.requireNonNull(approximationMethod, "approximationMethod");
 	}
 
 	public void setMonteCarloSamples(int monteCarloSamples) {
+		if (monteCarloSamples <= 0) {
+			throw new IllegalArgumentException("monteCarloSamples must be positive.");
+		}
 		this.monteCarloSamples = monteCarloSamples;
 	}
 
@@ -66,13 +71,16 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 	 * quickly dial runtime up/down without changing absolute defaults.
 	 */
 	public void setSamplesRatio(double samplesRatio) {
-		if (samplesRatio <= 0.0 || samplesRatio > 1.0) {
+		if (!Double.isFinite(samplesRatio) || samplesRatio <= 0.0 || samplesRatio > 1.0) {
 			throw new IllegalArgumentException("samplesRatio must be in (0, 1].");
 		}
 		this.samplesRatio = samplesRatio;
 	}
 
 	public void setStratifiedSamplesPerLevel(int stratifiedSamplesPerLevel) {
+		if (stratifiedSamplesPerLevel <= 0) {
+			throw new IllegalArgumentException("stratifiedSamplesPerLevel must be positive.");
+		}
 		this.stratifiedSamplesPerLevel = stratifiedSamplesPerLevel;
 	}
 
@@ -82,8 +90,9 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 
 	/** Limit the total pseudo-sim evaluations performed by the stratified sampler (per coalition). */
 	public void setMaxStratifiedEvaluations(int maxStratifiedEvaluations) {
-		if (maxStratifiedEvaluations <= 0) {
-			throw new IllegalArgumentException("maxStratifiedEvaluations must be positive.");
+		if (maxStratifiedEvaluations < 2) {
+			throw new IllegalArgumentException(
+				"maxStratifiedEvaluations must be at least 2 (empty and grand coalition).");
 		}
 		this.maxStratifiedEvaluations = maxStratifiedEvaluations;
 	}
@@ -106,12 +115,12 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 
 		List<CoalitionResult> results = executeTasks(tasks);
 
-		Map<Id<?>, Double> finalAllocations = new HashMap<>();
+		Map<CollaboratorKey, Double> finalAllocations = new HashMap<>();
 		for (CoalitionResult result : results) {
 			if (result == null) {
 				continue;
 			}
-			result.allocations().forEach((id, value) -> finalAllocations.merge(id, value, Double::sum));
+			result.allocations().forEach((key, value) -> finalAllocations.merge(key, value, Double::sum));
 			if (result.valueCache() != null && !result.valueCache().isEmpty()) {
 				collaborationDataStore.addSimulatedCoalitionScores(result.coalition(), result.valueCache());
 			}
@@ -129,7 +138,11 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 		}
 
 		FreightPseudoSimulator pseudoSimulator = pseudoSimulatorSupplier.get();
-		Random rnd = new Random(randomSeed + Math.abs((long) coalition.hashCode()));
+		long coalitionSeed = coalition.getCollaboratorsByKey().keySet().stream()
+			.sorted()
+			.mapToLong(key -> key.toString().hashCode())
+			.reduce(17L, (seed, value) -> 31L * seed + value);
+		Random rnd = new Random(randomSeed + coalitionSeed);
 
 		Map<Set<Id<?>>, Double> valueCache = new HashMap<>();       // savings cache (or raw when cost mode)
 		Map<Set<Id<?>>, Double> rawValueCache = new HashMap<>();    // raw psim values cache
@@ -148,17 +161,18 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 				pseudoSimulator, rnd);
 		}
 
-		double totalShapleyValue = shapleyValues.values().stream().mapToDouble(Double::doubleValue).sum();
-		double reservedShare = totalShapleyValue * (1 - allocationFactor);
+		Set<Id<?>> fullCoalition = Set.copyOf(players.keySet());
+		double grandCoalitionValue = evaluateSubCoalition(distributors, players, valueCache, rawValueCache,
+			baselineRaw, fullCoalition, pseudoSimulator) - valueCache.get(Set.of());
+		correctEfficiency(shapleyValues, grandCoalitionValue);
+		double reservedShare = grandCoalitionValue * (1 - allocationFactor);
 
-		Map<Id<?>, Double> allocations = new HashMap<>();
+		Map<CollaboratorKey, Double> allocations = new HashMap<>();
 		for (Map.Entry<Id<?>, Double> shapleyEntry : shapleyValues.entrySet()) {
-			Id<?> collaboratorId = shapleyEntry.getKey();
 			double allocation = shapleyEntry.getValue();
-			allocations.put(collaboratorId, allocationFactor * allocation);
+			allocations.put(AllocationUtils.playerKey(coalition, shapleyEntry.getKey()), allocationFactor * allocation);
 		}
-		Id<?> distributorId = extractDistributorId(coalition);
-		allocations.put(distributorId, reservedShare);
+		allocations.put(AllocationUtils.extractSingleDistributor(coalition).getKey(), reservedShare);
 
 		return new CoalitionResult(coalition, allocations, valueCache);
 	}
@@ -198,6 +212,7 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 											 FreightPseudoSimulator pseudoSimulator,
 											 Random rnd) {
 		List<Id<?>> playerList = new ArrayList<>(players.keySet());
+		playerList.sort(Comparator.comparing(Id::toString));
 		Map<Id<?>, Double> shapleyValues = new HashMap<>();
 		playerList.forEach(id -> shapleyValues.put(id, 0.0));
 
@@ -220,7 +235,7 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 			}
 		}
 
-		shapleyValues.replaceAll((id, value) -> Math.max(0.0, value / effectiveSamples));
+		shapleyValues.replaceAll((id, value) -> value / effectiveSamples);
 		return shapleyValues;
 	}
 
@@ -232,6 +247,7 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 											 FreightPseudoSimulator pseudoSimulator,
 											 Random rnd) {
 		List<Id<?>> playerList = new ArrayList<>(players.keySet());
+		playerList.sort(Comparator.comparing(Id::toString));
 		Map<Id<?>, Double> shapleyValues = new HashMap<>();
 		playerList.forEach(id -> shapleyValues.put(id, 0.0));
 		int n = playerList.size();
@@ -270,38 +286,36 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 			sampledByPlayer.put(playerId, perK);
 		}
 
-		// Optional pruning: if the union of sampled coalitions is still too large, shrink
-		// every per-stratum sample list proportionally so total evaluations stay under the cap.
+		// Keep complete marginal-contribution pairs and account for the mandatory empty
+		// and grand coalitions. This makes the configured evaluation limit a true hard cap.
 		int coalitionsBeforePruning = subsetsToEvaluate.size();
-		if (subsetsToEvaluate.size() > maxStratifiedEvaluations) {
-			logger.info("Pruning coalitions: before={}, cap={}", subsetsToEvaluate.size(), maxStratifiedEvaluations);
-			double keepRatio = (double) maxStratifiedEvaluations / subsetsToEvaluate.size();
-			sampledByPlayer.replaceAll((pid, perK) -> {
-				Map<Integer, List<Set<Id<?>>>> pruned = new HashMap<>();
-				perK.forEach((k, list) -> {
-					int keep = Math.max(1, (int) Math.ceil(list.size() * keepRatio));
-					Collections.shuffle(list, rnd);
-					pruned.put(k, new ArrayList<>(list.subList(0, keep)));
-				});
-				return pruned;
-			});
-			// rebuild the evaluation set from pruned lists
-			subsetsToEvaluate.clear();
-			for (Map.Entry<Id<?>, Map<Integer, List<Set<Id<?>>>>> entry : sampledByPlayer.entrySet()) {
-				Id<?> pid = entry.getKey();
-				for (List<Set<Id<?>>> subsets : entry.getValue().values()) {
-					for (Set<Id<?>> subset : subsets) {
-						subsetsToEvaluate.add(subset);
-						Set<Id<?>> withPlayer = new HashSet<>(subset);
-						withPlayer.add(pid);
-						subsetsToEvaluate.add(withPlayer);
+		Set<Set<Id<?>>> cappedSubsets = new LinkedHashSet<>();
+		cappedSubsets.add(Set.of());
+		cappedSubsets.add(Set.copyOf(playerList));
+		for (Id<?> playerId : playerList) {
+			Map<Integer, List<Set<Id<?>>>> perK = sampledByPlayer.get(playerId);
+			for (int k = 0; k <= n - 1; k++) {
+				List<Set<Id<?>>> accepted = new ArrayList<>();
+				for (Set<Id<?>> subset : perK.get(k)) {
+					Set<Id<?>> withoutPlayer = Set.copyOf(subset);
+					Set<Id<?>> mutableWithPlayer = new HashSet<>(subset);
+					mutableWithPlayer.add(playerId);
+					Set<Id<?>> withPlayer = Set.copyOf(mutableWithPlayer);
+					int additional = (cappedSubsets.contains(withoutPlayer) ? 0 : 1)
+						+ (cappedSubsets.contains(withPlayer) ? 0 : 1);
+					if (cappedSubsets.size() + additional > maxStratifiedEvaluations) {
+						continue;
 					}
+					cappedSubsets.add(withoutPlayer);
+					cappedSubsets.add(withPlayer);
+					accepted.add(withoutPlayer);
 				}
+				perK.put(k, List.copyOf(accepted));
 			}
-			logger.info("After pruning: {} coalitions (reduced by {}%)",
-						subsetsToEvaluate.size(),
-						String.format("%.1f", 100.0 * (1 - (double)subsetsToEvaluate.size() / coalitionsBeforePruning)));
 		}
+		subsetsToEvaluate = cappedSubsets;
+		logger.info("After hard-cap pruning: {} coalitions (before={}, cap={})",
+			subsetsToEvaluate.size(), coalitionsBeforePruning, maxStratifiedEvaluations);
 
 		logger.info("Total unique coalitions to evaluate: {} (exact would be: {})",
 					subsetsToEvaluate.size(), totalExactCoalitions);
@@ -335,7 +349,6 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 			shapleyValues.put(playerId, shapleyEstimate);
 		}
 
-		shapleyValues.replaceAll((id, value) -> Math.max(0.0, value));
 		return shapleyValues;
 	}
 
@@ -409,7 +422,10 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 			result.add(new HashSet<>(candidates.subList(0, subsetSize)));
 			attempts++;
 		}
-		return new ArrayList<>(result);
+		return result.stream()
+			.map(Set::copyOf)
+			.sorted(Comparator.comparing(this::subsetSortKey))
+			.toList();
 	}
 
 	private List<Set<Id<?>>> enumerateCombinations(List<Id<?>> elements, int k, int limit) {
@@ -463,16 +479,21 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 				});
 	}
 
-	private Id<?> extractDistributorId(MutableFreightCoalition coalition) {
-		if (coalition.getCollaborationType() == CollaborationTypes.CARRIER_RECEIVER) {
-			return coalition.getCollaboratorsSetByRole(CollaboratorRole.CARRIER).iterator().next().getId();
-		} else if (coalition.getCollaborationType() == CollaborationTypes.LSP_RECEIVER) {
-			return coalition.getCollaboratorsSetByRole(CollaboratorRole.LSP).iterator().next().getId();
+	private void correctEfficiency(Map<Id<?>, Double> shapleyValues, double targetValue) {
+		if (shapleyValues.isEmpty()) {
+			return;
 		}
-		throw new IllegalStateException("Unsupported collaboration type for approximate Shapley allocation: " + coalition.getCollaborationType());
+		double estimatedTotal = shapleyValues.values().stream().mapToDouble(Double::doubleValue).sum();
+		double residualPerPlayer = (targetValue - estimatedTotal) / shapleyValues.size();
+		shapleyValues.replaceAll((id, value) -> value + residualPerPlayer);
+	}
+
+	private String subsetSortKey(Set<Id<?>> subset) {
+		return subset.stream().map(Id::toString).sorted()
+			.collect(java.util.stream.Collectors.joining("|"));
 	}
 
 	private record CoalitionResult(MutableFreightCoalition coalition,
-								   Map<Id<?>, Double> allocations,
+								   Map<CollaboratorKey, Double> allocations,
 								   Map<Set<Id<?>>, Double> valueCache) { }
 }

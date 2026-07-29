@@ -7,7 +7,11 @@ import org.matsim.api.core.v01.network.Network;
 import org.matsim.api.core.v01.network.Node;
 import org.matsim.core.network.NetworkUtils;
 
-import java.net.URL;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Objects;
 
 public class CreateExampleSimInfrastructure {
 
@@ -85,11 +89,14 @@ public class CreateExampleSimInfrastructure {
 		}
 
 		if (writeNetwork) {
+			Objects.requireNonNull(outputDir, "outputDir");
+			Path directory = Path.of(outputDir);
 			try {
-				NetworkUtils.writeNetwork(network, outputDir + "/example_octagonal_network.xml");
-			} catch (Exception e) {
-				e.printStackTrace();
+				Files.createDirectories(directory);
+			} catch (IOException e) {
+				throw new UncheckedIOException("Could not create output directory " + directory, e);
 			}
+			NetworkUtils.writeNetwork(network, directory.resolve("example_octagonal_network.xml").toString());
 		}
 
 		return network;

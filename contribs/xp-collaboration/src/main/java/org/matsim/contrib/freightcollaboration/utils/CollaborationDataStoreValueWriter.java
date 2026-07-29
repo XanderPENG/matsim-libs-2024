@@ -3,13 +3,17 @@ package org.matsim.contrib.freightcollaboration.utils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Id;
+import org.matsim.contrib.freightcollaboration.CollaboratorKey;
 import org.matsim.contrib.freightcollaboration.MutableFreightCoalition;
 import org.matsim.contrib.freightcollaboration.allocation.CollaborationDataStore;
 import org.matsim.core.utils.io.MatsimXmlWriter;
+import org.matsim.core.utils.io.XmlUtils;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.util.Comparator;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -39,21 +43,23 @@ public class CollaborationDataStoreValueWriter extends MatsimXmlWriter {
 	 * @param iteration The iteration number
 	 */
 	public CollaborationDataStoreValueWriter(CollaborationDataStore dataStore, int iteration) {
-		this.dataStore = dataStore;
+		this.dataStore = Objects.requireNonNull(dataStore, "dataStore");
 		this.iteration = iteration;
 	}
 
 	public void write(String filename) {
+		Objects.requireNonNull(filename, "filename");
 		log.info("Writing collaboration data for iteration " + iteration + " to file: " + filename);
 		try {
 			openFile(filename);
 			writeXmlHead();
 			writeCollaborationData();
-			close();
 			log.info("Collaboration data written successfully.");
 		} catch (IOException e) {
 			log.error("Error writing collaboration data to file: " + filename, e);
 			throw new RuntimeException(e);
+		} finally {
+			close();
 		}
 	}
 
@@ -85,7 +91,9 @@ public class CollaborationDataStoreValueWriter extends MatsimXmlWriter {
 		writer.write("\t<coalitionScores>\n");
 
 		int coalitionIndex = 1;
-		for (Map.Entry<MutableFreightCoalition, Map<Set<Id<?>>, Double>> entry : coalitionScores.entrySet()) {
+		for (Map.Entry<MutableFreightCoalition, Map<Set<Id<?>>, Double>> entry : coalitionScores.entrySet().stream()
+			.sorted(Comparator.comparing(entry -> coalitionSortKey(entry.getKey())))
+			.toList()) {
 			MutableFreightCoalition coalition = entry.getKey();
 			Map<Set<Id<?>>, Double> subCoalitionScores = entry.getValue();
 
@@ -97,9 +105,11 @@ public class CollaborationDataStoreValueWriter extends MatsimXmlWriter {
 
 			// Write coalition members
 			writer.write("\t\t\t<members>\n");
-			for (var collaborator : coalition.getCollaboratorsSet()) {
+			for (var collaborator : coalition.getCollaboratorsSet().stream()
+				.sorted(Comparator.comparing(c -> c.getKey()))
+				.toList()) {
 				writer.write("\t\t\t\t<member");
-				writer.write(" id=\"" + collaborator.getId() + "\"");
+				writer.write(" id=\"" + attribute(collaborator.getId().toString()) + "\"");
 				writer.write(" role=\"" + collaborator.getRole() + "\"");
 				writer.write("/>\n");
 			}
@@ -107,7 +117,9 @@ public class CollaborationDataStoreValueWriter extends MatsimXmlWriter {
 
 			// Write sub-coalition scores
 			writer.write("\t\t\t<subCoalitionScores>\n");
-			for (Map.Entry<Set<Id<?>>, Double> scoreEntry : subCoalitionScores.entrySet()) {
+			for (Map.Entry<Set<Id<?>>, Double> scoreEntry : subCoalitionScores.entrySet().stream()
+				.sorted(Comparator.comparing(scoreEntry -> subCoalitionSortKey(scoreEntry.getKey())))
+				.toList()) {
 				Set<Id<?>> subCoalition = scoreEntry.getKey();
 				Double score = scoreEntry.getValue();
 
@@ -121,8 +133,9 @@ public class CollaborationDataStoreValueWriter extends MatsimXmlWriter {
 				} else {
 					writer.write(">\n");
 					// Write member IDs
-					for (Id<?> memberId : subCoalition) {
-						writer.write("\t\t\t\t\t<memberId>" + memberId.toString() + "</memberId>\n");
+					for (Id<?> memberId : subCoalition.stream().sorted(Comparator.comparing(Id::toString)).toList()) {
+						writer.write("\t\t\t\t\t<memberId>" + XmlUtils.encodeContent(memberId.toString())
+							+ "</memberId>\n");
 					}
 					writer.write("\t\t\t\t</subCoalition>\n");
 				}
@@ -137,7 +150,7 @@ public class CollaborationDataStoreValueWriter extends MatsimXmlWriter {
 	}
 
 	private void writeAllocatedValues() throws IOException {
-		Map<Id<?>, Double> allocatedValues = dataStore.getAllocatedValues();
+		Map<CollaboratorKey, Double> allocatedValues = dataStore.getAllocatedValues();
 
 		if (allocatedValues == null || allocatedValues.isEmpty()) {
 			writer.write("\t<!-- No allocated values available for this iteration -->\n\n");
@@ -153,9 +166,12 @@ public class CollaborationDataStoreValueWriter extends MatsimXmlWriter {
 
 		writer.write("\t\t<!-- Total allocated value: " + totalAllocated + " -->\n\n");
 
-		for (Map.Entry<Id<?>, Double> entry : allocatedValues.entrySet()) {
+		for (Map.Entry<CollaboratorKey, Double> entry : allocatedValues.entrySet().stream()
+				.sorted(Map.Entry.comparingByKey())
+				.toList()) {
 			writer.write("\t\t<allocation");
-			writer.write(" collaboratorId=\"" + entry.getKey() + "\"");
+			writer.write(" role=\"" + entry.getKey().role() + "\"");
+			writer.write(" collaboratorId=\"" + attribute(entry.getKey().id().toString()) + "\"");
 			writer.write(" value=\"" + entry.getValue() + "\"");
 			writer.write("/>\n");
 		}
@@ -188,8 +204,7 @@ public class CollaborationDataStoreValueWriter extends MatsimXmlWriter {
 	                                        String filename,
 	                                        int iteration) {
 		log.info("Writing coalition scores for iteration " + iteration + " to file: " + filename);
-		try {
-			BufferedWriter writer = org.matsim.core.utils.io.IOUtils.getBufferedWriter(filename);
+		try (BufferedWriter writer = org.matsim.core.utils.io.IOUtils.getBufferedWriter(filename)) {
 			writer.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
 			writer.write("<coalitionScores iteration=\"" + iteration + "\">\n");
 
@@ -198,15 +213,21 @@ public class CollaborationDataStoreValueWriter extends MatsimXmlWriter {
 
 			if (coalitionScores != null && !coalitionScores.isEmpty()) {
 				int coalitionIndex = 1;
-				for (Map.Entry<MutableFreightCoalition, Map<Set<Id<?>>, Double>> entry : coalitionScores.entrySet()) {
+				for (Map.Entry<MutableFreightCoalition, Map<Set<Id<?>>, Double>> entry
+					: coalitionScores.entrySet().stream()
+					.sorted(Comparator.comparing(entry -> coalitionSortKey(entry.getKey())))
+					.toList()) {
 					writer.write("\t<coalition id=\"" + coalitionIndex + "\" " +
 						"type=\"" + entry.getKey().getCollaborationType() + "\">\n");
 
-					for (Map.Entry<Set<Id<?>>, Double> scoreEntry : entry.getValue().entrySet()) {
+					for (Map.Entry<Set<Id<?>>, Double> scoreEntry : entry.getValue().entrySet().stream()
+						.sorted(Comparator.comparing(scoreEntry -> subCoalitionSortKey(scoreEntry.getKey())))
+						.toList()) {
 						String memberIds = scoreEntry.getKey().stream()
 							.map(Object::toString)
+							.sorted()
 							.collect(Collectors.joining(","));
-						writer.write("\t\t<score members=\"" + memberIds + "\" value=\"" +
+						writer.write("\t\t<score members=\"" + attribute(memberIds) + "\" value=\"" +
 							scoreEntry.getValue() + "\"/>\n");
 					}
 					writer.write("\t</coalition>\n");
@@ -215,7 +236,6 @@ public class CollaborationDataStoreValueWriter extends MatsimXmlWriter {
 			}
 
 			writer.write("</coalitionScores>\n");
-			writer.close();
 			log.info("Coalition scores written successfully.");
 		} catch (IOException e) {
 			log.error("Error writing coalition scores", e);
@@ -234,12 +254,11 @@ public class CollaborationDataStoreValueWriter extends MatsimXmlWriter {
 	                                        String filename,
 	                                        int iteration) {
 		log.info("Writing allocated values for iteration " + iteration + " to file: " + filename);
-		try {
-			BufferedWriter writer = org.matsim.core.utils.io.IOUtils.getBufferedWriter(filename);
+		try (BufferedWriter writer = org.matsim.core.utils.io.IOUtils.getBufferedWriter(filename)) {
 			writer.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
 			writer.write("<allocatedValues iteration=\"" + iteration + "\">\n");
 
-			Map<Id<?>, Double> allocatedValues = dataStore.getAllocatedValues();
+			Map<CollaboratorKey, Double> allocatedValues = dataStore.getAllocatedValues();
 
 			if (allocatedValues != null && !allocatedValues.isEmpty()) {
 				double totalAllocated = allocatedValues.values().stream()
@@ -248,18 +267,35 @@ public class CollaborationDataStoreValueWriter extends MatsimXmlWriter {
 
 				writer.write("\t<!-- Total: " + totalAllocated + " -->\n");
 
-				for (Map.Entry<Id<?>, Double> entry : allocatedValues.entrySet()) {
-					writer.write("\t<allocation collaboratorId=\"" + entry.getKey() +
+				for (Map.Entry<CollaboratorKey, Double> entry : allocatedValues.entrySet().stream()
+						.sorted(Map.Entry.comparingByKey())
+						.toList()) {
+					writer.write("\t<allocation role=\"" + entry.getKey().role()
+						+ "\" collaboratorId=\"" + attribute(entry.getKey().id().toString()) +
 						"\" value=\"" + entry.getValue() + "\"/>\n");
 				}
 			}
 
 			writer.write("</allocatedValues>\n");
-			writer.close();
 			log.info("Allocated values written successfully.");
 		} catch (IOException e) {
 			log.error("Error writing allocated values", e);
 			throw new RuntimeException(e);
 		}
+	}
+
+	private static String coalitionSortKey(MutableFreightCoalition coalition) {
+		return coalition.getCollaboratorsByKey().keySet().stream()
+			.sorted()
+			.map(CollaboratorKey::toString)
+			.collect(Collectors.joining("|"));
+	}
+
+	private static String subCoalitionSortKey(Set<Id<?>> members) {
+		return members.stream().map(Id::toString).sorted().collect(Collectors.joining("|"));
+	}
+
+	private static String attribute(String value) {
+		return XmlUtils.encodeAttributeValue(value);
 	}
 }

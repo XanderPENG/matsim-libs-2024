@@ -40,7 +40,7 @@ import java.util.Collection;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-class LinkReceiverAndLspTest {
+class LspReceiverIsolationIT {
 
 	@Test
 	void receiversTriggerLspReplan() {

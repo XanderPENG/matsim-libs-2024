@@ -39,7 +39,8 @@ import org.matsim.freight.receiver.ReceiverUtils;
 import org.matsim.freight.receiver.Receivers;
 import org.matsim.freight.receiver.collaboration.CollaborationUtils;
 
-import java.io.File;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -70,14 +71,15 @@ public class RunCollabReceiverDistantCarrier {
 	private static final double CHESSBOARD_EXAMPLE_AREA_MIN = 2000.0;
 	private static final double CHESSBOARD_EXAMPLE_AREA_MAX = 7000.0;
 	private static final double EPS = 1e-6;
+	static final String EXPERIMENT_COMPLETE_MARKER = ".experiment-complete";
 
-	private enum CustomerDistributionScenario {
+	enum CustomerDistributionScenario {
 		FULLY_RANDOM,
 		CLUSTERED,
 		DISPERSED
 	}
 
-	private enum ReceiverAreaPolicy {
+	enum ReceiverAreaPolicy {
 		SCALED_TO_NETWORK,
 		CHESSBOARD_EXAMPLE_AREA,
 		CENTERED_CHESSBOARD_EXAMPLE_AREA
@@ -100,9 +102,9 @@ public class RunCollabReceiverDistantCarrier {
 	private record ReceiverArea(double min, double max) {
 	}
 
-	private record ExperimentOptions(int networkSize, int carrierScenarioCount, int instanceCount, Path networkFile,
-									 Path outputBaseDir, ReceiverAreaPolicy receiverAreaPolicy,
-									 boolean regenerateNetworkFile) {
+	record ExperimentOptions(int networkSize, int carrierScenarioCount, int instanceCount, Path networkFile,
+							 Path outputBaseDir, ReceiverAreaPolicy receiverAreaPolicy,
+							 boolean regenerateNetworkFile) {
 	}
 
 	private record ExperimentConfig(ExperimentOptions options, String tag, double[] penaltySweep,
@@ -121,7 +123,7 @@ public class RunCollabReceiverDistantCarrier {
 		ExperimentOptions options = new ExperimentOptions(
 			networkSize,
 			DEFAULT_CARRIER_SCENARIOS,
-			1,
+			10,
 			CreateFreightChessboardNetwork.defaultNetworkPath(networkSize),
 			DEFAULT_OUTPUT_BASE_DIR,
 			ReceiverAreaPolicy.CENTERED_CHESSBOARD_EXAMPLE_AREA,
@@ -188,10 +190,13 @@ public class RunCollabReceiverDistantCarrier {
 			areaLabel, tag, allocationFactor, receiverPenalty, methodChoice.label(), instance);
 
 		Config config = createChessboardConfig(options, runId);
-		String outputDir = config.controller().getOutputDirectory();
-		if (new File(outputDir).exists()) {
-			logger.warn("Output directory {} already exists. Skipping this experiment.", outputDir);
+		Path outputDir = Path.of(config.controller().getOutputDirectory());
+		if (isExperimentComplete(outputDir)) {
+			logger.warn("Complete result marker exists in {}. Skipping this experiment.", outputDir);
 			return;
+		}
+		if (Files.exists(outputDir)) {
+			logger.warn("Output directory {} is incomplete and will be rerun.", outputDir);
 		}
 
 		logger.info("Running experiment with runId: {}", runId);
@@ -210,6 +215,19 @@ public class RunCollabReceiverDistantCarrier {
 		config.addModule(freightCfg);
 
 		runSingleControler(config, options, depotScenario, customerDistributionScenario, instance);
+		markExperimentComplete(outputDir);
+	}
+
+	static boolean isExperimentComplete(Path outputDirectory) {
+		return Files.isRegularFile(outputDirectory.resolve(EXPERIMENT_COMPLETE_MARKER));
+	}
+
+	private static void markExperimentComplete(Path outputDirectory) {
+		try {
+			Files.writeString(outputDirectory.resolve(EXPERIMENT_COMPLETE_MARKER), "complete\n");
+		} catch (IOException e) {
+			throw new UncheckedIOException("Could not write experiment completion marker in " + outputDirectory, e);
+		}
 	}
 
 	private static Config createChessboardConfig(ExperimentOptions options, String runId) {
@@ -291,7 +309,7 @@ public class RunCollabReceiverDistantCarrier {
 				bind(CarrierStrategyManager.class).toProvider(
 					new RunCarrierReceiverCollabChessboardExample.MyCarrierPlanStrategyManagerProvider(types));
 				bind(CarrierScoringFunctionFactory.class).to(
-					ScoringFunctionFactoryUsecase.CarrierScoringFunctionFactoryUsecase.class);
+					(Class<? extends CarrierScoringFunctionFactory>) ScoringFunctionFactoryUsecase.CarrierScoringFunctionFactoryUsecase.class);
 				bind(ReceiverScoringFunctionFactory.class).to(
 					ScoringFunctionFactoryUsecase.ReceiverScoringFunctionFactoryUsecase.class);
 			}
@@ -448,17 +466,22 @@ public class RunCollabReceiverDistantCarrier {
 		receiverLinks.add(centerLink.getId());
 
 		Coord center = midpoint(centerLink);
-		List<Link> areaLinks = getAllCarLinks(network);
+		ReceiverArea area = receiverArea(networkSize, receiverAreaPolicy);
+		List<Link> areaLinks = getCarLinksWithinArea(network, area);
 		double scale = receiverAreaPolicy == ReceiverAreaPolicy.SCALED_TO_NETWORK ? networkSize / 9.0 : 1.0;
 
 		addBalancedEdgeLinks(receiverLinks, areaLinks,
-			center.getX() - 2500.0 * scale, center.getX() + 2500.0 * scale,
-			center.getY() - 2000.0 * scale, center.getY() + 2000.0 * scale,
+			Math.max(area.min(), center.getX() - 2500.0 * scale),
+			Math.min(area.max(), center.getX() + 2500.0 * scale),
+			Math.max(area.min(), center.getY() - 2000.0 * scale),
+			Math.min(area.max(), center.getY() + 2000.0 * scale),
 			4, random);
 
 		addBalancedEdgeLinks(receiverLinks, areaLinks,
-			center.getX() - 4500.0 * scale, center.getX() + 4500.0 * scale,
-			center.getY() - 4000.0 * scale, center.getY() + 4000.0 * scale,
+			Math.max(area.min(), center.getX() - 4500.0 * scale),
+			Math.min(area.max(), center.getX() + 4500.0 * scale),
+			Math.max(area.min(), center.getY() - 4000.0 * scale),
+			Math.min(area.max(), center.getY() + 4000.0 * scale),
 			5, random);
 
 		return receiverLinks;
@@ -683,7 +706,7 @@ public class RunCollabReceiverDistantCarrier {
 		CreateFreightChessboardNetwork.writeNetwork(options.networkSize(), options.networkFile());
 	}
 
-	private static ExperimentOptions parseOptions(String[] args, ExperimentOptions defaults) {
+	static ExperimentOptions parseOptions(String[] args, ExperimentOptions defaults) {
 		int networkSize = defaults.networkSize();
 		int carrierScenarioCount = defaults.carrierScenarioCount();
 		int instanceCount = defaults.instanceCount();

@@ -32,11 +32,19 @@ public class FreightCoalitionManager {
 	public FreightCoalitionManager() {
 	}
 
+	public FreightCoalitionManager(Scenario scenario) {
+		this.scenario = scenario;
+	}
+
 	Set<CollaboratorRole> provideAllowedRoles() {
 
 		FreightCollaborationConfigGroup configGroup =
 			(FreightCollaborationConfigGroup) scenario.getConfig().getModules()
 				.get(FreightCollaborationConfigGroup.GROUP_NAME);
+		if (configGroup == null) {
+			throw new IllegalStateException("Missing " + FreightCollaborationConfigGroup.GROUP_NAME
+				+ " config module.");
+		}
 
 		Set<CollaboratorRole> allowedRoles = new HashSet<>();
 		for (CollaborationParamSet paramSet : configGroup.getCollaborationParamSets()) {
@@ -49,7 +57,7 @@ public class FreightCoalitionManager {
 		if (allCollaboratorRoles == null) {
 			allCollaboratorRoles = provideAllowedRoles();
 		}
-		return allCollaboratorRoles;
+		return Set.copyOf(allCollaboratorRoles);
 	}
 
 	public GrandFreightCoalition getGrandFreightCoalition() {
@@ -65,6 +73,7 @@ public class FreightCoalitionManager {
 	}
 
 	public void setMutableFreightCoalitions(List<MutableFreightCoalition> mutableFreightCoalitions) {
-		this.mutableFreightCoalitions = mutableFreightCoalitions;
+		this.mutableFreightCoalitions =
+			mutableFreightCoalitions == null ? null : List.copyOf(mutableFreightCoalitions);
 	}
 }

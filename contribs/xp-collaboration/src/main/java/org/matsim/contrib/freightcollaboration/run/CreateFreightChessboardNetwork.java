@@ -140,7 +140,7 @@ public final class CreateFreightChessboardNetwork {
 		}
 	}
 
-	private static Options parseOptions(String[] args) {
+	static Options parseOptions(String[] args) {
 		int gridSize = DEFAULT_GRID_SIZE;
 		Path outputFile = null;
 		int positional = 0;
@@ -194,6 +194,6 @@ public final class CreateFreightChessboardNetwork {
 		System.exit(0);
 	}
 
-	private record Options(int gridSize, Path outputFile) {
+	record Options(int gridSize, Path outputFile) {
 	}
 }

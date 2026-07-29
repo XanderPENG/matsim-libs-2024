@@ -41,6 +41,13 @@ public class LinkReceiverAndCarrier {
 	public static void receiversTriggerCarrierReplan(FreightCollaborator<Carrier> carrierCollaborator,
 													 Set<FreightCollaborator<Receiver>> receiverCollaborators,
 													 Network network, TravelTime tt, int maxIterations) {
+		if (maxIterations <= 0) {
+			throw new IllegalArgumentException("maxIterations must be positive.");
+		}
+		java.util.Objects.requireNonNull(carrierCollaborator, "carrierCollaborator");
+		java.util.Objects.requireNonNull(receiverCollaborators, "receiverCollaborators");
+		java.util.Objects.requireNonNull(network, "network");
+		java.util.Objects.requireNonNull(tt, "tt");
 		final int ttToken = System.identityHashCode(tt);
 		// If travel time object changed (new mobsim iteration), drop caches to avoid unbounded growth and stale warm-starts.
 		if (ttToken != CURRENT_TT_TOKEN) {
@@ -118,6 +125,9 @@ public class LinkReceiverAndCarrier {
 		}
 		vra.setMaxIterations(maxIterations);
 		Collection<VehicleRoutingProblemSolution> solutions = vra.searchSolutions();
+		if (solutions == null || solutions.isEmpty()) {
+			throw new IllegalStateException("No feasible carrier plan found for " + carrier.getId());
+		}
 		// Create a new carrierPlan from the best solution
 		VehicleRoutingProblemSolution bestSolution = Solutions.bestOf(solutions);
 		VRP_SOLUTION_CACHE.put(cacheKey, bestSolution);

@@ -8,7 +8,10 @@ import org.matsim.freight.logistics.LSP;
 import org.matsim.freight.receiver.Receiver;
 
 import java.util.HashMap;
+import java.util.EnumMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 public class FreightCollaboratorImpl<T extends HasPlansAndId<?, ?>> implements FreightCollaborator<T> {
@@ -20,8 +23,8 @@ public class FreightCollaboratorImpl<T extends HasPlansAndId<?, ?>> implements F
 	private final Map<CollaboratorRole, Set<Id<?>>> originalConnectedStakeholders = new HashMap<>();
 
 	public FreightCollaboratorImpl(T delegate, CollaboratorRole role) {
-		this.delegate = delegate;
-		this.role = role;
+		this.delegate = Objects.requireNonNull(delegate, "delegate");
+		this.role = Objects.requireNonNull(role, "role");
 	}
 
 	@Override
@@ -71,7 +74,7 @@ public class FreightCollaboratorImpl<T extends HasPlansAndId<?, ?>> implements F
 
 	@Override
 	public void setCollaborationPartners(Set<Id<?>> partnerIds) {
-		this.collaborationPartners = partnerIds;
+		this.collaborationPartners = partnerIds == null ? Set.of() : Set.copyOf(partnerIds);
 	}
 
 	@Override
@@ -81,11 +84,22 @@ public class FreightCollaboratorImpl<T extends HasPlansAndId<?, ?>> implements F
 
 	@Override
 	public void addOriginalConnectedStakeholders(Map<CollaboratorRole, Set<Id<?>>> stakeholders) {
-		this.originalConnectedStakeholders.putAll(stakeholders);
+		if (stakeholders == null) {
+			return;
+		}
+		stakeholders.forEach((role, ids) ->
+			this.originalConnectedStakeholders.put(
+				Objects.requireNonNull(role, "stakeholder role"),
+				ids == null ? Set.of() : Set.copyOf(ids)
+			)
+		);
 	}
 
 	@Override
 	public Map<CollaboratorRole, Set<Id<?>>> getOriginalConnectedStakeholders() {
-		return this.originalConnectedStakeholders;
+		Map<CollaboratorRole, Set<Id<?>>> copy = new EnumMap<>(CollaboratorRole.class);
+		originalConnectedStakeholders.forEach((role, ids) ->
+			copy.put(role, Set.copyOf(new LinkedHashSet<>(ids))));
+		return Map.copyOf(copy);
 	}
 }

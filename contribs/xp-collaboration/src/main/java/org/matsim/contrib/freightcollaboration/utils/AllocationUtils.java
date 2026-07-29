@@ -4,6 +4,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.population.HasPlansAndId;
+import org.matsim.api.core.v01.Scenario;
 import org.matsim.contrib.freightcollaboration.*;
 import org.matsim.contrib.freightcollaboration.allocation.*;
 import org.matsim.freight.carriers.*;
@@ -24,6 +25,7 @@ import static org.matsim.contrib.freightcollaboration.CollaborationTypes.*;
 public class AllocationUtils {
 
 	private static Logger LOGGER = LogManager.getLogger(AllocationUtils.class);
+	public static final int DEFAULT_MAX_EXACT_SHAPLEY_PLAYERS = 12;
 
 	// TODO: the CollaborationDataStore should be injected via Guice, fix it later
 	public static AllocationModel createAllocationModel(AllocationModels allocationModelType,
@@ -49,21 +51,35 @@ public class AllocationUtils {
 	}
 
 	public static Map<Set<Id<?>>, Double> generateSubsets(Map<Id<?>, ?> coalitionMembers) {
+		return generateSubsets(coalitionMembers, DEFAULT_MAX_EXACT_SHAPLEY_PLAYERS);
+	}
+
+	public static Map<Set<Id<?>>, Double> generateSubsets(Map<Id<?>, ?> coalitionMembers, int maxPlayers) {
+		Objects.requireNonNull(coalitionMembers, "coalitionMembers");
+		if (maxPlayers < 0 || maxPlayers >= Integer.SIZE - 1) {
+			throw new IllegalArgumentException("maxPlayers must be between 0 and 30.");
+		}
 		// The map would be like {(id1, id2, ...): score}
 		List<Id<?>> ids = new ArrayList<>(coalitionMembers.keySet());
-		Map<Set<Id<?>>, Double> result = new HashMap<>();
+		ids.sort(Comparator.comparing(Id::toString));
+		Map<Set<Id<?>>, Double> result = new LinkedHashMap<>();
 
 		int n = ids.size();
+		if (n > maxPlayers) {
+			throw new IllegalArgumentException("Exact coalition enumeration requested for " + n
+				+ " players, exceeding MAX_EXACT_SHAPLEY_PLAYERS=" + maxPlayers
+				+ ". Use APPROX_SHAPLEY or raise the limit explicitly.");
+		}
 		int total = 1 << n; // 2^n subsets
 
 		for (int mask = 0; mask < total; mask++) {
-			Set<Id<?>> subset = new HashSet<>();
+			Set<Id<?>> subset = new LinkedHashSet<>();
 			for (int i = 0; i < n; i++) {
 				if ((mask & (1 << i)) != 0) {
 					subset.add(ids.get(i));
 				}
 			}
-			result.put(subset, 0.0); // default value at the initialization
+			result.put(Set.copyOf(subset), 0.0); // default value at the initialization
 		}
 
 		return result;
@@ -104,6 +120,28 @@ public class AllocationUtils {
 		};
 	}
 
+	public static CollaboratorRole extractPlayerRole(MutableFreightCoalition coalition) {
+		return switch (coalition.getCollaborationType()) {
+			case CARRIER_RECEIVER, LSP_RECEIVER -> CollaboratorRole.RECEIVER;
+			case CARRIER_CARRIER -> CollaboratorRole.CARRIER;
+			default -> throw new IllegalStateException("Unsupported collaboration type: "
+				+ coalition.getCollaborationType());
+		};
+	}
+
+	public static FreightCollaborator<?> extractSingleDistributor(MutableFreightCoalition coalition) {
+		Map<Id<?>, FreightCollaborator<?>> distributors = extractValidDistributors(coalition);
+		if (distributors.size() != 1) {
+			throw new IllegalStateException("Expected exactly one distributor for "
+				+ coalition.getCollaborationType() + " but found " + distributors.size());
+		}
+		return distributors.values().iterator().next();
+	}
+
+	public static CollaboratorKey playerKey(MutableFreightCoalition coalition, Id<?> playerId) {
+		return new CollaboratorKey(extractPlayerRole(coalition), playerId);
+	}
+
 	/**
 	 * A function that could deep copy a map of collaborators.
 	 * Creates new instances of the underlying freight agents (Carrier, LSP, Receiver) to avoid
@@ -111,6 +149,13 @@ public class AllocationUtils {
 	 */
 	@SuppressWarnings("unchecked")
 	public static <T extends FreightCollaborator<?>> Map<Id<?>, T> deepCopyCollaboratorsMap(Map<Id<?>, T> originalMap) {
+		return deepCopyCollaboratorsMap(originalMap, null);
+	}
+
+	@SuppressWarnings("unchecked")
+	public static <T extends FreightCollaborator<?>> Map<Id<?>, T> deepCopyCollaboratorsMap(
+			Map<Id<?>, T> originalMap, Scenario scenario) {
+		Objects.requireNonNull(originalMap, "originalMap");
 		if (LOGGER.isDebugEnabled()) {
 			LOGGER.debug("Deep copy collaborators map");
 		}
@@ -123,7 +168,7 @@ public class AllocationUtils {
 			T originalCollaborator = entry.getValue();
 
 			// Create a deep copy of the collaborator by copying its delegate and preserving its role
-			T copiedCollaborator = (T) deepCopyCollaborator(originalCollaborator);
+			T copiedCollaborator = (T) deepCopyCollaborator(originalCollaborator, scenario);
 			copiedMap.put(collaboratorId, copiedCollaborator);
 		}
 
@@ -135,7 +180,8 @@ public class AllocationUtils {
 	 * @FIXME: Curretnly, the revceiverTriggerCarriersReplanning will reset the carrier plan (without scores), which will result in erroer when using CarrierUtils.copyPlan
 	 */
 	@SuppressWarnings("unchecked")
-	private static FreightCollaborator<?> deepCopyCollaborator(FreightCollaborator<?> originalCollaborator) {
+	private static FreightCollaborator<?> deepCopyCollaborator(
+			FreightCollaborator<?> originalCollaborator, Scenario scenario) {
 		var originalDelegate = originalCollaborator.getDelegate();
 		CollaboratorRole role = originalCollaborator.getRole();
 
@@ -145,46 +191,15 @@ public class AllocationUtils {
 		switch (role) {
 			case CARRIER -> {
 				if (originalDelegate instanceof Carrier originalCarrier) {
-					Carrier copiedCarrier = CarriersUtils.createCarrier(originalCarrier.getId());
-
-					// Copy carrier capabilities (vehicles, etc.) – plans/shipments are rebuilt per subset, so skip them to stay fast.
-					copiedCarrier.setCarrierCapabilities(originalCarrier.getCarrierCapabilities());
-
-					// Copy attributes manually
-					for (String key : originalCarrier.getAttributes().getAsMap().keySet()) {
-						Object value = originalCarrier.getAttributes().getAttribute(key);
-						copiedCarrier.getAttributes().putAttribute(key, value);
-					}
-
-					copiedDelegate = copiedCarrier;
+					copiedDelegate = copyCarrier(originalCarrier);
 				}
 			}
 			case LSP -> {
 				if (originalDelegate instanceof LSP originalLsp) {
-					/* FIXME: It seems there is no need/way to deep copy an LSP, as the replanning process will rebuild the plans from scratch.
-					    or create a new LSP which will not affect the original one.
-					 */
-
-					return originalCollaborator; // Return the original collaborator without copying
-
-//					LSPPlan copiedPlan = copyLspPlan(originalLsp.getSelectedPlan());
-//					// create minimal scheduler; use a forward scheduler as default fallback
-//					var scheduler = org.matsim.freight.logistics.LSPUtils.createForwardLogisticChainScheduler();
-//					var builder = org.matsim.freight.logistics.LSPUtils.LSPBuilder.getInstance(originalLsp.getId())
-//						.setLogisticChainScheduler(scheduler)
-//						.setInitialPlan(copiedPlan);
-//					LSP copiedLsp = builder.build();
-//					copiedPlan.setLSP(copiedLsp);
-//					// copy basic attributes
-//					for (String key : originalLsp.getAttributes().getAsMap().keySet()) {
-//						Object value = originalLsp.getAttributes().getAttribute(key);
-//						copiedLsp.getAttributes().putAttribute(key, value);
-//					}
-//					// copy plan score to keep comparable baseline
-//					if (copiedPlan.getScore() == null && originalLsp.getSelectedPlan().getScore() != null) {
-//						copiedPlan.setScore(originalLsp.getSelectedPlan().getScore());
-//					}
-//					copiedDelegate = copiedLsp;
+					if (scenario == null) {
+						throw new IllegalArgumentException("A Scenario is required to deep-copy an LSP.");
+					}
+					copiedDelegate = LinkReceiverAndLsp.copyLsp(originalLsp, scenario);
 				}
 			}
 			case RECEIVER -> {
@@ -192,6 +207,8 @@ public class AllocationUtils {
 					// Use ReceiverUtils factory method
 					Receiver copiedReceiver = ReceiverUtils.newInstance(originalReceiver.getId());
 					copiedReceiver.setLinkId(originalReceiver.getLinkId());
+					copiedReceiver.setInitialCost(originalReceiver.getInitialCost());
+					originalReceiver.getProducts().forEach(copiedReceiver::addProduct);
 					// Copy plans
 					for (ReceiverPlan plan : originalReceiver.getPlans()) {
 						ReceiverPlan newPlan = plan.createCopy();
@@ -234,8 +251,65 @@ public class AllocationUtils {
 		} else {
 			copiedCollaborator.disableCollaboration();
 		}
+		copiedCollaborator.setCollaborationPartners(originalCollaborator.getCollaborationPartners());
+		copiedCollaborator.addOriginalConnectedStakeholders(
+			originalCollaborator.getOriginalConnectedStakeholders());
 
 		return copiedCollaborator;
+	}
+
+	/**
+	 * Deep-copies the mutable carrier containers and plans. Vehicle types and shipment/service
+	 * value objects are reused, but their owning maps, vehicles, capabilities and tours are isolated.
+	 */
+	public static Carrier copyCarrier(Carrier originalCarrier) {
+		Objects.requireNonNull(originalCarrier, "originalCarrier");
+		Carrier copiedCarrier = CarriersUtils.createCarrier(originalCarrier.getId());
+
+		CarrierCapabilities.Builder capabilities = CarrierCapabilities.Builder.newInstance()
+			.setFleetSize(originalCarrier.getCarrierCapabilities().getFleetSize());
+		for (CarrierVehicle vehicle : originalCarrier.getCarrierCapabilities().getCarrierVehicles().values()) {
+			CarrierVehicle copiedVehicle = CarrierVehicle.Builder.newInstance(
+					vehicle.getId(), vehicle.getLinkId(), vehicle.getType())
+				.setEarliestStart(vehicle.getEarliestStartTime())
+				.setLatestEnd(vehicle.getLatestEndTime())
+				.build();
+			vehicle.getAttributes().getAsMap().forEach(copiedVehicle.getAttributes()::putAttribute);
+			capabilities.addVehicle(copiedVehicle);
+		}
+		copiedCarrier.setCarrierCapabilities(capabilities.build());
+		copiedCarrier.getShipments().putAll(originalCarrier.getShipments());
+		copiedCarrier.getServices().putAll(originalCarrier.getServices());
+		originalCarrier.getAttributes().getAsMap().forEach(copiedCarrier.getAttributes()::putAttribute);
+
+		Map<CarrierPlan, CarrierPlan> copiedPlans = new IdentityHashMap<>();
+		for (CarrierPlan plan : originalCarrier.getPlans()) {
+			CarrierPlan copiedPlan = copyCarrierPlan(plan, copiedCarrier);
+			copiedCarrier.addPlan(copiedPlan);
+			copiedPlans.put(plan, copiedPlan);
+		}
+		if (originalCarrier.getSelectedPlan() != null) {
+			copiedCarrier.setSelectedPlan(copiedPlans.get(originalCarrier.getSelectedPlan()));
+		}
+		return copiedCarrier;
+	}
+
+	private static CarrierPlan copyCarrierPlan(CarrierPlan originalPlan, Carrier copiedCarrier) {
+		List<ScheduledTour> tours = new ArrayList<>();
+		for (ScheduledTour scheduledTour : originalPlan.getScheduledTours()) {
+			CarrierVehicle copiedVehicle = copiedCarrier.getCarrierCapabilities().getCarrierVehicles()
+				.get(scheduledTour.getVehicle().getId());
+			if (copiedVehicle == null) {
+				throw new IllegalStateException("Carrier plan references unknown vehicle "
+					+ scheduledTour.getVehicle().getId());
+			}
+			tours.add(ScheduledTour.newInstance(scheduledTour.getTour().duplicate(), copiedVehicle,
+				scheduledTour.getDeparture()));
+		}
+		CarrierPlan copiedPlan = new CarrierPlan(copiedCarrier, tours);
+		copiedPlan.setScore(originalPlan.getScore());
+		originalPlan.getAttributes().getAsMap().forEach(copiedPlan.getAttributes()::putAttribute);
+		return copiedPlan;
 	}
 
 	public static CarrierPlan copyNoScoreCarrierPlan(CarrierPlan plan2copy) {

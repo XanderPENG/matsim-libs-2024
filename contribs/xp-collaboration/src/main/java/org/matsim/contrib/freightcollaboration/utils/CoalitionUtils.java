@@ -16,8 +16,13 @@ import java.util.*;
 
 public class CoalitionUtils {
 
-    public record ReceiverDelta(boolean twExtended, boolean serviceContracted, Set<Id<Carrier>> carriers) {
-        public boolean hasChange() { return twExtended || serviceContracted; }
+    public record ReceiverDelta(boolean twExtended, boolean serviceContracted, boolean ordersChanged,
+								Set<Id<Carrier>> carriers) {
+        public ReceiverDelta {
+			carriers = Set.copyOf(carriers);
+		}
+
+        public boolean hasChange() { return twExtended || serviceContracted || ordersChanged; }
     }
 
 
@@ -41,8 +46,12 @@ public class CoalitionUtils {
 
     public static void markCollaboratedReceiver(FreightCollaborators freightCollaborators,
                                                 CollaborationDataStore collaborationDataStore) {
-        Map<Id<Receiver>, ReceiverPlan> originPlans = collaborationDataStore.getOriginalPlans()
-            .get(CollaboratorRole.RECEIVER)
+        Map<Id<?>, ? extends BasicPlan> storedReceiverPlans = collaborationDataStore.getOriginalPlans()
+			.get(CollaboratorRole.RECEIVER);
+		if (storedReceiverPlans == null) {
+			throw new IllegalStateException("No original receiver plans are available in the collaboration data store.");
+		}
+        Map<Id<Receiver>, ReceiverPlan> originPlans = storedReceiverPlans
             .entrySet().stream()
             .collect(HashMap::new, (m, e) -> m.put((Id<Receiver>) e.getKey(), (ReceiverPlan) e.getValue()), Map::putAll);
 
@@ -74,22 +83,41 @@ public class CoalitionUtils {
      * Returns carriers affected for quick coalition linking.
      */
     public static ReceiverDelta computeReceiverDelta(ReceiverPlan originalPlan, ReceiverPlan currentPlan) {
+		Objects.requireNonNull(originalPlan, "originalPlan");
+		Objects.requireNonNull(currentPlan, "currentPlan");
         boolean twExtended = false;
         boolean serviceContracted = false;
+        boolean ordersChanged = false;
         Set<Id<Carrier>> collaboratingCarriers = new HashSet<>();
 
         // Build a lookup of original orders by carrier for fast access
         Map<Id<Carrier>, ReceiverOrder> originalOrdersByCarrier = new HashMap<>();
         for (ReceiverOrder order : originalPlan.getReceiverOrders()) {
-            originalOrdersByCarrier.put(order.getCarrierId(), order);
+			originalOrdersByCarrier.put(order.getCarrierId(), order);
         }
+		Map<Id<Carrier>, ReceiverOrder> currentOrdersByCarrier = new HashMap<>();
+		for (ReceiverOrder order : currentPlan.getReceiverOrders()) {
+			currentOrdersByCarrier.put(order.getCarrierId(), order);
+		}
+		Set<Id<Carrier>> allCarrierIds = new HashSet<>(originalOrdersByCarrier.keySet());
+		allCarrierIds.addAll(currentOrdersByCarrier.keySet());
+		for (Id<Carrier> carrierId : allCarrierIds) {
+			ReceiverOrder originalOrder = originalOrdersByCarrier.get(carrierId);
+			ReceiverOrder currentOrder = currentOrdersByCarrier.get(carrierId);
+			if (originalOrder == null || currentOrder == null
+				|| originalOrder.getReceiverProductOrders().size()
+				!= currentOrder.getReceiverProductOrders().size()) {
+				ordersChanged = true;
+				collaboratingCarriers.add(carrierId);
+			}
+		}
 
         List<TimeWindow> originalTWs = originalPlan.getTimeWindows();
 
         for (ReceiverOrder order : currentPlan.getReceiverOrders()) {
             ReceiverOrder originalOrder = originalOrdersByCarrier.get(order.getCarrierId());
             if (originalOrder == null) {
-                continue; // no baseline to compare; treat as unchanged
+                continue;
             }
 
             // TWs assumed aligned by index
@@ -119,7 +147,12 @@ public class CoalitionUtils {
             }
         }
 
-        return new ReceiverDelta(twExtended, serviceContracted, collaboratingCarriers);
+		if (currentPlan.getTimeWindows().size() > originalTWs.size()) {
+			twExtended = true;
+			collaboratingCarriers.addAll(currentOrdersByCarrier.keySet());
+		}
+
+        return new ReceiverDelta(twExtended, serviceContracted, ordersChanged, collaboratingCarriers);
     }
 
 

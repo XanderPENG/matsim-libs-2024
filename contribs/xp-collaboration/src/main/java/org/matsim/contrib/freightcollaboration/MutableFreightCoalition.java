@@ -5,6 +5,9 @@ import org.matsim.utils.objectattributes.attributable.Attributes;
 import org.matsim.utils.objectattributes.attributable.AttributesImpl;
 
 import java.util.Map;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -13,12 +16,12 @@ import java.util.Set;
  */
 public class MutableFreightCoalition implements FreightCoalition {
 	private final Attributes coalitionAttributes = new AttributesImpl();
-	private final Map<Id<?>, FreightCollaborator<?>> collaboratorsMap;
+	private final Map<CollaboratorKey, FreightCollaborator<?>> collaboratorsMap;
 	private CollaborationType collaborationType;
 
 	public MutableFreightCoalition(CollaborationType collaborationType) {
-		this.collaborationType = collaborationType;
-		this.collaboratorsMap = new java.util.HashMap<>();
+		this.collaborationType = Objects.requireNonNull(collaborationType, "collaborationType");
+		this.collaboratorsMap = new LinkedHashMap<>();
 	}
 
 	@Override
@@ -27,13 +30,25 @@ public class MutableFreightCoalition implements FreightCoalition {
 	}
 
 	@Override
+	@Deprecated
 	public Map<Id<?>, FreightCollaborator<?>> getCollaboratorsMap() {
-		return collaboratorsMap;
+		return legacyIdMap();
 	}
 
 	@Override
+	public Map<CollaboratorKey, FreightCollaborator<?>> getCollaboratorsByKey() {
+		return Map.copyOf(collaboratorsMap);
+	}
+
+	@Override
+	@Deprecated
 	public FreightCollaborator<?> getCollaborator(Id<?> id) {
-		return collaboratorsMap.get(id);
+		return findUnique(id);
+	}
+
+	@Override
+	public FreightCollaborator<?> getCollaborator(CollaboratorRole role, Id<?> id) {
+		return collaboratorsMap.get(new CollaboratorKey(role, id));
 	}
 
 	@Override
@@ -50,8 +65,14 @@ public class MutableFreightCoalition implements FreightCoalition {
 	}
 
 	@Override
+	@Deprecated
 	public boolean contains(Id<?> id) {
-		return collaboratorsMap.containsKey(id);
+		return findUnique(id) != null;
+	}
+
+	@Override
+	public boolean contains(CollaboratorRole role, Id<?> id) {
+		return collaboratorsMap.containsKey(new CollaboratorKey(role, id));
 	}
 
 	@Override
@@ -75,7 +96,7 @@ public class MutableFreightCoalition implements FreightCoalition {
 	public Map<Id<?>, FreightCollaborator<?>> getCollaboratorsMapByRole(CollaboratorRole role) {
 		return collaboratorsMap.values().stream()
 			.filter(c -> c.getRole() == role)
-			.collect(java.util.stream.Collectors.toMap(FreightCollaborator::getId, c -> c));
+			.collect(java.util.stream.Collectors.toUnmodifiableMap(FreightCollaborator::getId, c -> c));
 	}
 
 	public CollaborationType getCollaborationType() {
@@ -83,11 +104,23 @@ public class MutableFreightCoalition implements FreightCoalition {
 	}
 
 	public void addCollaborator(FreightCollaborator<?> collaborator) {
-		collaboratorsMap.put(collaborator.getId(), collaborator);
+		Objects.requireNonNull(collaborator, "collaborator");
+		collaboratorsMap.put(collaborator.getKey(), collaborator);
 	}
 
+	/**
+	 * @deprecated Use {@link #removeCollaborator(CollaboratorRole, Id)}.
+	 */
+	@Deprecated
 	public void removeCollaborator(Id<?> id) {
-		collaboratorsMap.remove(id);
+		FreightCollaborator<?> collaborator = findUnique(id);
+		if (collaborator != null) {
+			collaboratorsMap.remove(collaborator.getKey());
+		}
+	}
+
+	public void removeCollaborator(CollaboratorRole role, Id<?> id) {
+		collaboratorsMap.remove(new CollaboratorKey(role, id));
 	}
 
 	public void addCollaborators(Set<FreightCollaborator<?>> collaborators) {
@@ -98,12 +131,12 @@ public class MutableFreightCoalition implements FreightCoalition {
 
 	public void removeCollaborators(Set<FreightCollaborator<?>> collaborators) {
 		for (FreightCollaborator<?> collaborator : collaborators) {
-			removeCollaborator(collaborator.getId());
+			collaboratorsMap.remove(collaborator.getKey());
 		}
 	}
 
 	public void updateCollaborationType(CollaborationType newType) {
-		this.collaborationType = newType;
+		this.collaborationType = Objects.requireNonNull(newType, "newType");
 	}
 
 	public void updateCollaborators(Set<FreightCollaborator<?>> newCollaborators) {
@@ -114,5 +147,29 @@ public class MutableFreightCoalition implements FreightCoalition {
 	@Override
 	public Attributes getAttributes() {
 		return coalitionAttributes;
+	}
+
+	private FreightCollaborator<?> findUnique(Id<?> id) {
+		Objects.requireNonNull(id, "id");
+		List<FreightCollaborator<?>> matches = collaboratorsMap.entrySet().stream()
+			.filter(entry -> entry.getKey().id().equals(id))
+			.map(Map.Entry::getValue)
+			.toList();
+		if (matches.size() > 1) {
+			throw new IllegalStateException("Ambiguous collaborator id '" + id
+				+ "' is used by multiple roles. Use a role-aware lookup.");
+		}
+		return matches.isEmpty() ? null : matches.getFirst();
+	}
+
+	private Map<Id<?>, FreightCollaborator<?>> legacyIdMap() {
+		Map<Id<?>, FreightCollaborator<?>> result = new LinkedHashMap<>();
+		for (FreightCollaborator<?> collaborator : collaboratorsMap.values()) {
+			if (result.putIfAbsent(collaborator.getId(), collaborator) != null) {
+				throw new IllegalStateException("Coalition contains the same collaborator id in multiple roles. "
+					+ "Use getCollaboratorsByKey().");
+			}
+		}
+		return Map.copyOf(result);
 	}
 }

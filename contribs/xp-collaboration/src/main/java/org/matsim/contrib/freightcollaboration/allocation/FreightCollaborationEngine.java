@@ -17,6 +17,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.function.Supplier;
+import java.util.function.IntFunction;
 import java.util.*;
 
 public class FreightCollaborationEngine {
@@ -34,23 +35,42 @@ public class FreightCollaborationEngine {
 
 	private static final Logger LOGGER = LogManager.getLogger(FreightCollaborationEngine.class);
 
-	private CarrierScoringFunctionFactory carrierScoringFunctionFactory;
+	private final CarrierScoringFunctionFactory carrierScoringFunctionFactory;
 
 	// FIXME: I do not see any reason to have this field if it is not used
 //	private final EventsManager existingEventsManager;
 
 	private final TravelTime travelTime;
+	private final Supplier<FreightPseudoSimulator> pseudoSimulatorOverride;
+	private final IntFunction<ExecutorService> executorFactory;
 
 	public FreightCollaborationEngine(Config config, Scenario scenario, FreightCollaborators freightCollaborators,
 			CollaborationDataStore collaborationDataStore, List<MutableFreightCoalition> existingCoalitions, TravelTime travelTime,
 									  CarrierScoringFunctionFactory carrierScoringFunctionFactory) {
+		this(config, scenario, freightCollaborators, collaborationDataStore, existingCoalitions, travelTime,
+			carrierScoringFunctionFactory, null, parallelism -> Executors.newFixedThreadPool(parallelism,
+				r -> {
+					Thread t = new Thread(r);
+					t.setName("freight-collab-" + t.getId());
+					t.setDaemon(true);
+					return t;
+				}));
+	}
+
+	FreightCollaborationEngine(Config config, Scenario scenario, FreightCollaborators freightCollaborators,
+			CollaborationDataStore collaborationDataStore, List<MutableFreightCoalition> existingCoalitions,
+			TravelTime travelTime, CarrierScoringFunctionFactory carrierScoringFunctionFactory,
+			Supplier<FreightPseudoSimulator> pseudoSimulatorOverride,
+			IntFunction<ExecutorService> executorFactory) {
 		this.config = config;
 		this.scenario = scenario;
 		this.freightCollaborators = freightCollaborators;
 		this.collaborationDataStore = collaborationDataStore;
-		this.existingCoalitions = existingCoalitions;
+		this.existingCoalitions = existingCoalitions == null ? List.of() : List.copyOf(existingCoalitions);
 		this.travelTime = travelTime;
 		this.carrierScoringFunctionFactory = carrierScoringFunctionFactory;
+		this.pseudoSimulatorOverride = pseudoSimulatorOverride;
+		this.executorFactory = Objects.requireNonNull(executorFactory, "executorFactory");
 	}
 
 
@@ -73,33 +93,30 @@ public class FreightCollaborationEngine {
 			return;
 		}
 
-		Supplier<FreightPseudoSimulator> pseudoSimulatorSupplier = () -> {
+		Supplier<FreightPseudoSimulator> pseudoSimulatorSupplier = pseudoSimulatorOverride != null
+			? pseudoSimulatorOverride
+			: () -> {
 			FreightPseudoSimulator simulator = new FreightPseudoSimulator(collaborationDataStore, scenario.getNetwork(),
 				freightCollaborators, travelTime, carrierScoringFunctionFactory, fcg);
 			simulator.setVrpMaxIterations(fcg.getVrpMaxIterations());
 			return simulator;
 		};
 
-		ExecutorService executor = Executors.newFixedThreadPool(parallelism,
-			r -> {
-				Thread t = new Thread(r);
-				t.setName("freight-collab-" + t.getId());
-				t.setDaemon(true);
-				return t;
-			});
-
-		AllocationModel allocationModel = AllocationUtils.createAllocationModel(fcg.ALLOCATION_MODEL, collaborationDataStore,
-			pseudoSimulatorSupplier, existingCoalitions, fcg.getAllocationFactor(), executor, parallelism);
-		if (allocationModel instanceof AllocationModelApproxShapleyValue approx) {
-			approx.setApproximationMethod(AllocationModelApproxShapleyValue.ApproximationMethod
-				.valueOf(fcg.getApproxShapleyMethod()));
-			approx.setMonteCarloSamples(fcg.getMonteCarloSamples());
-			approx.setSamplesRatio(fcg.getSamplesRatio());
-			approx.setStratifiedSamplesPerLevel(fcg.getStratifiedSamplesPerLevel());
-			approx.setMaxStratifiedEvaluations(fcg.getMaxStratifiedEvaluations());
-		}
-
+		ExecutorService executor = Objects.requireNonNull(executorFactory.apply(parallelism),
+			"executorFactory returned null");
 		try {
+			AllocationModel allocationModel = AllocationUtils.createAllocationModel(fcg.ALLOCATION_MODEL,
+				collaborationDataStore, pseudoSimulatorSupplier, existingCoalitions,
+				fcg.getAllocationFactor(), executor, parallelism);
+			if (allocationModel instanceof AllocationModelApproxShapleyValue approx) {
+				approx.setApproximationMethod(AllocationModelApproxShapleyValue.ApproximationMethod
+					.valueOf(fcg.getApproxShapleyMethod()));
+				approx.setMonteCarloSamples(fcg.getMonteCarloSamples());
+				approx.setSamplesRatio(fcg.getSamplesRatio());
+				approx.setStratifiedSamplesPerLevel(fcg.getStratifiedSamplesPerLevel());
+				approx.setMaxStratifiedEvaluations(fcg.getMaxStratifiedEvaluations());
+			}
+
 			if (fcg.ALLOCATION_MODEL == AllocationModels.APPROX_SHAPLEY) {
 				allocationModel.allocate(fcg.getAllocationStrategy());
 				return;
@@ -141,7 +158,7 @@ public class FreightCollaborationEngine {
 		} catch (Exception e) {
 			throw new RuntimeException("Error during freight collaboration execution", e);
 		} finally {
-			executor.shutdown();
+			executor.shutdownNow();
 		}
 
 		// Something to do with triggering the MATSim scoring module
@@ -163,18 +180,20 @@ public class FreightCollaborationEngine {
 	 * @param players
 	 * @return
 	 */
-	private Collection<Set<Id<?>>> buildSubCoalitionsForProportional(Set<Id<?>> players) {
-		List<Set<Id<?>>> subCoalitions = new ArrayList<>();
+	static Collection<Set<Id<?>>> buildSubCoalitionsForProportional(Set<Id<?>> players) {
+		Objects.requireNonNull(players, "players");
+		Set<Set<Id<?>>> subCoalitions = new LinkedHashSet<>();
 		subCoalitions.add(Set.of());
+		for (Id<?> player : players) {
+			subCoalitions.add(Set.of(player));
+		}
 		subCoalitions.add(Set.copyOf(players));
-//		for (Id<?> player : players) {
-//			subCoalitions.add(Set.of(player));
-//		}
-		return subCoalitions;
+		return List.copyOf(subCoalitions);
 	}
 
-	private Collection<Set<Id<?>>> buildSubCoalitionsForMarginal(Set<Id<?>> players) {
-		List<Set<Id<?>>> subCoalitions = new ArrayList<>();
+	static Collection<Set<Id<?>>> buildSubCoalitionsForMarginal(Set<Id<?>> players) {
+		Objects.requireNonNull(players, "players");
+		Set<Set<Id<?>>> subCoalitions = new LinkedHashSet<>();
 		subCoalitions.add(Set.of());
 		Set<Id<?>> fullCoalition = Set.copyOf(players);
 		subCoalitions.add(fullCoalition);
@@ -183,11 +202,7 @@ public class FreightCollaborationEngine {
 			withoutPlayer.remove(player);
 			subCoalitions.add(withoutPlayer);
 		}
-		return subCoalitions;
-	}
-
-	private void injectScoringFunctionForValueAllocation(){
-
+		return List.copyOf(subCoalitions);
 	}
 
 

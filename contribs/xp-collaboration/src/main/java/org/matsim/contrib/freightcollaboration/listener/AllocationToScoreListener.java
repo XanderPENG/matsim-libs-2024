@@ -3,7 +3,6 @@ package org.matsim.contrib.freightcollaboration.listener;
 import com.google.inject.Inject;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.Scenario;
 import org.matsim.api.core.v01.population.HasPlansAndId;
 import org.matsim.contrib.freightcollaboration.FreightCollaborator;
@@ -18,6 +17,7 @@ import org.matsim.core.controler.listener.IterationEndsListener;
  * @deprecated as we can implement it in the scoring functions directly now.
  * @author Xander Peng
  */
+@Deprecated
 public class AllocationToScoreListener implements IterationEndsListener {
 	private static final Logger LOGGER = LogManager.getLogger(AllocationToScoreListener.class);
 
@@ -29,6 +29,16 @@ public class AllocationToScoreListener implements IterationEndsListener {
 
 	@Inject
 	FreightCollaborators freightCollaborators;
+
+	public AllocationToScoreListener() {
+	}
+
+	AllocationToScoreListener(CollaborationDataStore collaborationDataStore, Scenario scenario,
+			FreightCollaborators freightCollaborators) {
+		this.collaborationDataStore = collaborationDataStore;
+		this.scenario = scenario;
+		this.freightCollaborators = freightCollaborators;
+	}
 
 	@Override
 	public void notifyIterationEnds(IterationEndsEvent event) {
@@ -52,13 +62,15 @@ public class AllocationToScoreListener implements IterationEndsListener {
 		}
 		// If there are allocated values, convert them to scores
 		for (var entry : collaborationDataStore.getAllocatedValues().entrySet()) {
-			Id<?> collaboratorId = entry.getKey();
+			var collaboratorKey = entry.getKey();
 			double allocatedValue = entry.getValue();
-			// Retrieve the FreightCollaborator from the scenario using the collaboratorId
-			var freightCollaborator = freightCollaborators.getFreightCollaborators().get(collaboratorId);
-			assert freightCollaborator != null;
+			var freightCollaborator = freightCollaborators.getFreightCollaborator(
+				collaboratorKey.role(), collaboratorKey.id());
+			if (freightCollaborator == null) {
+				throw new IllegalStateException("No collaborator registered for allocation key " + collaboratorKey);
+			}
 			var selPlan = freightCollaborator.getTypedSelectedPlan();
-			double selPlanScore = selPlan.getScore();
+			double selPlanScore = selPlan.getScore() == null ? 0.0 : selPlan.getScore();
 			selPlan.setScore(selPlanScore + allocatedValue);
 		}
 	}

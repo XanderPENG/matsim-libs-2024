@@ -3,14 +3,12 @@ package org.matsim.contrib.freightcollaboration.allocation;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Id;
-import org.matsim.contrib.freightcollaboration.CollaborationTypes;
-import org.matsim.contrib.freightcollaboration.CollaboratorRole;
+import org.matsim.contrib.freightcollaboration.CollaboratorKey;
+import org.matsim.contrib.freightcollaboration.FreightCollaborator;
 import org.matsim.contrib.freightcollaboration.MutableFreightCoalition;
+import org.matsim.contrib.freightcollaboration.utils.AllocationUtils;
 
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 public class AllocationModelShapleyValue implements AllocationModel {
 
@@ -21,7 +19,10 @@ public class AllocationModelShapleyValue implements AllocationModel {
 	private final double allocationFactor;
 
 	public AllocationModelShapleyValue(CollaborationDataStore collaborationDataStore, double allocationFactor) {
-		this.collaborationDataStore = collaborationDataStore;
+		this.collaborationDataStore = Objects.requireNonNull(collaborationDataStore, "collaborationDataStore");
+		if (!Double.isFinite(allocationFactor) || allocationFactor < 0.0 || allocationFactor > 1.0) {
+			throw new IllegalArgumentException("allocationFactor must be in [0, 1].");
+		}
 		this.allocationFactor = allocationFactor;
 	}
 
@@ -36,37 +37,26 @@ public class AllocationModelShapleyValue implements AllocationModel {
 
 	public void allocateCostSavings() {
 		// Maintain a map to store final allocation values for each collaborator
-		Map<Id<?>, Double> finalAllocations = new HashMap<>();
+		Map<CollaboratorKey, Double> finalAllocations = new HashMap<>();
+		Map<MutableFreightCoalition, Map<Set<Id<?>>, Double>> simulatedScores =
+			requireSimulatedScores();
 
 		// For-loop over all mutable coalitions
-		for (Map.Entry<MutableFreightCoalition, Map<Set<Id<?>>, Double>> entry : collaborationDataStore.getSimulatedCoalitionScores().entrySet()) {
+		for (Map.Entry<MutableFreightCoalition, Map<Set<Id<?>>, Double>> entry : simulatedScores.entrySet()) {
 			MutableFreightCoalition coalition = entry.getKey();
 			// in this map key: subcoalition, but without the distributor ID (carrier) but only the players
 			Map<Set<Id<?>>, Double> coalitionScores = entry.getValue();
 
 			// Get the distributor (carrier) ID by collaboration types
-			Id<?> distributorId = null;
-			if (coalition.getCollaborationType() == CollaborationTypes.CARRIER_RECEIVER) {
-				distributorId = coalition.getCollaboratorsSetByRole(CollaboratorRole.CARRIER).iterator().next().getId();
-			} else if (coalition.getCollaborationType() == CollaborationTypes.LSP_RECEIVER) {
-				distributorId = coalition.getCollaboratorsSetByRole(CollaboratorRole.LSP).iterator().next().getId();
-			} else {
-				throw new IllegalStateException("Unsupported collaboration type for Shapley Value allocation: " + coalition.getCollaborationType());
-			}
+			CollaboratorKey distributorKey = AllocationUtils.extractSingleDistributor(coalition).getKey();
 
 			// Calculate the cost savings for each subcoalition in  this coalition
-			double nonCollaborativeCost = coalitionScores.get(Set.of());
+			double nonCollaborativeCost = requireScore(coalitionScores, Set.of());
 			Map<Set<Id<?>>, Double> costSavings = new HashMap<>();
 			for (Map.Entry<Set<Id<?>>, Double> scoreEntry : coalitionScores.entrySet()) {
 				Set<Id<?>> subCoalition = scoreEntry.getKey();
 				double collaborativeCost = scoreEntry.getValue();
-				// it should not be negative, so we use absolute value here to avoid any issue
 				double savings = collaborativeCost - nonCollaborativeCost;
-				// @FIXME: it seems inevitable to have negative savings here, due to the VRP solution randomness. Now we reset it to zero
-				if (savings < 0) {
-					logger.warn("Pls check that the collaborative cost savings should not be negative. now the savings: {}", savings);
-					savings = 0.0;
-				}
 				costSavings.put(subCoalition, savings);
 			}
 
@@ -78,12 +68,12 @@ public class AllocationModelShapleyValue implements AllocationModel {
 
 			// record the allocations
 			for (Map.Entry<Id<?>, Double> shapleyEntry : shapleyValues.entrySet()) {
-				Id<?> collaboratorId = shapleyEntry.getKey();
+				CollaboratorKey collaboratorKey = AllocationUtils.playerKey(coalition, shapleyEntry.getKey());
 				double allocation = shapleyEntry.getValue();
-				finalAllocations.put(collaboratorId, finalAllocations.getOrDefault(collaboratorId, 0.0) + allocationFactor * allocation);
+				finalAllocations.merge(collaboratorKey, allocationFactor * allocation, Double::sum);
 			}
 			// Add the reserved savings to the distributor
-			finalAllocations.put(distributorId, finalAllocations.getOrDefault(distributorId, 0.0) + reservedCostSavings);
+			finalAllocations.merge(distributorKey, reservedCostSavings, Double::sum);
 		}
 
 		// Update the allocated values in the data store
@@ -91,69 +81,67 @@ public class AllocationModelShapleyValue implements AllocationModel {
 	}
 
 	private void allocateCost() {
-		Map<Id<?>, Double> finalAllocations = new HashMap<>();
+		Map<CollaboratorKey, Double> finalAllocations = new HashMap<>();
 
-		for (Map.Entry<MutableFreightCoalition, Map<Set<Id<?>>, Double>> entry : collaborationDataStore.getSimulatedCoalitionScores().entrySet()) {
+		for (Map.Entry<MutableFreightCoalition, Map<Set<Id<?>>, Double>> entry : requireSimulatedScores().entrySet()) {
 			MutableFreightCoalition coalition = entry.getKey();
 			Map<Set<Id<?>>, Double> coalitionScores = entry.getValue();
 
-			Id<?> distributorId = null;
-			if (coalition.getCollaborationType() == CollaborationTypes.CARRIER_RECEIVER) {
-				distributorId = coalition.getCollaboratorsSetByRole(CollaboratorRole.CARRIER).iterator().next().getId();
-			} else {
-				throw new IllegalStateException("Unsupported collaboration type for Shapley Value allocation: " + coalition.getCollaborationType());
-			}
+			CollaboratorKey distributorKey = AllocationUtils.extractSingleDistributor(coalition).getKey();
 
 			Map<Id<?>, Double> shapleyValues = calculateShapleyValues(coalitionScores);
 			double totalCostShare = shapleyValues.values().stream().mapToDouble(Double::doubleValue).sum();
 			double reservedShare = totalCostShare * (1 - allocationFactor);
 
 			for (Map.Entry<Id<?>, Double> shapleyEntry : shapleyValues.entrySet()) {
-				Id<?> collaboratorId = shapleyEntry.getKey();
+				CollaboratorKey collaboratorKey = AllocationUtils.playerKey(coalition, shapleyEntry.getKey());
 				double allocation = shapleyEntry.getValue();
-				finalAllocations.put(collaboratorId, finalAllocations.getOrDefault(collaboratorId, 0.0) + allocationFactor * allocation);
+				finalAllocations.merge(collaboratorKey, allocationFactor * allocation, Double::sum);
 			}
 
-			finalAllocations.put(distributorId, finalAllocations.getOrDefault(distributorId, 0.0) + reservedShare);
+			finalAllocations.merge(distributorKey, reservedShare, Double::sum);
 		}
 
 		collaborationDataStore.setAllocatedValues(finalAllocations);
 	}
 
 	Map<Id<?>, Double> calculateShapleyValues(Map<Set<Id<?>>, Double> coalitionScores) {
-		Map<Id<?>, Double> shapleyValues = new HashMap<>();
+		Objects.requireNonNull(coalitionScores, "coalitionScores");
 
 		// Extract all unique collaborator IDs from coalition scores
-		Set<Id<?>> allCollaborators = new HashSet<>();
+		Set<Id<?>> allCollaborators = new LinkedHashSet<>();
 		for (Set<Id<?>> coalition : coalitionScores.keySet()) {
+			Objects.requireNonNull(coalition, "coalition key");
 			allCollaborators.addAll(coalition);
 		}
 
 		int n = allCollaborators.size();
+		if (n >= Integer.SIZE - 1) {
+			throw new IllegalArgumentException("Too many players for exact Shapley allocation: " + n);
+		}
+		int expectedCoalitions = 1 << n;
+		if (coalitionScores.size() != expectedCoalitions) {
+			throw new IllegalArgumentException("Incomplete characteristic function: expected "
+				+ expectedCoalitions + " sub-coalitions for " + n + " players, found "
+				+ coalitionScores.size());
+		}
+		requireScore(coalitionScores, Set.of());
+		Map<Id<?>, Double> shapleyValues = new LinkedHashMap<>();
 
 		// Calculate Shapley value for each collaborator
 		for (Id<?> collaborator : allCollaborators) {
 			double shapleyValue = 0.0;
 
-			// Iterate through all coalitions
-			for (Set<Id<?>> coalition : coalitionScores.keySet()) {
-				// Check coalitions both with and without this collaborator
-				if (coalition.contains(collaborator)) {
-					// Create coalition without this collaborator
-					Set<Id<?>> coalitionWithout = new HashSet<>(coalition);
-					coalitionWithout.remove(collaborator);
-
-					// Calculate marginal contribution
-					double valueWith = coalitionScores.get(coalition);
-					double valueWithout = coalitionScores.getOrDefault(coalitionWithout, 0.0);
-					double marginalContribution = valueWith - valueWithout;
-
-					// Weight by coalition size factor: (|S|! * (n - |S| - 1)!) / n!
-					int coalitionSize = coalitionWithout.size();
-					double weight = factorial(coalitionSize) * factorial(n - coalitionSize - 1) / (double) factorial(n);
-
-					shapleyValue += weight * marginalContribution;
+			for (Set<Id<?>> coalitionWithout : coalitionScores.keySet()) {
+				if (coalitionWithout.contains(collaborator)) {
+					continue;
 				}
+				Set<Id<?>> coalitionWith = new HashSet<>(coalitionWithout);
+				coalitionWith.add(collaborator);
+				double valueWith = requireScore(coalitionScores, coalitionWith);
+				double valueWithout = requireScore(coalitionScores, coalitionWithout);
+				double weight = 1.0 / (n * binomial(n - 1, coalitionWithout.size()));
+				shapleyValue += weight * (valueWith - valueWithout);
 			}
 
 			shapleyValues.put(collaborator, shapleyValue);
@@ -162,13 +150,36 @@ public class AllocationModelShapleyValue implements AllocationModel {
 		return shapleyValues;
 	}
 
-	private long factorial(int n) {
-		if (n <= 1) return 1;
-		long result = 1;
-		for (int i = 2; i <= n; i++) {
-			result *= i;
+	private double binomial(int n, int k) {
+		if (k < 0 || k > n) {
+			return 0.0;
+		}
+		k = Math.min(k, n - k);
+		double result = 1.0;
+		for (int i = 1; i <= k; i++) {
+			result *= (double) (n - k + i) / i;
 		}
 		return result;
 	}
 
+	private Map<MutableFreightCoalition, Map<Set<Id<?>>, Double>> requireSimulatedScores() {
+		Map<MutableFreightCoalition, Map<Set<Id<?>>, Double>> scores =
+			collaborationDataStore.getSimulatedCoalitionScores();
+		if (scores == null || scores.isEmpty()) {
+			logger.warn("No simulated coalition scores available for Shapley allocation.");
+			return Map.of();
+		}
+		return scores;
+	}
+
+	private static double requireScore(Map<Set<Id<?>>, Double> scores, Set<Id<?>> coalition) {
+		Double value = scores.get(coalition);
+		if (value == null) {
+			throw new IllegalArgumentException("Missing score for sub-coalition " + coalition);
+		}
+		if (!Double.isFinite(value)) {
+			throw new IllegalArgumentException("Non-finite score for sub-coalition " + coalition + ": " + value);
+		}
+		return value;
+	}
 }

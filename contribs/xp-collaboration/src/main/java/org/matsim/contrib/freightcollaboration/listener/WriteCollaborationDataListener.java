@@ -30,6 +30,16 @@ public class WriteCollaborationDataListener implements IterationEndsListener {
 	@Inject
 	OutputDirectoryHierarchy controlerIO;
 
+	public WriteCollaborationDataListener() {
+	}
+
+	WriteCollaborationDataListener(CollaborationDataStore collaborationDataStore, Scenario scenario,
+			OutputDirectoryHierarchy controlerIO) {
+		this.collaborationDataStore = collaborationDataStore;
+		this.scenario = scenario;
+		this.controlerIO = controlerIO;
+	}
+
 	@Override
 	public void notifyIterationEnds(IterationEndsEvent event) {
 		int iteration = event.getIteration();

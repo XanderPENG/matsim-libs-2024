@@ -5,6 +5,8 @@ import org.apache.logging.log4j.Logger;
 import org.matsim.contrib.freightcollaboration.allocation.AllocationModels;
 import org.matsim.contrib.freightcollaboration.allocation.AllocationValueTypes;
 import org.matsim.contrib.freightcollaboration.allocation.AllocationModelApproxShapleyValue;
+import org.matsim.contrib.freightcollaboration.utils.AllocationUtils;
+import org.matsim.core.config.Config;
 import org.matsim.core.config.ReflectiveConfigGroup;
 import org.matsim.core.config.ReflectiveConfigGroup.StringGetter;
 import org.matsim.core.config.ReflectiveConfigGroup.StringSetter;
@@ -122,6 +124,12 @@ public class FreightCollaborationConfigGroup extends ReflectiveConfigGroup {
 
 	@Parameter
 	public int MAX_STRATIFIED_EVALUATIONS = 100;
+
+	/**
+	 * Maximum number of players for exhaustive coalition enumeration.
+	 */
+	@Parameter
+	public int MAX_EXACT_SHAPLEY_PLAYERS = AllocationUtils.DEFAULT_MAX_EXACT_SHAPLEY_PLAYERS;
 
 //	@StringSetter("collaborationParamSets")
 	public void setCollaborationParamSets(String value) {
@@ -271,6 +279,13 @@ public class FreightCollaborationConfigGroup extends ReflectiveConfigGroup {
 		return ALLOCATION_FACTOR;
 	}
 
+	public void setAllocationFactor(double allocationFactor) {
+		if (!Double.isFinite(allocationFactor) || allocationFactor < 0.0 || allocationFactor > 1.0) {
+			throw new IllegalArgumentException("ALLOCATION_FACTOR must be in [0,1].");
+		}
+		this.ALLOCATION_FACTOR = allocationFactor;
+	}
+
 	@StringGetter("APPROX_SHAPLEY_METHOD")
 	public String getApproxShapleyMethod() {
 		return APPROX_SHAPLEY_METHOD;
@@ -293,7 +308,7 @@ public class FreightCollaborationConfigGroup extends ReflectiveConfigGroup {
 	}
 
 	public Set<CollaborationParamSet> getCollaborationParamSets() {
-		return collaborationParamSets;
+		return Set.copyOf(collaborationParamSets);
 	}
 
 	public int getMonteCarloSamples() {
@@ -312,7 +327,7 @@ public class FreightCollaborationConfigGroup extends ReflectiveConfigGroup {
 	}
 
 	public void setSamplesRatio(double ratio) {
-		if (ratio <= 0.0 || ratio > 1.0) {
+		if (!Double.isFinite(ratio) || ratio <= 0.0 || ratio > 1.0) {
 			throw new IllegalArgumentException("SAMPLES_RATIO must be in (0,1].");
 		}
 		this.SAMPLES_RATIO = ratio;
@@ -334,10 +349,57 @@ public class FreightCollaborationConfigGroup extends ReflectiveConfigGroup {
 	}
 
 	public void setMaxStratifiedEvaluations(int maxEval) {
-		if (maxEval <= 0) {
-			throw new IllegalArgumentException("MAX_STRATIFIED_EVALUATIONS must be positive.");
+		if (maxEval < 2) {
+			throw new IllegalArgumentException(
+				"MAX_STRATIFIED_EVALUATIONS must be at least 2 (empty and grand coalition).");
 		}
 		this.MAX_STRATIFIED_EVALUATIONS = maxEval;
 	}
 
+	public int getMaxExactShapleyPlayers() {
+		return MAX_EXACT_SHAPLEY_PLAYERS;
+	}
+
+	public void setMaxExactShapleyPlayers(int maxPlayers) {
+		if (maxPlayers < 0 || maxPlayers >= Integer.SIZE - 1) {
+			throw new IllegalArgumentException("MAX_EXACT_SHAPLEY_PLAYERS must be between 0 and 30.");
+		}
+		this.MAX_EXACT_SHAPLEY_PLAYERS = maxPlayers;
+	}
+
+	@Override
+	protected void checkConsistency(Config config) {
+		super.checkConsistency(config);
+		setVrpMaxIterations(VRP_MAX_ITERATIONS);
+		setParallelism(PARALLELISM);
+		setAllocationFactor(ALLOCATION_FACTOR);
+		setMonteCarloSamples(MONTE_CARLO_SAMPLES);
+		setSamplesRatio(SAMPLES_RATIO);
+		setStratifiedSamplesPerLevel(STRATIFIED_SAMPLES_PER_LEVEL);
+		setMaxStratifiedEvaluations(MAX_STRATIFIED_EVALUATIONS);
+		setMaxExactShapleyPlayers(MAX_EXACT_SHAPLEY_PLAYERS);
+		if (!Double.isFinite(RECEIVER_RELAXATION_PENALTY) || RECEIVER_RELAXATION_PENALTY < 0.0) {
+			throw new IllegalArgumentException("RECEIVER_RELAXATION_PENALTY must be finite and non-negative.");
+		}
+		if (!Double.isFinite(RECEIVER_FIXED_FEE) || RECEIVER_FIXED_FEE < 0.0) {
+			throw new IllegalArgumentException("RECEIVER_FIXED_FEE must be finite and non-negative.");
+		}
+		if (!Double.isFinite(CARRIER_CHARGED_FEE) || CARRIER_CHARGED_FEE < 0.0) {
+			throw new IllegalArgumentException("CARRIER_CHARGED_FEE must be finite and non-negative.");
+		}
+		for (CollaborationParamSet paramSet : collaborationParamSets) {
+			if (paramSet.getCollaborationType() == null) {
+				throw new IllegalArgumentException("Each collaborationParamSet requires COLLABORATION_TYPE.");
+			}
+			if (paramSet.getCollaborationStrategies() == null) {
+				continue;
+			}
+			paramSet.getCollaborationStrategies().forEach(strategy -> {
+				if (strategy.getCollaborationType() != paramSet.getCollaborationType()) {
+					throw new IllegalArgumentException("Strategy " + strategy + " is not compatible with "
+						+ paramSet.getCollaborationType());
+				}
+			});
+		}
+	}
 }

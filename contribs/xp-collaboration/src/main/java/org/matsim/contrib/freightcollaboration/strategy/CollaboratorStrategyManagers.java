@@ -6,6 +6,7 @@ import org.matsim.core.replanning.GenericStrategyManager;
 import org.matsim.freight.receiver.replanning.ReceiverStrategyManager;
 
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * This is a "Master Manager" that manages different agents' strategy managers.
@@ -16,7 +17,7 @@ public class CollaboratorStrategyManagers {
 	Map<CollaboratorRole, GenericStrategyManager<?,?>> strategyManagers;
 
 	private CollaboratorStrategyManagers(Map<CollaboratorRole, GenericStrategyManager<?,?>> strategyManagers) {
-		this.strategyManagers = strategyManagers;
+		this.strategyManagers = Map.copyOf(strategyManagers);
 	}
 
 	public static class Builder {
@@ -27,12 +28,15 @@ public class CollaboratorStrategyManagers {
 		}
 
 		public Builder addStrategyManager(CollaboratorRole role, GenericStrategyManager<?,?> manager) {
-			this.strategyManagers.put(role, manager);
+			this.strategyManagers.put(Objects.requireNonNull(role, "role"),
+				Objects.requireNonNull(manager, "manager"));
 			return this;
 		}
 
 		public Builder addStrategyManager(CollaboratorRole role, Provider<ReceiverStrategyManager> manager) {
-			this.strategyManagers.put(role, manager.get());
+			this.strategyManagers.put(Objects.requireNonNull(role, "role"),
+				Objects.requireNonNull(Objects.requireNonNull(manager, "manager").get(),
+					"provided strategy manager"));
 			return this;
 		}
 

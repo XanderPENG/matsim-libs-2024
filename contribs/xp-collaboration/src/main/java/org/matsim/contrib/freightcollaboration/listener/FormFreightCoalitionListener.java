@@ -50,6 +50,20 @@ public class FormFreightCoalitionListener implements BeforeMobsimListener {
 	@Inject
 	CollaborationDataStore collaborationDataStore;
 
+	public FormFreightCoalitionListener() {
+	}
+
+	FormFreightCoalitionListener(Scenario scenario, FreightCollaborators freightCollaborators,
+			FreightCoalitionManager freightCoalitionManager,
+			CollaborationDataStore collaborationDataStore) {
+		this.scenario = Objects.requireNonNull(scenario, "scenario");
+		this.freightCollaborators = Objects.requireNonNull(freightCollaborators, "freightCollaborators");
+		this.freightCoalitionManager = Objects.requireNonNull(freightCoalitionManager,
+			"freightCoalitionManager");
+		this.collaborationDataStore = Objects.requireNonNull(collaborationDataStore,
+			"collaborationDataStore");
+	}
+
 	@Override
 	public void notifyBeforeMobsim(BeforeMobsimEvent event) {
 		// Form grand coalition at the first iteration
@@ -225,6 +239,9 @@ public class FormFreightCoalitionListener implements BeforeMobsimListener {
         Map<Id<Receiver>, CoalitionUtils.ReceiverDelta> deltas = new HashMap<>();
         Map<Id<Receiver>, FreightCollaborator<Receiver>> receivers = freightCollaborators.getFreightCollaboratorsByRole(CollaboratorRole.RECEIVER);
         var originalReceiverPlans = collaborationDataStore.getOriginalPlans().get(CollaboratorRole.RECEIVER);
+		if (originalReceiverPlans == null || originalReceiverPlans.isEmpty()) {
+			return deltas;
+		}
 
         for (Map.Entry<Id<Receiver>, FreightCollaborator<Receiver>> entry : receivers.entrySet()) {
             ReceiverPlan original = (ReceiverPlan) originalReceiverPlans.get(entry.getKey());

@@ -15,14 +15,24 @@ public interface FreightCoalition extends Attributable {
 
 	/**
 	 * Get all collaborators with their IDs
+	 *
+	 * @deprecated A raw id cannot distinguish collaborators in different roles. Use
+	 * {@link #getCollaboratorsByKey()}.
 	 */
+	@Deprecated
 	Map<Id<?>, FreightCollaborator<?>> getCollaboratorsMap();
+
+	Map<CollaboratorKey, FreightCollaborator<?>> getCollaboratorsByKey();
 
 	/**
 	 * Get a collaborator by its ID.
 	 * @param id The ID of the collaborator
+	 * @deprecated Use {@link #getCollaborator(CollaboratorRole, Id)}.
 	 */
+	@Deprecated
 	FreightCollaborator<?> getCollaborator(Id<?> id);
+
+	FreightCollaborator<?> getCollaborator(CollaboratorRole role, Id<?> id);
 
 	/**
 	 * Get all unique roles represented in this coalition.
@@ -38,8 +48,12 @@ public interface FreightCoalition extends Attributable {
 	/**
 	 * Check if a collaborator with the given ID is part of this coalition.
 	 * @param id The ID to check
+	 * @deprecated Use {@link #contains(CollaboratorRole, Id)}.
 	 */
+	@Deprecated
 	boolean contains(Id<?> id);
+
+	boolean contains(CollaboratorRole role, Id<?> id);
 
 	/**
 	 * Get the number of collaborators in this coalition.

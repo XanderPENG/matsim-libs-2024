@@ -6,10 +6,14 @@ import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.Scenario;
 import org.matsim.api.core.v01.population.BasicPlan;
 import org.matsim.contrib.freightcollaboration.CollaboratorRole;
+import org.matsim.contrib.freightcollaboration.CollaboratorKey;
 import org.matsim.contrib.freightcollaboration.MutableFreightCoalition;
 import org.matsim.freight.carriers.Carrier;
 import org.matsim.freight.carriers.CarrierPlan;
 
+import java.util.EnumMap;
+import java.util.LinkedHashMap;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -20,15 +24,15 @@ public class CollaborationDataStore {
 	// This map stores the original plans of each collaborator before any modifications due to collaboration.
 	// Note: this map should not be changed after initialization.
 	private final Map<CollaboratorRole, Map<Id<?>, ? extends BasicPlan>> originalPlans;
-	private Map<MutableFreightCoalition, Map<Set<Id<?>>, Double>> simulatedCoalitionScores;
-	private Map<Id<?>, Double> allocatedValues;
-	private Scenario scenario;
-	private Map<Id<Carrier>, Carrier> LspReceiverCopiedNonDistrCarriers;
-	private Map<Id<Carrier>, Double> iter0CarrierBaselineFeeFree;
-	private Map<Id<Carrier>, Double> iter0CarrierBaselineFeeIncluded;
+	private volatile Map<MutableFreightCoalition, Map<Set<Id<?>>, Double>> simulatedCoalitionScores;
+	private volatile Map<CollaboratorKey, Double> allocatedValues;
+	private volatile Scenario scenario;
+	private volatile Map<Id<Carrier>, Carrier> LspReceiverCopiedNonDistrCarriers;
+	private volatile Map<Id<Carrier>, Double> iter0CarrierBaselineFeeFree;
+	private volatile Map<Id<Carrier>, Double> iter0CarrierBaselineFeeIncluded;
 
 	public CollaborationDataStore(Map<CollaboratorRole, Map<Id<?>, ? extends BasicPlan>> originalPlans) {
-		this.originalPlans = originalPlans;
+		this.originalPlans = copyOriginalPlans(originalPlans);
 		resetSimulatedCoalitionScores();
 	}
 
@@ -41,7 +45,9 @@ public class CollaborationDataStore {
 			simulatedCoalitionScores = new ConcurrentHashMap<>();
 		}
 		// Add/overwrite the entry (parallel-safe)
-		simulatedCoalitionScores.put(coalition, subCoalitionScores);
+		Map<Set<Id<?>>, Double> scoresCopy = new LinkedHashMap<>();
+		subCoalitionScores.forEach((members, score) -> scoresCopy.put(Set.copyOf(members), score));
+		simulatedCoalitionScores.put(coalition, Map.copyOf(scoresCopy));
 	}
 
 	private void resetSimulatedCoalitionScores() {
@@ -53,15 +59,21 @@ public class CollaborationDataStore {
 	}
 
 	public Map<MutableFreightCoalition, Map<Set<Id<?>>, Double>> getSimulatedCoalitionScores() {
-		return simulatedCoalitionScores;
+		Map<MutableFreightCoalition, Map<Set<Id<?>>, Double>> scores = simulatedCoalitionScores;
+		return scores == null ? null : Map.copyOf(scores);
 	}
 
-	public Map<Id<?>, Double> getAllocatedValues() {
+	public Map<CollaboratorKey, Double> getAllocatedValues() {
 		return allocatedValues;
 	}
 
-	public void setAllocatedValues(Map<Id<?>, Double> allocatedValues) {
-		this.allocatedValues = allocatedValues;
+	public void setAllocatedValues(Map<CollaboratorKey, Double> allocatedValues) {
+		this.allocatedValues = allocatedValues == null ? null : Map.copyOf(allocatedValues);
+	}
+
+	public double getAllocatedValue(CollaboratorRole role, Id<?> id) {
+		Map<CollaboratorKey, Double> values = allocatedValues;
+		return values == null ? 0.0 : values.getOrDefault(new CollaboratorKey(role, id), 0.0);
 	}
 
 	// Reset the entire data store (only used at the beginning of a new simulation)
@@ -79,7 +91,7 @@ public class CollaborationDataStore {
 	}
 
 	public void setLspReceiverCopiedNonDistrCarriers(Map<Id<Carrier>, Carrier> carrierMap) {
-		this.LspReceiverCopiedNonDistrCarriers = carrierMap;
+		this.LspReceiverCopiedNonDistrCarriers = carrierMap == null ? null : Map.copyOf(carrierMap);
 	}
 
 	public Map<Id<Carrier>, Carrier> getLspReceiverCopiedNonDistrCarriers() {
@@ -87,7 +99,7 @@ public class CollaborationDataStore {
 	}
 
 	public void setIter0CarrierBaselineFeeFree(Map<Id<Carrier>, Double> baselineScores) {
-		this.iter0CarrierBaselineFeeFree = baselineScores;
+		this.iter0CarrierBaselineFeeFree = baselineScores == null ? null : Map.copyOf(baselineScores);
 	}
 
 	public Map<Id<Carrier>, Double> getIter0CarrierBaselineFeeFree() {
@@ -95,10 +107,22 @@ public class CollaborationDataStore {
 	}
 
 	public void setIter0CarrierBaselineFeeIncluded(Map<Id<Carrier>, Double> baselineScores) {
-		this.iter0CarrierBaselineFeeIncluded = baselineScores;
+		this.iter0CarrierBaselineFeeIncluded = baselineScores == null ? null : Map.copyOf(baselineScores);
 	}
 
 	public Map<Id<Carrier>, Double> getIter0CarrierBaselineFeeIncluded() {
 		return iter0CarrierBaselineFeeIncluded;
+	}
+
+	private static Map<CollaboratorRole, Map<Id<?>, ? extends BasicPlan>> copyOriginalPlans(
+			Map<CollaboratorRole, Map<Id<?>, ? extends BasicPlan>> source) {
+		if (source == null || source.isEmpty()) {
+			return Map.of();
+		}
+		Map<CollaboratorRole, Map<Id<?>, ? extends BasicPlan>> copy =
+			new EnumMap<>(CollaboratorRole.class);
+		source.forEach((role, plans) ->
+			copy.put(role, plans == null ? Map.of() : Map.copyOf(new HashMap<>(plans))));
+		return Map.copyOf(copy);
 	}
 }

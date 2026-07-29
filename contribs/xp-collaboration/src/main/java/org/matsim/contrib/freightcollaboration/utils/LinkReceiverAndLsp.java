@@ -23,6 +23,35 @@ import org.matsim.freight.receiver.Order;
 import java.util.*;
 
 public class LinkReceiverAndLsp {
+
+	/**
+	 * Creates an isolated structural copy of an LSP, including fresh resources, affiliated carriers,
+	 * plans and shipments.
+	 */
+	public static LSP copyLsp(LSP originalLsp, Scenario scenario) {
+		Objects.requireNonNull(originalLsp, "originalLsp");
+		Objects.requireNonNull(scenario, "scenario");
+		LSPPlan originalPlan = Objects.requireNonNull(originalLsp.getSelectedPlan(),
+			"originalLsp selected plan");
+		Map<Id<LSPResource>, LSPResource> resourceMap = cloneResources(originalLsp.getResources(), scenario);
+		List<LogisticChain> clonedChains = cloneLogisticChains(originalPlan.getLogisticChains(), resourceMap);
+		LSPPlan copiedPlan = LSPUtils.createLSPPlan();
+		clonedChains.forEach(copiedPlan::addLogisticChain);
+		copiedPlan.setInitialShipmentAssigner(originalPlan.getInitialShipmentAssigner());
+		copiedPlan.setType(originalPlan.getType());
+		copiedPlan.setScore(originalPlan.getScore());
+		LogisticChainScheduler scheduler =
+			ResourceImplementationUtils.createDefaultSimpleForwardLogisticChainScheduler(
+				deriveOrderedResources(clonedChains));
+		LSP copy = LSPUtils.LSPBuilder.getInstance(originalLsp.getId())
+			.setLogisticChainScheduler(scheduler)
+			.setInitialPlan(copiedPlan)
+			.build();
+		copiedPlan.setLSP(copy);
+		copyAttributes(originalLsp, copy);
+		rebuildShipments(originalLsp, Set.of()).forEach(copy::assignShipmentToLSP);
+		return copy;
+	}
 	/**
 	 * This method is used to replan the LSP since the receivers' collaboration that changed the TW/services
 	 * would likely make the current LSP plan infeasible or suboptimal.
@@ -149,15 +178,7 @@ public class LinkReceiverAndLsp {
 	}
 
 	private static Carrier copyCarrierBasics(Carrier original){
-		Carrier copy = org.matsim.freight.carriers.CarriersUtils.createCarrier(original.getId());
-		CarrierCapabilities caps = original.getCarrierCapabilities();
-		copy.setCarrierCapabilities(caps);
-		// copy simple attributes
-		original.getAttributes().getAsMap().forEach(copy.getAttributes()::putAttribute);
-		if (CarriersUtils.getJspritIterations(copy) <= 10){
-			CarriersUtils.setJspritIterations(copy, 200);
-		}
-		return copy;
+		return AllocationUtils.copyCarrier(original);
 	}
 
 	private static List<LogisticChain> cloneLogisticChains(Collection<LogisticChain> originals,

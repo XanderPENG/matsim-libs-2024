@@ -36,6 +36,16 @@ public class LspReceiverPreRerouteListener implements BeforeMobsimListener {
 	@Inject
 	Config config;
 
+	public LspReceiverPreRerouteListener() {
+	}
+
+	LspReceiverPreRerouteListener(CollaborationDataStore collaborationDataStore,
+			Scenario scenario, Config config) {
+		this.collaborationDataStore = collaborationDataStore;
+		this.scenario = scenario;
+		this.config = config;
+	}
+
 	@Override
 	public void notifyBeforeMobsim(BeforeMobsimEvent event) {
 		// Get LSPs from the scenario
@@ -137,11 +147,12 @@ public class LspReceiverPreRerouteListener implements BeforeMobsimListener {
 		}
 
 		// Set selected plan if exists
-		if (originalCarrier.getSelectedPlan() == null) {
+		if (originalCarrier.getSelectedPlan() != null) {
 			// Find the corresponding copied plan and set it as selected
+			int selectedPlanIndex = originalCarrier.getPlans().indexOf(originalCarrier.getSelectedPlan());
 			List<CarrierPlan> copiedPlans = copiedCarrier.getPlans();
-			if (!copiedPlans.isEmpty()) {
-				copiedCarrier.setSelectedPlan(copiedPlans.getFirst()); // Simplified - use first plan
+			if (selectedPlanIndex >= 0 && selectedPlanIndex < copiedPlans.size()) {
+				copiedCarrier.setSelectedPlan(copiedPlans.get(selectedPlanIndex));
 			}
 		}
 		return copiedCarrier;

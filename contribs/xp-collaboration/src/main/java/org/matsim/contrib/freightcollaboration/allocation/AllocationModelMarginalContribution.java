@@ -3,13 +3,14 @@ package org.matsim.contrib.freightcollaboration.allocation;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Id;
-import org.matsim.contrib.freightcollaboration.CollaborationTypes;
-import org.matsim.contrib.freightcollaboration.CollaboratorRole;
+import org.matsim.contrib.freightcollaboration.CollaboratorKey;
 import org.matsim.contrib.freightcollaboration.MutableFreightCoalition;
+import org.matsim.contrib.freightcollaboration.utils.AllocationUtils;
 
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 public class AllocationModelMarginalContribution implements AllocationModel {
@@ -20,7 +21,10 @@ public class AllocationModelMarginalContribution implements AllocationModel {
 	private final double allocationFactor;
 
 	public AllocationModelMarginalContribution(CollaborationDataStore collaborationDataStore, double allocationFactor) {
-		this.collaborationDataStore = collaborationDataStore;
+		this.collaborationDataStore = Objects.requireNonNull(collaborationDataStore, "collaborationDataStore");
+		if (!Double.isFinite(allocationFactor) || allocationFactor < 0.0 || allocationFactor > 1.0) {
+			throw new IllegalArgumentException("allocationFactor must be in [0, 1].");
+		}
 		this.allocationFactor = allocationFactor;
 	}
 
@@ -34,7 +38,7 @@ public class AllocationModelMarginalContribution implements AllocationModel {
 	}
 
 	private void allocateCostSavings() {
-		Map<Id<?>, Double> finalAllocations = new HashMap<>();
+		Map<CollaboratorKey, Double> finalAllocations = new HashMap<>();
 		Map<MutableFreightCoalition, Map<Set<Id<?>>, Double>> simulatedScores = collaborationDataStore.getSimulatedCoalitionScores();
 		if (simulatedScores == null || simulatedScores.isEmpty()) {
 			logger.warn("No simulated coalition scores available for marginal contribution allocation.");
@@ -44,15 +48,20 @@ public class AllocationModelMarginalContribution implements AllocationModel {
 		for (Map.Entry<MutableFreightCoalition, Map<Set<Id<?>>, Double>> entry : simulatedScores.entrySet()) {
 			MutableFreightCoalition coalition = entry.getKey();
 			Map<Set<Id<?>>, Double> coalitionScores = entry.getValue();
-			Id<?> distributorId = extractDistributorId(coalition);
+			CollaboratorKey distributorKey = AllocationUtils.extractSingleDistributor(coalition).getKey();
 			Set<Id<?>> allPlayers = extractAllPlayers(coalitionScores);
 			if (allPlayers.isEmpty()) {
 				logger.warn("Coalition {} has no collaborating players, skipping.", coalition);
 				continue;
-			}
+				}
 
-			Set<Id<?>> fullCoalition = new HashSet<>(allPlayers);
-			double baseline = coalitionScores.get(Set.of());
+				Set<Id<?>> fullCoalition = new HashSet<>(allPlayers);
+				Double baselineValue = coalitionScores.get(Set.of());
+				if (baselineValue == null) {
+					throw new IllegalArgumentException(
+						"Missing empty-coalition baseline for " + coalition);
+				}
+				double baseline = baselineValue;
 			Double fullScore = coalitionScores.get(fullCoalition);
 			if (fullScore == null) {
 				logger.warn("No full coalition score available for coalition {}, skipping marginal allocation.", coalition);
@@ -85,18 +94,18 @@ public class AllocationModelMarginalContribution implements AllocationModel {
 				Id<?> playerId = marginalEntry.getKey();
 				double marginal = marginalEntry.getValue();
 				double allocation = marginalSum > 0 ? playerBudget * marginal / marginalSum : fallbackShare;
-				finalAllocations.put(playerId, finalAllocations.getOrDefault(playerId, 0.0) + allocation);
+				finalAllocations.merge(AllocationUtils.playerKey(coalition, playerId), allocation, Double::sum);
 			}
 
 			double reservedSavings = totalSavings * (1 - allocationFactor);
-			finalAllocations.put(distributorId, finalAllocations.getOrDefault(distributorId, 0.0) + reservedSavings);
+			finalAllocations.merge(distributorKey, reservedSavings, Double::sum);
 		}
 
 		collaborationDataStore.setAllocatedValues(finalAllocations);
 	}
 
 	private void allocateCost() {
-		Map<Id<?>, Double> finalAllocations = new HashMap<>();
+		Map<CollaboratorKey, Double> finalAllocations = new HashMap<>();
 		Map<MutableFreightCoalition, Map<Set<Id<?>>, Double>> simulatedScores = collaborationDataStore.getSimulatedCoalitionScores();
 		if (simulatedScores == null || simulatedScores.isEmpty()) {
 			logger.warn("No simulated coalition scores available for marginal contribution allocation.");
@@ -106,7 +115,7 @@ public class AllocationModelMarginalContribution implements AllocationModel {
 		for (Map.Entry<MutableFreightCoalition, Map<Set<Id<?>>, Double>> entry : simulatedScores.entrySet()) {
 			MutableFreightCoalition coalition = entry.getKey();
 			Map<Set<Id<?>>, Double> coalitionScores = entry.getValue();
-			Id<?> distributorId = extractDistributorId(coalition);
+			CollaboratorKey distributorKey = AllocationUtils.extractSingleDistributor(coalition).getKey();
 			Set<Id<?>> allPlayers = extractAllPlayers(coalitionScores);
 			if (allPlayers.isEmpty()) {
 				logger.warn("Coalition {} has no collaborating players, skipping.", coalition);
@@ -138,11 +147,11 @@ public class AllocationModelMarginalContribution implements AllocationModel {
 				Id<?> playerId = marginalEntry.getKey();
 				double marginal = marginalEntry.getValue();
 				double allocation = marginalSum > 0 ? playerBudget * marginal / marginalSum : fallbackShare;
-				finalAllocations.put(playerId, finalAllocations.getOrDefault(playerId, 0.0) + allocation);
+				finalAllocations.merge(AllocationUtils.playerKey(coalition, playerId), allocation, Double::sum);
 			}
 
 			double reservedShare = fullCost * (1 - allocationFactor);
-			finalAllocations.put(distributorId, finalAllocations.getOrDefault(distributorId, 0.0) + reservedShare);
+			finalAllocations.merge(distributorKey, reservedShare, Double::sum);
 		}
 
 		collaborationDataStore.setAllocatedValues(finalAllocations);
@@ -156,10 +165,4 @@ public class AllocationModelMarginalContribution implements AllocationModel {
 		return allCollaborators;
 	}
 
-	private Id<?> extractDistributorId(MutableFreightCoalition coalition) {
-		if (coalition.getCollaborationType() == CollaborationTypes.CARRIER_RECEIVER) {
-			return coalition.getCollaboratorsSetByRole(CollaboratorRole.CARRIER).iterator().next().getId();
-		}
-		throw new IllegalStateException("Unsupported collaboration type for marginal contribution allocation: " + coalition.getCollaborationType());
-	}
 }

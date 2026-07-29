@@ -1,9 +1,6 @@
 package org.matsim.contrib.freightcollaboration.allocation;
 
-import com.google.inject.Inject;
-import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.population.Leg;
-import org.matsim.contrib.freightcollaboration.run.ScoringFunctionFactoryUsecase;
 import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfigGroup;
 import org.matsim.core.scoring.ScoringFunction;
 import org.matsim.core.utils.collections.Tuple;
@@ -16,6 +13,7 @@ import org.matsim.freight.carriers.controller.FreightActivity;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 class CarrierPSimScorer {
 	Map<Integer, ScoringFunction> scoringFunctions = null;
@@ -30,9 +28,11 @@ class CarrierPSimScorer {
 	CarrierPSimScorer(Map<Integer, Tuple<List<FreightActivity>, List<Leg>>> driverLegsAndActivities, Carrier carrier,
 					  CarrierScoringFunctionFactory carrierScoringFunctionFactory,
 					  FreightCollaborationConfigGroup freightConfig) {
-		this.driverLegsAndActivities = driverLegsAndActivities;
-		this.carrier = carrier;
-		this.carrierScoringFunctionFactory = carrierScoringFunctionFactory;
+		this.driverLegsAndActivities = Map.copyOf(Objects.requireNonNull(
+			driverLegsAndActivities, "driverLegsAndActivities"));
+		this.carrier = Objects.requireNonNull(carrier, "carrier");
+		this.carrierScoringFunctionFactory = Objects.requireNonNull(
+			carrierScoringFunctionFactory, "carrierScoringFunctionFactory");
 		this.freightConfig = freightConfig;
 	}
 
@@ -41,14 +41,15 @@ class CarrierPSimScorer {
 		for(Integer driverId : driverLegsAndActivities.keySet()) {
 			// create scoring function for each driver, only considering cost components
 			// TODO: make this more general if other scoring functions are needed
-			ScoringFunctionFactoryUsecase.CarrierScoringFunctionFactoryUsecase factory =
-				(ScoringFunctionFactoryUsecase.CarrierScoringFunctionFactoryUsecase) carrierScoringFunctionFactory;
+			FreightCollaborationConfigGroup.PsimScoringMode mode =
+				freightConfig == null
+					? FreightCollaborationConfigGroup.PsimScoringMode.BASIC_COST
+					: freightConfig.getPsimScoringMode();
 			ScoringFunction scoringFunction;
-			if (freightConfig != null
-				&& freightConfig.getPsimScoringMode() == FreightCollaborationConfigGroup.PsimScoringMode.BASIC_PLUS_FEES) {
-				scoringFunction = factory.createBasicCostPlusFeesScoringFunction(carrier);
+			if (carrierScoringFunctionFactory instanceof CarrierPsimScoringFunctionFactory psimFactory) {
+				scoringFunction = psimFactory.createPsimScoringFunction(carrier, mode);
 			} else {
-				scoringFunction = factory.createBasicCostScoringFunction(carrier);
+				scoringFunction = carrierScoringFunctionFactory.createScoringFunction(carrier);
 			}
 			scoringFunctions.put(driverId, scoringFunction);
 		}

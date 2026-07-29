@@ -3,13 +3,14 @@ package org.matsim.contrib.freightcollaboration.allocation;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Id;
-import org.matsim.contrib.freightcollaboration.CollaborationTypes;
-import org.matsim.contrib.freightcollaboration.CollaboratorRole;
+import org.matsim.contrib.freightcollaboration.CollaboratorKey;
 import org.matsim.contrib.freightcollaboration.MutableFreightCoalition;
+import org.matsim.contrib.freightcollaboration.utils.AllocationUtils;
 
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 public class AllocationModelProportional implements AllocationModel {
@@ -19,7 +20,10 @@ public class AllocationModelProportional implements AllocationModel {
 	private final double allocationFactor;
 
 	public AllocationModelProportional(CollaborationDataStore collaborationDataStore, double allocationFactor) {
-		this.collaborationDataStore = collaborationDataStore;
+		this.collaborationDataStore = Objects.requireNonNull(collaborationDataStore, "collaborationDataStore");
+		if (!Double.isFinite(allocationFactor) || allocationFactor < 0.0 || allocationFactor > 1.0) {
+			throw new IllegalArgumentException("allocationFactor must be in [0, 1].");
+		}
 		this.allocationFactor = allocationFactor;
 	}
 
@@ -33,7 +37,7 @@ public class AllocationModelProportional implements AllocationModel {
 	}
 
 	private void allocateCostSavings() {
-		Map<Id<?>, Double> finalAllocations = new HashMap<>();
+		Map<CollaboratorKey, Double> finalAllocations = new HashMap<>();
 		Map<MutableFreightCoalition, Map<Set<Id<?>>, Double>> simulatedScores = collaborationDataStore.getSimulatedCoalitionScores();
 		if (simulatedScores == null || simulatedScores.isEmpty()) {
 			logger.warn("No simulated coalition scores available for proportional allocation.");
@@ -43,16 +47,21 @@ public class AllocationModelProportional implements AllocationModel {
 		for (Map.Entry<MutableFreightCoalition, Map<Set<Id<?>>, Double>> entry : simulatedScores.entrySet()) {
 			MutableFreightCoalition coalition = entry.getKey();
 			Map<Set<Id<?>>, Double> coalitionScores = entry.getValue();
-			Id<?> distributorId = extractDistributorId(coalition);
+			CollaboratorKey distributorKey = AllocationUtils.extractSingleDistributor(coalition).getKey();
 
 			Set<Id<?>> allPlayers = extractAllPlayers(coalitionScores);
 			if (allPlayers.isEmpty()) {
 				logger.warn("Coalition {} has no collaborating players, skipping proportional allocation.", coalition);
 				continue;
-			}
+				}
 
-			Set<Id<?>> fullCoalition = new HashSet<>(allPlayers);
-			double baseline = coalitionScores.get(Set.of());
+				Set<Id<?>> fullCoalition = new HashSet<>(allPlayers);
+				Double baselineValue = coalitionScores.get(Set.of());
+				if (baselineValue == null) {
+					throw new IllegalArgumentException(
+						"Missing empty-coalition baseline for " + coalition);
+				}
+				double baseline = baselineValue;
 			Double collaborativeScore = coalitionScores.get(fullCoalition);
 			if (collaborativeScore == null) {
 				logger.warn("No collaborative score found for coalition {}, skipping.", coalition);
@@ -83,18 +92,18 @@ public class AllocationModelProportional implements AllocationModel {
 				Id<?> playerId = weightEntry.getKey();
 				double weight = weightEntry.getValue();
 				double allocation = weightSum > 0 ? playerBudget * weight / weightSum : fallbackShare;
-				finalAllocations.put(playerId, finalAllocations.getOrDefault(playerId, 0.0) + allocation);
+				finalAllocations.merge(AllocationUtils.playerKey(coalition, playerId), allocation, Double::sum);
 			}
 
 			double reservedSavings = totalSavings * (1 - allocationFactor);
-			finalAllocations.put(distributorId, finalAllocations.getOrDefault(distributorId, 0.0) + reservedSavings);
+			finalAllocations.merge(distributorKey, reservedSavings, Double::sum);
 		}
 
 		collaborationDataStore.setAllocatedValues(finalAllocations);
 	}
 
 	private void allocateCost() {
-		Map<Id<?>, Double> finalAllocations = new HashMap<>();
+		Map<CollaboratorKey, Double> finalAllocations = new HashMap<>();
 		Map<MutableFreightCoalition, Map<Set<Id<?>>, Double>> simulatedScores = collaborationDataStore.getSimulatedCoalitionScores();
 		if (simulatedScores == null || simulatedScores.isEmpty()) {
 			logger.warn("No simulated coalition scores available for proportional allocation.");
@@ -104,7 +113,7 @@ public class AllocationModelProportional implements AllocationModel {
 		for (Map.Entry<MutableFreightCoalition, Map<Set<Id<?>>, Double>> entry : simulatedScores.entrySet()) {
 			MutableFreightCoalition coalition = entry.getKey();
 			Map<Set<Id<?>>, Double> coalitionScores = entry.getValue();
-			Id<?> distributorId = extractDistributorId(coalition);
+			CollaboratorKey distributorKey = AllocationUtils.extractSingleDistributor(coalition).getKey();
 
 			Set<Id<?>> allPlayers = extractAllPlayers(coalitionScores);
 			if (allPlayers.isEmpty()) {
@@ -134,11 +143,11 @@ public class AllocationModelProportional implements AllocationModel {
 				Id<?> playerId = weightEntry.getKey();
 				double weight = weightEntry.getValue();
 				double allocation = weightSum > 0 ? playerBudget * weight / weightSum : fallbackShare;
-				finalAllocations.put(playerId, finalAllocations.getOrDefault(playerId, 0.0) + allocation);
+				finalAllocations.merge(AllocationUtils.playerKey(coalition, playerId), allocation, Double::sum);
 			}
 
 			double reservedShare = collaborativeCost * (1 - allocationFactor);
-			finalAllocations.put(distributorId, finalAllocations.getOrDefault(distributorId, 0.0) + reservedShare);
+			finalAllocations.merge(distributorKey, reservedShare, Double::sum);
 		}
 
 		collaborationDataStore.setAllocatedValues(finalAllocations);
@@ -152,10 +161,4 @@ public class AllocationModelProportional implements AllocationModel {
 		return allCollaborators;
 	}
 
-	private Id<?> extractDistributorId(MutableFreightCoalition coalition) {
-		if (coalition.getCollaborationType() == CollaborationTypes.CARRIER_RECEIVER) {
-			return coalition.getCollaboratorsSetByRole(CollaboratorRole.CARRIER).iterator().next().getId();
-		}
-		throw new IllegalStateException("Unsupported collaboration type for proportional allocation: " + coalition.getCollaborationType());
-	}
 }

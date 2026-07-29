@@ -30,6 +30,17 @@ public class Iter0BaselineCarrierScoreListener implements IterationEndsListener 
 	@Inject private CollaborationDataStore dataStore;
 	@Inject private FreightCollaborators freightCollaborators;
 
+	public Iter0BaselineCarrierScoreListener() {
+	}
+
+	Iter0BaselineCarrierScoreListener(Scenario scenario, Config config,
+			CollaborationDataStore dataStore, FreightCollaborators freightCollaborators) {
+		this.scenario = scenario;
+		this.config = config;
+		this.dataStore = dataStore;
+		this.freightCollaborators = freightCollaborators;
+	}
+
 	@Override
 	public void notifyIterationEnds(IterationEndsEvent event) {
 		int firstIteration = config.controller().getFirstIteration();

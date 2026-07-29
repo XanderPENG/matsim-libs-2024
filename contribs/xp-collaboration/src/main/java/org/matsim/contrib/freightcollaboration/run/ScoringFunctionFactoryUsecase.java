@@ -10,6 +10,7 @@ import org.matsim.contrib.freightcollaboration.CollaboratorRole;
 import org.matsim.contrib.freightcollaboration.FreightCollaborator;
 import org.matsim.contrib.freightcollaboration.FreightCollaborators;
 import org.matsim.contrib.freightcollaboration.allocation.CollaborationDataStore;
+import org.matsim.contrib.freightcollaboration.allocation.CarrierPsimScoringFunctionFactory;
 import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfigGroup;
 import org.matsim.contrib.freightcollaboration.utils.LinkReceiverAndCarrier;
 import org.matsim.contrib.freightcollaboration.allocation.AllocationValueTypes;
@@ -33,7 +34,7 @@ import java.util.Set;
 
 public class ScoringFunctionFactoryUsecase {
 
-	public static class CarrierScoringFunctionFactoryUsecase implements CarrierScoringFunctionFactory {
+	public static class CarrierScoringFunctionFactoryUsecase implements CarrierPsimScoringFunctionFactory {
 
 		private static final Logger logger = LogManager.getLogger(CarrierScoringFunctionFactoryUsecase.class);
 
@@ -48,6 +49,19 @@ public class ScoringFunctionFactoryUsecase {
 
 		@Inject
 		FreightCollaborationConfigGroup freightConfig;
+
+		public CarrierScoringFunctionFactoryUsecase() {
+		}
+
+		CarrierScoringFunctionFactoryUsecase(Network network,
+				FreightCollaborators freightCollaborators,
+				CollaborationDataStore dataStore,
+				FreightCollaborationConfigGroup freightConfig) {
+			this.network = network;
+			this.freightCollaborators = freightCollaborators;
+			this.dataStore = dataStore;
+			this.freightConfig = freightConfig;
+		}
 
 		@Override
 		public ScoringFunction createScoringFunction(Carrier carrier) {
@@ -78,6 +92,14 @@ public class ScoringFunctionFactoryUsecase {
 			double feePerReceiver = freightConfig != null ? freightConfig.CARRIER_CHARGED_FEE : 200.0;
 			sf.addScoringFunction(new SimpleChargingReceiverScoring(carrier, freightCollaborators, feePerReceiver));
 			return sf;
+		}
+
+		@Override
+		public ScoringFunction createPsimScoringFunction(
+				Carrier carrier, FreightCollaborationConfigGroup.PsimScoringMode mode) {
+			return mode == FreightCollaborationConfigGroup.PsimScoringMode.BASIC_PLUS_FEES
+				? createBasicCostPlusFeesScoringFunction(carrier)
+				: createBasicCostScoringFunction(carrier);
 		}
 
 		public static class SimpleDriversActivityScoring implements SumScoringFunction.BasicScoring, SumScoringFunction.ActivityScoring {
@@ -112,12 +134,16 @@ public class ScoringFunctionFactoryUsecase {
 					TimeWindow tw = ((FreightActivity) act).getTimeWindow();
 					if(actStartTime > tw.getEnd()){
 						double penalty_score = (-1)*(actStartTime - tw.getEnd())*missedTimeWindowPenalty;
-						if (!(penalty_score <= 0.0)) throw new AssertionError("penalty score must be negative");
+						if (penalty_score > 0.0) {
+							throw new IllegalStateException("Time-window penalty must be non-positive.");
+						}
 						score += penalty_score;
 
 					}
 					double actTimeCosts = (act.getEndTime().seconds() -actStartTime)*timeParameter;
-					if (!(actTimeCosts >= 0.0)) throw new AssertionError("actTimeCosts must be positive");
+					if (actTimeCosts < 0.0) {
+						throw new IllegalStateException("Freight activity ends before it starts.");
+					}
 					score += actTimeCosts*(-1);
 				}
 			}
@@ -198,7 +224,7 @@ public class ScoringFunctionFactoryUsecase {
 				Set<FreightCollaborator<Receiver>> linkedReceivers =
 					LinkReceiverAndCarrier.findLinkedReceivers(carrier, freightCollaborators);
 				for (FreightCollaborator<Receiver> receiver : linkedReceivers) {
-					double allocation = dataStore.getAllocatedValues().getOrDefault(receiver.getId(), 0.0);
+					double allocation = dataStore.getAllocatedValue(CollaboratorRole.RECEIVER, receiver.getId());
 					if (allocation > 0) {
 						distributed += allocation;
 					}
@@ -272,6 +298,9 @@ public class ScoringFunctionFactoryUsecase {
 			}
 
 			private double findChangedOrders() {
+				if (receiver.getSelectedPlan() == null) {
+					throw new IllegalStateException("Receiver " + receiver.getId() + " has no selected plan.");
+				}
 				// Get the current receiver plans TW and order service durations
 				List<TimeWindow> thisTWs = receiver.getSelectedPlan().getTimeWindows();
 				List<Double> thisServiceDurations = receiver.getSelectedPlan().getReceiverOrders().stream()
@@ -279,9 +308,12 @@ public class ScoringFunctionFactoryUsecase {
 						.map(Order::getServiceDuration)
 						.toList();
 				// Get the original receiver plans TW and order service durations from the data store
-				ReceiverPlan originalReceiverPlan = (ReceiverPlan) collaborationDataStore.getOriginalPlans()
-					.get(CollaboratorRole.RECEIVER)
-					.get(receiver.getId());
+				var originalPlans = collaborationDataStore.getOriginalPlans().get(CollaboratorRole.RECEIVER);
+				if (originalPlans == null || originalPlans.get(receiver.getId()) == null) {
+					throw new IllegalStateException("Original plan for receiver " + receiver.getId()
+						+ " is missing from the collaboration data store.");
+				}
+				ReceiverPlan originalReceiverPlan = (ReceiverPlan) originalPlans.get(receiver.getId());
 				List<TimeWindow> originalTWs = originalReceiverPlan.getTimeWindows();
 				List<Double> originalServiceDurations = originalReceiverPlan.getReceiverOrders().stream()
 						.flatMap(ro -> ro.getReceiverProductOrders().stream())
@@ -290,7 +322,7 @@ public class ScoringFunctionFactoryUsecase {
 				// Compare the two plans and identify changes
 				// changed TWs
 				double relaxationAmountOfTW = 0.0;
-				for (int i = 0; i < thisTWs.size(); i++) {
+				for (int i = 0; i < Math.min(thisTWs.size(), originalTWs.size()); i++) {
 					if (!thisTWs.get(i).equals(originalTWs.get(i))) {
 						// the time window has been changed, then calculate how much it has changed (UNIT:SECOND)
 						double startRelaxation = originalTWs.get(i).getStart() > thisTWs.get(i).getStart()
@@ -304,7 +336,7 @@ public class ScoringFunctionFactoryUsecase {
 				}
 				// changed service durations
 				double relaxationAmountOfServiceDuration = 0.0;
-				for (int i = 0; i < thisServiceDurations.size(); i++) {
+				for (int i = 0; i < Math.min(thisServiceDurations.size(), originalServiceDurations.size()); i++) {
 					if (!thisServiceDurations.get(i).equals(originalServiceDurations.get(i))) {
 						// the service duration has been changed, then calculate how much it has changed (UNIT:SECOND)
 						double durationRelaxation = thisServiceDurations.get(i) < originalServiceDurations.get(i)?
@@ -339,7 +371,7 @@ public class ScoringFunctionFactoryUsecase {
 				if (collaborationDataStore.getAllocatedValues() == null || collaborationDataStore.getAllocatedValues().isEmpty()) {
 					return 0.0;
 				}
-				return collaborationDataStore.getAllocatedValues().getOrDefault(receiver.getId(), 0.0);
+				return collaborationDataStore.getAllocatedValue(CollaboratorRole.RECEIVER, receiver.getId());
 			}
 		}
 
@@ -388,7 +420,7 @@ public class ScoringFunctionFactoryUsecase {
 		}
 	}
 
-	public static class CarrierScoringFunctionFactoryForLspReceiverCollab implements CarrierScoringFunctionFactory {
+	public static class CarrierScoringFunctionFactoryForLspReceiverCollab implements CarrierPsimScoringFunctionFactory {
 
 		private static final Logger logger = LogManager.getLogger(CarrierScoringFunctionFactoryForLspReceiverCollab.class);
 
@@ -403,6 +435,19 @@ public class ScoringFunctionFactoryUsecase {
 
 		@Inject
 		FreightCollaborationConfigGroup freightConfig;
+
+		public CarrierScoringFunctionFactoryForLspReceiverCollab() {
+		}
+
+		CarrierScoringFunctionFactoryForLspReceiverCollab(Network network,
+				FreightCollaborators freightCollaborators,
+				CollaborationDataStore dataStore,
+				FreightCollaborationConfigGroup freightConfig) {
+			this.network = network;
+			this.freightCollaborators = freightCollaborators;
+			this.dataStore = dataStore;
+			this.freightConfig = freightConfig;
+		}
 
 		@Override
 		public ScoringFunction createScoringFunction(Carrier carrier) {
@@ -422,6 +467,14 @@ public class ScoringFunctionFactoryUsecase {
 			sf.addScoringFunction(new CarrierScoringFunctionFactoryImpl.SimpleVehicleEmploymentScoring(carrier));
 			sf.addScoringFunction(new CarrierScoringFunctionFactoryImpl.SimpleDriversActivityScoring());
 			return sf;
+		}
+
+		@Override
+		public ScoringFunction createPsimScoringFunction(
+				Carrier carrier, FreightCollaborationConfigGroup.PsimScoringMode mode) {
+			return mode == FreightCollaborationConfigGroup.PsimScoringMode.BASIC_PLUS_FEES
+				? createScoringFunction(carrier)
+				: createBasicCostScoringFunction(carrier);
 		}
 
 		public static class SimpleChargingReceiverScoring implements SumScoringFunction.BasicScoring {

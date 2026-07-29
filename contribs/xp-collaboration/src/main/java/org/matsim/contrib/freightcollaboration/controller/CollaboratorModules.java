@@ -5,6 +5,7 @@ import org.matsim.core.controler.AbstractModule;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 public class CollaboratorModules {
 	private final Map<CollaboratorRole, AbstractModule> modules;
@@ -15,7 +16,8 @@ public class CollaboratorModules {
 	}
 
 	public CollaboratorModules(Map<CollaboratorRole, AbstractModule> modules) {
-		this.modules = modules;
+		this.modules = new HashMap<>();
+		Objects.requireNonNull(modules, "modules").forEach(this::addModule);
 	}
 
 	public AbstractModule getModule(CollaboratorRole role) {
@@ -23,8 +25,10 @@ public class CollaboratorModules {
 	}
 
 	public void addModule(CollaboratorRole role, AbstractModule module) {
-		modules.put(role, module);
+		modules.put(Objects.requireNonNull(role, "role"), Objects.requireNonNull(module, "module"));
 	}
 
-
+	public Map<CollaboratorRole, AbstractModule> asMap() {
+		return Map.copyOf(modules);
+	}
 }

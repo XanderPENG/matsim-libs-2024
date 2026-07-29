@@ -21,6 +21,13 @@ public interface FreightCollaborator<T extends HasPlansAndId<?, ?>> {
 	default Id<?> getId() {
 		return getDelegate().getId();
 	}
+
+	/**
+	 * Get the role-aware identity of this collaborator.
+	 */
+	default CollaboratorKey getKey() {
+		return new CollaboratorKey(getRole(), getId());
+	}
 	/**
 	 * Get the role of the collaborator (e.g., "Carrier", "LSP", "Receiver").
 	 */
