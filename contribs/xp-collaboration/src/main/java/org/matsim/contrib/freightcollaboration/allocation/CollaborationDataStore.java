@@ -30,6 +30,8 @@ public class CollaborationDataStore {
 	private volatile Map<Id<Carrier>, Carrier> LspReceiverCopiedNonDistrCarriers;
 	private volatile Map<Id<Carrier>, Double> iter0CarrierBaselineFeeFree;
 	private volatile Map<Id<Carrier>, Double> iter0CarrierBaselineFeeIncluded;
+	private final Map<MutableFreightCoalition, Double> appliedAllocationFactors = new ConcurrentHashMap<>();
+	private final Map<CollaboratorKey, Double> distributorPlayerTransfers = new ConcurrentHashMap<>();
 
 	public CollaborationDataStore(Map<CollaboratorRole, Map<Id<?>, ? extends BasicPlan>> originalPlans) {
 		this.originalPlans = copyOriginalPlans(originalPlans);
@@ -76,10 +78,38 @@ public class CollaborationDataStore {
 		return values == null ? 0.0 : values.getOrDefault(new CollaboratorKey(role, id), 0.0);
 	}
 
+	public void recordAppliedAllocationFactor(MutableFreightCoalition coalition, double factor) {
+		if (!Double.isFinite(factor) || factor < 0.0 || factor > 1.0) {
+			throw new IllegalArgumentException("Applied allocation factor must be in [0,1].");
+		}
+		appliedAllocationFactors.put(coalition, factor);
+	}
+
+	public Map<MutableFreightCoalition, Double> getAppliedAllocationFactors() {
+		return Map.copyOf(appliedAllocationFactors);
+	}
+
+	public void recordDistributorPlayerTransfer(CollaboratorKey distributor, double signedTransfer) {
+		if (!Double.isFinite(signedTransfer)) {
+			throw new IllegalArgumentException("Distributor transfer must be finite.");
+		}
+		distributorPlayerTransfers.merge(distributor, signedTransfer, Double::sum);
+	}
+
+	public Map<CollaboratorKey, Double> getDistributorPlayerTransfers() {
+		return Map.copyOf(distributorPlayerTransfers);
+	}
+
+	public double getDistributorPlayerTransfer(CollaboratorRole role, Id<?> id) {
+		return distributorPlayerTransfers.getOrDefault(new CollaboratorKey(role, id), 0.0);
+	}
+
 	// Reset the entire data store (only used at the beginning of a new simulation)
 	public void reset(){
 		resetSimulatedCoalitionScores();
 		allocatedValues = null;
+		appliedAllocationFactors.clear();
+		distributorPlayerTransfers.clear();
 	}
 
 	public Scenario getScenario() {

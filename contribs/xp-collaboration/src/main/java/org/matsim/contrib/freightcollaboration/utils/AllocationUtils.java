@@ -50,6 +50,26 @@ public class AllocationUtils {
 		}
 	}
 
+	public static AllocationModel createAllocationModel(AllocationModels allocationModelType,
+			CollaborationDataStore collaborationDataStore,
+			Supplier<FreightPseudoSimulator> freightPseudoSimulatorSupplier,
+			List<MutableFreightCoalition> coalitions,
+			CoalitionAllocationFactorResolver allocationFactorResolver,
+			ExecutorService executor,
+			int parallelism) {
+		Objects.requireNonNull(allocationFactorResolver, "allocationFactorResolver");
+		return switch (allocationModelType) {
+			case PROPORTIONAL -> new AllocationModelProportional(collaborationDataStore,
+				allocationFactorResolver);
+			case SHAPLEY -> new AllocationModelShapleyValue(collaborationDataStore,
+				allocationFactorResolver);
+			case MARGINAL -> new AllocationModelMarginalContribution(collaborationDataStore,
+				allocationFactorResolver);
+			case APPROX_SHAPLEY -> new AllocationModelApproxShapleyValue(collaborationDataStore,
+				freightPseudoSimulatorSupplier, coalitions, allocationFactorResolver, executor, parallelism);
+		};
+	}
+
 	public static Map<Set<Id<?>>, Double> generateSubsets(Map<Id<?>, ?> coalitionMembers) {
 		return generateSubsets(coalitionMembers, DEFAULT_MAX_EXACT_SHAPLEY_PLAYERS);
 	}

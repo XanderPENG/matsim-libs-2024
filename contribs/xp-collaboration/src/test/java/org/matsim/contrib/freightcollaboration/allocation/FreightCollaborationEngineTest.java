@@ -7,9 +7,12 @@ import org.matsim.contrib.freightcollaboration.FreightCollaborationTestFixtures;
 import org.matsim.contrib.freightcollaboration.FreightCollaborators;
 import org.matsim.contrib.freightcollaboration.MutableFreightCoalition;
 import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfigGroup;
+import org.matsim.contrib.freightcollaboration.config.MutableAllocationFactorConfigGroup;
+import org.matsim.contrib.freightcollaboration.strategy.CarrierAllocationFactor;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
 import org.matsim.core.scenario.ScenarioUtils;
+import org.matsim.freight.carriers.Carrier;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -98,6 +101,70 @@ class FreightCollaborationEngineTest {
 			() -> assertThrows(NullPointerException.class,
 				() -> FreightCollaborationEngine.buildSubCoalitionsForMarginal(null))
 		);
+	}
+
+	@Test
+	void optInModuleMakesEngineUseTheSelectedCarrierPlanFactor() {
+		Fixture fixture = fixture(AllocationModels.SHAPLEY);
+		MutableAllocationFactorConfigGroup mutableConfig = new MutableAllocationFactorConfigGroup();
+		fixture.config.addModule(mutableConfig);
+		Carrier carrier = (Carrier) fixture.coalition.getCollaboratorsSetByRole(
+			org.matsim.contrib.freightcollaboration.CollaboratorRole.CARRIER)
+			.iterator().next().getDelegate();
+		CarrierAllocationFactor.set(carrier.getSelectedPlan(), 0.3, mutableConfig);
+		FreightPseudoSimulator simulator = new FreightPseudoSimulator((distributors, players, subset) ->
+			10.0 + 5.0 * subset.size());
+		FreightCollaborationEngine engine = new FreightCollaborationEngine(
+			fixture.config, fixture.scenario, fixture.collaborators, fixture.store,
+			List.of(fixture.coalition), null, null, () -> simulator,
+			ignored -> Executors.newSingleThreadExecutor());
+
+		engine.runCollaboration();
+
+		assertEquals(0.3, fixture.store.getAppliedAllocationFactors().get(fixture.coalition));
+		assertEquals(3.0, fixture.store.getDistributorPlayerTransfer(
+			org.matsim.contrib.freightcollaboration.CollaboratorRole.CARRIER, carrier.getId()), 1e-12);
+	}
+
+	@Test
+	void mutableEngineRejectsCostModeBeforePseudoSimulation() {
+		Fixture fixture = fixture(AllocationModels.SHAPLEY);
+		fixture.config.addModule(new MutableAllocationFactorConfigGroup());
+		FreightCollaborationConfigGroup freightConfig = (FreightCollaborationConfigGroup) fixture.config
+			.getModules().get(FreightCollaborationConfigGroup.GROUP_NAME);
+		freightConfig.setAllocationStrategyString(AllocationValueTypes.COST.name());
+		AtomicInteger evaluations = new AtomicInteger();
+		FreightCollaborationEngine engine = new FreightCollaborationEngine(
+			fixture.config, fixture.scenario, fixture.collaborators, fixture.store,
+			List.of(fixture.coalition), null, null,
+			() -> new FreightPseudoSimulator((distributors, players, subset) -> {
+				evaluations.incrementAndGet();
+				return 0.0;
+			}), ignored -> Executors.newSingleThreadExecutor());
+
+		RuntimeException failure = assertThrows(RuntimeException.class, engine::runCollaboration);
+		assertInstanceOf(IllegalArgumentException.class, failure.getCause());
+		assertEquals(0, evaluations.get());
+	}
+
+	@Test
+	void mutableEngineRejectsMultipleCarrierDistributorsBeforePseudoSimulation() {
+		Fixture fixture = fixture(AllocationModels.SHAPLEY);
+		fixture.config.addModule(new MutableAllocationFactorConfigGroup());
+		fixture.coalition.addCollaborator(FreightCollaborationTestFixtures.carrierCollaborator("other-carrier"));
+		AtomicInteger evaluations = new AtomicInteger();
+		FreightCollaborationEngine engine = new FreightCollaborationEngine(
+			fixture.config, fixture.scenario, fixture.collaborators, fixture.store,
+			List.of(fixture.coalition), null, null,
+			() -> new FreightPseudoSimulator((distributors, players, subset) -> {
+				evaluations.incrementAndGet();
+				return 0.0;
+			}), ignored -> Executors.newSingleThreadExecutor());
+
+		RuntimeException failure = assertThrows(RuntimeException.class, engine::runCollaboration);
+		assertInstanceOf(IllegalStateException.class, failure.getCause());
+		assertTrue(failure.getCause().getMessage().contains("exactly one distributor"));
+		assertEquals(0, evaluations.get());
 	}
 
 	private static Fixture fixture(AllocationModels model) {

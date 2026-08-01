@@ -16,14 +16,24 @@ public class AllocationModelShapleyValue implements AllocationModel {
 	CollaborationDataStore collaborationDataStore;
 
 	private static final Logger logger = LogManager.getLogger(AllocationModelShapleyValue.class);
-	private final double allocationFactor;
+	private final CoalitionAllocationFactorResolver allocationFactorResolver;
+	private final boolean recordMutableState;
 
 	public AllocationModelShapleyValue(CollaborationDataStore collaborationDataStore, double allocationFactor) {
+		this(collaborationDataStore, constantFactor(allocationFactor), false);
+	}
+
+	public AllocationModelShapleyValue(CollaborationDataStore collaborationDataStore,
+			CoalitionAllocationFactorResolver allocationFactorResolver) {
+		this(collaborationDataStore, allocationFactorResolver, true);
+	}
+
+	private AllocationModelShapleyValue(CollaborationDataStore collaborationDataStore,
+			CoalitionAllocationFactorResolver allocationFactorResolver, boolean recordMutableState) {
 		this.collaborationDataStore = Objects.requireNonNull(collaborationDataStore, "collaborationDataStore");
-		if (!Double.isFinite(allocationFactor) || allocationFactor < 0.0 || allocationFactor > 1.0) {
-			throw new IllegalArgumentException("allocationFactor must be in [0, 1].");
-		}
-		this.allocationFactor = allocationFactor;
+		this.allocationFactorResolver = Objects.requireNonNull(allocationFactorResolver,
+			"allocationFactorResolver");
+		this.recordMutableState = recordMutableState;
 	}
 
 	@Override
@@ -44,6 +54,7 @@ public class AllocationModelShapleyValue implements AllocationModel {
 		// For-loop over all mutable coalitions
 		for (Map.Entry<MutableFreightCoalition, Map<Set<Id<?>>, Double>> entry : simulatedScores.entrySet()) {
 			MutableFreightCoalition coalition = entry.getKey();
+			double allocationFactor = resolveFactor(coalition);
 			// in this map key: subcoalition, but without the distributor ID (carrier) but only the players
 			Map<Set<Id<?>>, Double> coalitionScores = entry.getValue();
 
@@ -67,13 +78,17 @@ public class AllocationModelShapleyValue implements AllocationModel {
 			double reservedCostSavings = totalShapleyValue * (1 - allocationFactor);
 
 			// record the allocations
+			double playerTransfer = 0.0;
 			for (Map.Entry<Id<?>, Double> shapleyEntry : shapleyValues.entrySet()) {
 				CollaboratorKey collaboratorKey = AllocationUtils.playerKey(coalition, shapleyEntry.getKey());
 				double allocation = shapleyEntry.getValue();
-				finalAllocations.merge(collaboratorKey, allocationFactor * allocation, Double::sum);
+				double scaledAllocation = allocationFactor * allocation;
+				playerTransfer += scaledAllocation;
+				finalAllocations.merge(collaboratorKey, scaledAllocation, Double::sum);
 			}
 			// Add the reserved savings to the distributor
 			finalAllocations.merge(distributorKey, reservedCostSavings, Double::sum);
+			recordTransfer(distributorKey, playerTransfer);
 		}
 
 		// Update the allocated values in the data store
@@ -85,6 +100,7 @@ public class AllocationModelShapleyValue implements AllocationModel {
 
 		for (Map.Entry<MutableFreightCoalition, Map<Set<Id<?>>, Double>> entry : requireSimulatedScores().entrySet()) {
 			MutableFreightCoalition coalition = entry.getKey();
+			double allocationFactor = resolveFactor(coalition);
 			Map<Set<Id<?>>, Double> coalitionScores = entry.getValue();
 
 			CollaboratorKey distributorKey = AllocationUtils.extractSingleDistributor(coalition).getKey();
@@ -93,13 +109,17 @@ public class AllocationModelShapleyValue implements AllocationModel {
 			double totalCostShare = shapleyValues.values().stream().mapToDouble(Double::doubleValue).sum();
 			double reservedShare = totalCostShare * (1 - allocationFactor);
 
+			double playerTransfer = 0.0;
 			for (Map.Entry<Id<?>, Double> shapleyEntry : shapleyValues.entrySet()) {
 				CollaboratorKey collaboratorKey = AllocationUtils.playerKey(coalition, shapleyEntry.getKey());
 				double allocation = shapleyEntry.getValue();
-				finalAllocations.merge(collaboratorKey, allocationFactor * allocation, Double::sum);
+				double scaledAllocation = allocationFactor * allocation;
+				playerTransfer += scaledAllocation;
+				finalAllocations.merge(collaboratorKey, scaledAllocation, Double::sum);
 			}
 
 			finalAllocations.merge(distributorKey, reservedShare, Double::sum);
+			recordTransfer(distributorKey, playerTransfer);
 		}
 
 		collaborationDataStore.setAllocatedValues(finalAllocations);
@@ -160,6 +180,27 @@ public class AllocationModelShapleyValue implements AllocationModel {
 			result *= (double) (n - k + i) / i;
 		}
 		return result;
+	}
+
+	private double resolveFactor(MutableFreightCoalition coalition) {
+		double factor = CoalitionAllocationFactorResolver.requireValid(allocationFactorResolver, coalition);
+		if (recordMutableState) {
+			collaborationDataStore.recordAppliedAllocationFactor(coalition, factor);
+		}
+		return factor;
+	}
+
+	private void recordTransfer(CollaboratorKey distributor, double transfer) {
+		if (recordMutableState) {
+			collaborationDataStore.recordDistributorPlayerTransfer(distributor, transfer);
+		}
+	}
+
+	private static CoalitionAllocationFactorResolver constantFactor(double allocationFactor) {
+		if (!Double.isFinite(allocationFactor) || allocationFactor < 0.0 || allocationFactor > 1.0) {
+			throw new IllegalArgumentException("allocationFactor must be in [0, 1].");
+		}
+		return coalition -> allocationFactor;
 	}
 
 	private Map<MutableFreightCoalition, Map<Set<Id<?>>, Double>> requireSimulatedScores() {

@@ -18,14 +18,24 @@ public class AllocationModelMarginalContribution implements AllocationModel {
 	private static final Logger logger = LogManager.getLogger(AllocationModelMarginalContribution.class);
 
 	private final CollaborationDataStore collaborationDataStore;
-	private final double allocationFactor;
+	private final CoalitionAllocationFactorResolver allocationFactorResolver;
+	private final boolean recordMutableState;
 
 	public AllocationModelMarginalContribution(CollaborationDataStore collaborationDataStore, double allocationFactor) {
+		this(collaborationDataStore, constantFactor(allocationFactor), false);
+	}
+
+	public AllocationModelMarginalContribution(CollaborationDataStore collaborationDataStore,
+			CoalitionAllocationFactorResolver allocationFactorResolver) {
+		this(collaborationDataStore, allocationFactorResolver, true);
+	}
+
+	private AllocationModelMarginalContribution(CollaborationDataStore collaborationDataStore,
+			CoalitionAllocationFactorResolver allocationFactorResolver, boolean recordMutableState) {
 		this.collaborationDataStore = Objects.requireNonNull(collaborationDataStore, "collaborationDataStore");
-		if (!Double.isFinite(allocationFactor) || allocationFactor < 0.0 || allocationFactor > 1.0) {
-			throw new IllegalArgumentException("allocationFactor must be in [0, 1].");
-		}
-		this.allocationFactor = allocationFactor;
+		this.allocationFactorResolver = Objects.requireNonNull(allocationFactorResolver,
+			"allocationFactorResolver");
+		this.recordMutableState = recordMutableState;
 	}
 
 	@Override
@@ -47,6 +57,7 @@ public class AllocationModelMarginalContribution implements AllocationModel {
 
 		for (Map.Entry<MutableFreightCoalition, Map<Set<Id<?>>, Double>> entry : simulatedScores.entrySet()) {
 			MutableFreightCoalition coalition = entry.getKey();
+			double allocationFactor = resolveFactor(coalition);
 			Map<Set<Id<?>>, Double> coalitionScores = entry.getValue();
 			CollaboratorKey distributorKey = AllocationUtils.extractSingleDistributor(coalition).getKey();
 			Set<Id<?>> allPlayers = extractAllPlayers(coalitionScores);
@@ -90,15 +101,18 @@ public class AllocationModelMarginalContribution implements AllocationModel {
 			double playerBudget = totalSavings * allocationFactor;
 			double fallbackShare = playerBudget / allPlayers.size();
 
+			double playerTransfer = 0.0;
 			for (Map.Entry<Id<?>, Double> marginalEntry : marginalContributions.entrySet()) {
 				Id<?> playerId = marginalEntry.getKey();
 				double marginal = marginalEntry.getValue();
 				double allocation = marginalSum > 0 ? playerBudget * marginal / marginalSum : fallbackShare;
+				playerTransfer += allocation;
 				finalAllocations.merge(AllocationUtils.playerKey(coalition, playerId), allocation, Double::sum);
 			}
 
 			double reservedSavings = totalSavings * (1 - allocationFactor);
 			finalAllocations.merge(distributorKey, reservedSavings, Double::sum);
+			recordTransfer(distributorKey, playerTransfer);
 		}
 
 		collaborationDataStore.setAllocatedValues(finalAllocations);
@@ -114,6 +128,7 @@ public class AllocationModelMarginalContribution implements AllocationModel {
 
 		for (Map.Entry<MutableFreightCoalition, Map<Set<Id<?>>, Double>> entry : simulatedScores.entrySet()) {
 			MutableFreightCoalition coalition = entry.getKey();
+			double allocationFactor = resolveFactor(coalition);
 			Map<Set<Id<?>>, Double> coalitionScores = entry.getValue();
 			CollaboratorKey distributorKey = AllocationUtils.extractSingleDistributor(coalition).getKey();
 			Set<Id<?>> allPlayers = extractAllPlayers(coalitionScores);
@@ -143,15 +158,18 @@ public class AllocationModelMarginalContribution implements AllocationModel {
 			double playerBudget = fullCost * allocationFactor;
 			double fallbackShare = playerBudget / allPlayers.size();
 
+			double playerTransfer = 0.0;
 			for (Map.Entry<Id<?>, Double> marginalEntry : marginalContributions.entrySet()) {
 				Id<?> playerId = marginalEntry.getKey();
 				double marginal = marginalEntry.getValue();
 				double allocation = marginalSum > 0 ? playerBudget * marginal / marginalSum : fallbackShare;
+				playerTransfer += allocation;
 				finalAllocations.merge(AllocationUtils.playerKey(coalition, playerId), allocation, Double::sum);
 			}
 
 			double reservedShare = fullCost * (1 - allocationFactor);
 			finalAllocations.merge(distributorKey, reservedShare, Double::sum);
+			recordTransfer(distributorKey, playerTransfer);
 		}
 
 		collaborationDataStore.setAllocatedValues(finalAllocations);
@@ -163,6 +181,27 @@ public class AllocationModelMarginalContribution implements AllocationModel {
 			allCollaborators.addAll(coalition);
 		}
 		return allCollaborators;
+	}
+
+	private double resolveFactor(MutableFreightCoalition coalition) {
+		double factor = CoalitionAllocationFactorResolver.requireValid(allocationFactorResolver, coalition);
+		if (recordMutableState) {
+			collaborationDataStore.recordAppliedAllocationFactor(coalition, factor);
+		}
+		return factor;
+	}
+
+	private void recordTransfer(CollaboratorKey distributor, double transfer) {
+		if (recordMutableState) {
+			collaborationDataStore.recordDistributorPlayerTransfer(distributor, transfer);
+		}
+	}
+
+	private static CoalitionAllocationFactorResolver constantFactor(double allocationFactor) {
+		if (!Double.isFinite(allocationFactor) || allocationFactor < 0.0 || allocationFactor > 1.0) {
+			throw new IllegalArgumentException("allocationFactor must be in [0, 1].");
+		}
+		return coalition -> allocationFactor;
 	}
 
 }

@@ -26,7 +26,8 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 	private final CollaborationDataStore collaborationDataStore;
 	private final Supplier<FreightPseudoSimulator> pseudoSimulatorSupplier;
 	private final List<MutableFreightCoalition> coalitions;
-	private final double allocationFactor;
+	private final CoalitionAllocationFactorResolver allocationFactorResolver;
+	private final boolean recordMutableState;
 	private final ExecutorService executor;
 	private final int parallelism;
 	private long randomSeed = 1L;
@@ -44,13 +45,33 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 											 double allocationFactor,
 											 ExecutorService executor,
 											 int parallelism) {
+		this(collaborationDataStore, pseudoSimulatorSupplier, coalitions, constantFactor(allocationFactor),
+			executor, parallelism, false);
+	}
+
+	public AllocationModelApproxShapleyValue(CollaborationDataStore collaborationDataStore,
+			Supplier<FreightPseudoSimulator> pseudoSimulatorSupplier,
+			List<MutableFreightCoalition> coalitions,
+			CoalitionAllocationFactorResolver allocationFactorResolver,
+			ExecutorService executor,
+			int parallelism) {
+		this(collaborationDataStore, pseudoSimulatorSupplier, coalitions, allocationFactorResolver,
+			executor, parallelism, true);
+	}
+
+	private AllocationModelApproxShapleyValue(CollaborationDataStore collaborationDataStore,
+			Supplier<FreightPseudoSimulator> pseudoSimulatorSupplier,
+			List<MutableFreightCoalition> coalitions,
+			CoalitionAllocationFactorResolver allocationFactorResolver,
+			ExecutorService executor,
+			int parallelism,
+			boolean recordMutableState) {
 		this.collaborationDataStore = Objects.requireNonNull(collaborationDataStore, "collaborationDataStore");
 		this.pseudoSimulatorSupplier = Objects.requireNonNull(pseudoSimulatorSupplier, "pseudoSimulatorSupplier");
 		this.coalitions = coalitions == null ? List.of() : List.copyOf(coalitions);
-		if (!Double.isFinite(allocationFactor) || allocationFactor < 0.0 || allocationFactor > 1.0) {
-			throw new IllegalArgumentException("allocationFactor must be in [0, 1].");
-		}
-		this.allocationFactor = allocationFactor;
+		this.allocationFactorResolver = Objects.requireNonNull(allocationFactorResolver,
+			"allocationFactorResolver");
+		this.recordMutableState = recordMutableState;
 		this.executor = executor;
 		this.parallelism = Math.max(1, parallelism);
 	}
@@ -124,12 +145,17 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 			if (result.valueCache() != null && !result.valueCache().isEmpty()) {
 				collaborationDataStore.addSimulatedCoalitionScores(result.coalition(), result.valueCache());
 			}
+			if (recordMutableState) {
+				collaborationDataStore.recordAppliedAllocationFactor(result.coalition(), result.allocationFactor());
+				collaborationDataStore.recordDistributorPlayerTransfer(result.distributor(), result.playerTransfer());
+			}
 		}
 
 		collaborationDataStore.setAllocatedValues(finalAllocations);
 	}
 
 	private CoalitionResult computeCoalitionAllocation(MutableFreightCoalition coalition) {
+		double allocationFactor = CoalitionAllocationFactorResolver.requireValid(allocationFactorResolver, coalition);
 		Map<Id<?>, FreightCollaborator<?>> players = AllocationUtils.extractValidPlayers(coalition);
 		Map<Id<?>, FreightCollaborator<?>> distributors = AllocationUtils.extractValidDistributors(coalition);
 		if (players.isEmpty()) {
@@ -168,13 +194,17 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 		double reservedShare = grandCoalitionValue * (1 - allocationFactor);
 
 		Map<CollaboratorKey, Double> allocations = new HashMap<>();
+		double playerTransfer = 0.0;
 		for (Map.Entry<Id<?>, Double> shapleyEntry : shapleyValues.entrySet()) {
 			double allocation = shapleyEntry.getValue();
-			allocations.put(AllocationUtils.playerKey(coalition, shapleyEntry.getKey()), allocationFactor * allocation);
+			double scaledAllocation = allocationFactor * allocation;
+			playerTransfer += scaledAllocation;
+			allocations.put(AllocationUtils.playerKey(coalition, shapleyEntry.getKey()), scaledAllocation);
 		}
-		allocations.put(AllocationUtils.extractSingleDistributor(coalition).getKey(), reservedShare);
+		CollaboratorKey distributor = AllocationUtils.extractSingleDistributor(coalition).getKey();
+		allocations.put(distributor, reservedShare);
 
-		return new CoalitionResult(coalition, allocations, valueCache);
+		return new CoalitionResult(coalition, allocations, valueCache, allocationFactor, distributor, playerTransfer);
 	}
 
 	private List<CoalitionResult> executeTasks(List<Callable<CoalitionResult>> tasks) {
@@ -493,7 +523,17 @@ public class AllocationModelApproxShapleyValue implements AllocationModel {
 			.collect(java.util.stream.Collectors.joining("|"));
 	}
 
+	private static CoalitionAllocationFactorResolver constantFactor(double allocationFactor) {
+		if (!Double.isFinite(allocationFactor) || allocationFactor < 0.0 || allocationFactor > 1.0) {
+			throw new IllegalArgumentException("allocationFactor must be in [0, 1].");
+		}
+		return coalition -> allocationFactor;
+	}
+
 	private record CoalitionResult(MutableFreightCoalition coalition,
 								   Map<CollaboratorKey, Double> allocations,
-								   Map<Set<Id<?>>, Double> valueCache) { }
+								   Map<Set<Id<?>>, Double> valueCache,
+								   double allocationFactor,
+								   CollaboratorKey distributor,
+								   double playerTransfer) { }
 }

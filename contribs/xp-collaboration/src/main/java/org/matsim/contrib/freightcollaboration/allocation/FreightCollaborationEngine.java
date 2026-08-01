@@ -6,10 +6,14 @@ import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.Scenario;
 import org.matsim.contrib.freightcollaboration.*;
 import org.matsim.contrib.freightcollaboration.config.FreightCollaborationConfigGroup;
+import org.matsim.contrib.freightcollaboration.config.MutableAllocationFactorConfigGroup;
+import org.matsim.contrib.freightcollaboration.strategy.CarrierAllocationFactor;
 import org.matsim.contrib.freightcollaboration.utils.AllocationUtils;
 import org.matsim.core.config.Config;
 import org.matsim.core.router.util.TravelTime;
 import org.matsim.freight.carriers.controller.CarrierScoringFunctionFactory;
+import org.matsim.freight.carriers.Carrier;
+import org.matsim.freight.carriers.CarrierPlan;
 
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
@@ -105,9 +109,7 @@ public class FreightCollaborationEngine {
 		ExecutorService executor = Objects.requireNonNull(executorFactory.apply(parallelism),
 			"executorFactory returned null");
 		try {
-			AllocationModel allocationModel = AllocationUtils.createAllocationModel(fcg.ALLOCATION_MODEL,
-				collaborationDataStore, pseudoSimulatorSupplier, existingCoalitions,
-				fcg.getAllocationFactor(), executor, parallelism);
+			AllocationModel allocationModel = createAllocationModel(fcg, pseudoSimulatorSupplier, executor, parallelism);
 			if (allocationModel instanceof AllocationModelApproxShapleyValue approx) {
 				approx.setApproximationMethod(AllocationModelApproxShapleyValue.ApproximationMethod
 					.valueOf(fcg.getApproxShapleyMethod()));
@@ -172,6 +174,49 @@ public class FreightCollaborationEngine {
 		 * Now, I temporarily choose the second option for simplicity.
 		 */
 
+	}
+
+	private AllocationModel createAllocationModel(FreightCollaborationConfigGroup fcg,
+			Supplier<FreightPseudoSimulator> pseudoSimulatorSupplier,
+			ExecutorService executor, int parallelism) {
+		Object mutableModule = config.getModules().get(MutableAllocationFactorConfigGroup.GROUP_NAME);
+		if (!(mutableModule instanceof MutableAllocationFactorConfigGroup mutableConfig)) {
+			// Deliberately retain the legacy fixed-double path when the opt-in module is absent.
+			return AllocationUtils.createAllocationModel(fcg.ALLOCATION_MODEL,
+				collaborationDataStore, pseudoSimulatorSupplier, existingCoalitions,
+				fcg.getAllocationFactor(), executor, parallelism);
+		}
+
+		mutableConfig.validateGrid();
+		if (fcg.getAllocationStrategy() != AllocationValueTypes.COST_SAVINGS) {
+			throw new IllegalArgumentException(
+				"Mutable carrier allocation factors currently require COST_SAVINGS allocation.");
+		}
+		CoalitionAllocationFactorResolver resolver = coalition -> {
+			if (coalition.getCollaborationType() != CollaborationTypes.CARRIER_RECEIVER) {
+				return fcg.getAllocationFactor();
+			}
+			var distributor = AllocationUtils.extractSingleDistributor(coalition);
+			if (!(distributor.getDelegate() instanceof Carrier carrier)) {
+				throw new IllegalStateException("CARRIER_RECEIVER coalition distributor is not a Carrier: "
+					+ distributor.getId());
+			}
+			CarrierPlan selectedPlan = carrier.getSelectedPlan();
+			if (selectedPlan == null) {
+				throw new IllegalStateException("Carrier has no selected plan: " + carrier.getId());
+			}
+			return CarrierAllocationFactor.require(selectedPlan, mutableConfig);
+		};
+		// Reject malformed carrier coalitions before starting any costly pseudo-simulation work.
+		for (MutableFreightCoalition coalition : existingCoalitions) {
+			if (coalition.getCollaborationType()
+				== CollaborationTypes.CARRIER_RECEIVER) {
+				CoalitionAllocationFactorResolver.requireValid(resolver, coalition);
+			}
+		}
+		return AllocationUtils.createAllocationModel(fcg.ALLOCATION_MODEL,
+			collaborationDataStore, pseudoSimulatorSupplier, existingCoalitions,
+			resolver, executor, parallelism);
 	}
 
 	/**
