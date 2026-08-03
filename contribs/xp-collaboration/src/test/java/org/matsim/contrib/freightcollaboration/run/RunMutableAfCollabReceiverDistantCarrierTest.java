@@ -3,6 +3,9 @@ package org.matsim.contrib.freightcollaboration.run;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.matsim.contrib.freightcollaboration.config.MutableAllocationFactorConfigGroup;
+import org.matsim.core.config.Config;
+import org.matsim.core.config.ConfigUtils;
+import org.matsim.core.controler.Injector;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -10,6 +13,7 @@ import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -24,7 +28,20 @@ class RunMutableAfCollabReceiverDistantCarrierTest {
 		assertEquals(Path.of("output", "mutableAfCollabReceiverDistantCarrier"),
 			options.experimentOptions().outputBaseDir());
 		assertEquals(0.8, config.getInitialAllocationFactor());
-		assertEquals(11, config.getMaxFactorPlans());
+		assertEquals(0.1, config.getMinAllocationFactor());
+		assertEquals(0.05, config.getAllocationFactorStep());
+		assertEquals(19, config.getMaxFactorPlans());
+	}
+
+	@Test
+	void matsimInjectorAutomaticallyBindsTheMutableConfigModule() {
+		MutableAllocationFactorConfigGroup mutableConfig =
+			RunMutableAfCollabReceiverDistantCarrier.defaultOptions().createConfigGroup();
+		Config config = ConfigUtils.createConfig(mutableConfig);
+
+		com.google.inject.Injector injector = Injector.createInjector(config);
+
+		assertSame(mutableConfig, injector.getInstance(MutableAllocationFactorConfigGroup.class));
 	}
 
 	@Test
@@ -61,7 +78,7 @@ class RunMutableAfCollabReceiverDistantCarrierTest {
 			RunMutableAfCollabReceiverDistantCarrier.defaultOptions();
 		assertThrows(IllegalArgumentException.class,
 			() -> RunMutableAfCollabReceiverDistantCarrier.parseOptions(
-				new String[]{"--initial-allocation-factor=0.85"}, defaults));
+				new String[]{"--initial-allocation-factor=0.83"}, defaults));
 		assertThrows(IllegalArgumentException.class,
 			() -> RunMutableAfCollabReceiverDistantCarrier.parseOptions(
 				new String[]{"--allocation-factor-step=NaN"}, defaults));

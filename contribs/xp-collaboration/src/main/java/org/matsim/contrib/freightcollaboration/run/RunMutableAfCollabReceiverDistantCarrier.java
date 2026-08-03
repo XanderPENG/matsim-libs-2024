@@ -299,7 +299,9 @@ public final class RunMutableAfCollabReceiverDistantCarrier {
 		controler.addOverridingModule(new AbstractModule() {
 			@Override
 			public void install() {
-				bind(MutableAllocationFactorConfigGroup.class).toInstance(mutableConfig);
+				// Config groups added via config.addModule(...) are already bound by MATSim's
+				// ExplodedConfigModule. Binding mutableConfig again here makes Guice fail with
+				// BindingAlreadySet during controller injector creation.
 				bind(CarrierStrategyManager.class).toProvider(
 					new MutableAfCarrierStrategyManagerProvider(mutableConfig));
 				bind(CarrierScoringFunctionFactory.class).to(MutableAfCarrierScoringFunctionFactory.class);
@@ -382,9 +384,9 @@ public final class RunMutableAfCollabReceiverDistantCarrier {
 			Usage:
 			  RunMutableAfCollabReceiverDistantCarrier [shared distant-carrier options]
 			    --initial-allocation-factor=0.8
-			    --allocation-factor-min=0.0
+			    --allocation-factor-min=0.1
 			    --allocation-factor-max=1.0
-			    --allocation-factor-step=0.1
+			    --allocation-factor-step=0.05
 			    --allocation-factor-mutation-weight=1.0
 			    --allocation-factor-freeze-fraction=0.9
 

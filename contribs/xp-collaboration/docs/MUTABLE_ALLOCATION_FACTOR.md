@@ -360,7 +360,7 @@ config.setMaxFactorPlans(config.gridPointCount());
 
 所以通过新 run 改 min/max/step 时，不需要单独配置 `MAX_FACTOR_PLANS`。
 
-> **当前源码注意：** 新 run 的 `printUsage()` 仍展示 `min=0.0`、`step=0.1`，与 `defaultOptions()` 当前的 `min=0.1`、`step=0.05` 不一致。为了实验可复现，建议始终显式传入六个 Mutable AF CLI 参数，不依赖帮助文本或隐式默认值。
+新 run 的 `printUsage()`、`defaultOptions()` 和对应测试均使用上述 `min=0.1`、`step=0.05` 默认网格。为了实验可复现，仍建议在正式实验中显式传入六个 Mutable AF CLI 参数。
 
 ### 6.4 网格合法性
 
@@ -1195,9 +1195,6 @@ receiverConfig.setReceiverTriggerCarrierReplanning(false);
 controler.addOverridingModule(new AbstractModule() {
     @Override
     public void install() {
-        bind(MutableAllocationFactorConfigGroup.class)
-            .toInstance(mutableConfig);
-
         bind(CarrierStrategyManager.class)
             .toProvider(new MutableAfCarrierStrategyManagerProvider(mutableConfig));
 
@@ -1216,6 +1213,14 @@ controler.addOverridingModule(new AbstractModule() {
     }
 });
 ```
+
+这里**不要再次**执行：
+
+```java
+bind(MutableAllocationFactorConfigGroup.class).toInstance(mutableConfig);
+```
+
+因为前面的 `config.addModule(mutableConfig)` 已使 MATSim 的 `ExplodedConfigModule` 自动按具体 config-group 类型绑定同一个实例。重复绑定会在 controller 创建 injector 时触发 Guice `BindingAlreadySet`。
 
 #### D. 不要安装会覆盖 factor plan 的 Carrier strategy/listener
 
@@ -1439,16 +1444,21 @@ Mutable config 与 `ALLOCATION_STRATEGY=COST` 同时存在会在 engine 中失�
 
 Preserving listener 无法重建 shipment，会明确失败。
 
-### 16.3 当前源码一致性注意事项
+### 16.3 启动阶段的 selected-plan warning
 
-截至本文对应的工作区状态：
+当前 distant-carrier scenario 创建 Carrier 时尚未运行 jsprit，因此 `CollaborationModule` 在 injector 配置期间尝试复制 Carrier original plan 时可能记录：
 
-1. `MutableAllocationFactorConfigGroup` 类默认网格是 `0.0–1.0 / step 0.1 / 11 plans`；
-2. `RunMutableAfCollabReceiverDistantCarrier.defaultOptions()` 当前默认网格是 `0.1–1.0 / step 0.05 / 19 plans`；
-3. 新 run 的 `printUsage()` 仍显示旧的 `0.0–1.0 / step 0.1`；
-4. `RunMutableAfCollabReceiverDistantCarrierTest.defaultsUseAnIndependentOutputTreeAndExpectedFactorGrid()` 仍断言 `MAX_FACTOR_PLANS == 11`，与当前 run 的 19 个网格点不一致。
+```text
+Copy carrier plan into CollaborationDataStore failed ... selected plan might be null
+```
 
-这不改变 Mutable AF 的架构，但会影响“无参数默认运行”和对应测试。开展正式实验前应统一 run 默认值、help 文本和测试期望。本文的使用示例选择显式传入全部 Mutable AF 参数，以规避默认值歧义。
+这条 warning 本身不是 Guice 启动失败：
+
+- Preserving listener 会在 iteration 0 `BeforeMobsim` 为无 plan Carrier 求解 jsprit 并建立 initial-factor plan；
+- 当前 run 只有 Carrier–Receiver collaboration，PSim 对 non-collaborating players 的 original-plan 恢复使用 Receiver originals；
+- 真正导致 injector 终止的 `BindingAlreadySet` 应通过“不重复绑定 mutable config group”解决。
+
+如果 warning 之后出现与 Carrier original plan 缺失直接相关的新异常，则应另行引入启动前 initial route，而不应把该 warning 与 Guice duplicate binding 混为同一问题。
 
 ---
 
