@@ -10,7 +10,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Retains factor diversity by removing inferior duplicate-factor plans first. */
+/**
+ * Legacy generic plan remover retained for source compatibility.
+ * Mutable-AF runs use the bounded-memory eviction policy in {@code MutableAfLearningStore}.
+ */
+@Deprecated(since = "2025.0", forRemoval = true)
 public final class CarrierAllocationFactorPlanRemovalSelector
 		implements PlanSelector<CarrierPlan, Carrier> {
 

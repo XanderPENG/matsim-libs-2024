@@ -13,7 +13,11 @@ import org.matsim.utils.objectattributes.attributable.AttributesUtils;
 
 import java.util.Objects;
 
-/** A carrier innovation strategy that changes only the offered allocation factor. */
+/**
+ * Legacy per-iteration factor mutation retained for source compatibility.
+ * Mutable-AF runs use the joint learning coordinator instead.
+ */
+@Deprecated(since = "2025.0", forRemoval = true)
 public final class CarrierAllocationFactorPlanStrategy implements GenericPlanStrategy<CarrierPlan, Carrier> {
 
 	private final PlanSelector<CarrierPlan, Carrier> parentSelector;

@@ -30,7 +30,10 @@ class RunMutableAfCollabReceiverDistantCarrierTest {
 		assertEquals(0.8, config.getInitialAllocationFactor());
 		assertEquals(0.1, config.getMinAllocationFactor());
 		assertEquals(0.05, config.getAllocationFactorStep());
-		assertEquals(19, config.getMaxFactorPlans());
+		assertEquals(5, config.getMaxFactorPlans());
+		assertEquals(6, config.getNewFactorMinDwell());
+		assertEquals(3, config.getEvaluationWindow());
+		assertEquals(100, options.lastIteration());
 	}
 
 	@Test
@@ -56,7 +59,19 @@ class RunMutableAfCollabReceiverDistantCarrierTest {
 				"--allocation-factor-max=0.8",
 				"--allocation-factor-step=0.2",
 				"--allocation-factor-mutation-weight=2.5",
-				"--allocation-factor-freeze-fraction=0.75"
+				"--allocation-factor-freeze-fraction=0.75",
+				"--allocation-factor-max-plans=4",
+				"--allocation-factor-new-dwell=8",
+				"--allocation-factor-revisit-dwell=4",
+				"--allocation-factor-stability-window=2",
+				"--allocation-factor-max-dwell=20",
+				"--allocation-factor-evaluation-window=4",
+				"--allocation-factor-stability-relative-tolerance=0.002",
+				"--allocation-factor-min-exploration-probability=0.2",
+				"--allocation-factor-max-exploration-probability=0.7",
+				"--allocation-factor-exploitation-beta=5.0",
+				"--receiver-plans-per-factor=4",
+				"--last-iteration=80"
 			}, RunMutableAfCollabReceiverDistantCarrier.defaultOptions());
 
 		assertEquals(25, parsed.experimentOptions().networkSize());
@@ -70,6 +85,17 @@ class RunMutableAfCollabReceiverDistantCarrierTest {
 		assertEquals(2.5, config.getMutationWeight());
 		assertEquals(0.75, config.getDisableInnovationFraction());
 		assertEquals(4, config.getMaxFactorPlans());
+		assertEquals(8, config.getNewFactorMinDwell());
+		assertEquals(4, config.getRevisitFactorMinDwell());
+		assertEquals(2, config.getStabilityWindow());
+		assertEquals(20, config.getMaxAdaptDwell());
+		assertEquals(4, config.getEvaluationWindow());
+		assertEquals(0.002, config.getStabilityRelativeTolerance());
+		assertEquals(0.2, config.getMinExplorationProbability());
+		assertEquals(0.7, config.getMaxExplorationProbability());
+		assertEquals(5.0, config.getExploitationBeta());
+		assertEquals(4, config.getMaxReceiverPlansPerFactor());
+		assertEquals(80, parsed.lastIteration());
 	}
 
 	@Test

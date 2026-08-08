@@ -31,7 +31,40 @@ public final class MutableAllocationFactorConfigGroup extends ReflectiveConfigGr
 	public double DISABLE_INNOVATION_FRACTION = 0.9;
 
 	@Parameter
-	public int MAX_FACTOR_PLANS = 11;
+	public int MAX_FACTOR_PLANS = 5;
+
+	@Parameter
+	public int NEW_FACTOR_MIN_DWELL = 6;
+
+	@Parameter
+	public int REVISIT_FACTOR_MIN_DWELL = 3;
+
+	@Parameter
+	public int STABILITY_WINDOW = 3;
+
+	@Parameter
+	public int MAX_ADAPT_DWELL = 15;
+
+	@Parameter
+	public int EVALUATION_WINDOW = 3;
+
+	@Parameter
+	public double STABILITY_RELATIVE_TOLERANCE = 1e-3;
+
+	@Parameter
+	public double PARTICIPATION_RELATIVE_TOLERANCE = 1e-6;
+
+	@Parameter
+	public double MIN_EXPLORATION_PROBABILITY = 0.10;
+
+	@Parameter
+	public double MAX_EXPLORATION_PROBABILITY = 0.80;
+
+	@Parameter
+	public double EXPLOITATION_BETA = 4.0;
+
+	@Parameter
+	public int MAX_RECEIVER_PLANS_PER_FACTOR = 5;
 
 	public MutableAllocationFactorConfigGroup() {
 		super(GROUP_NAME);
@@ -108,10 +141,103 @@ public final class MutableAllocationFactorConfigGroup extends ReflectiveConfigGr
 	}
 
 	public void setMaxFactorPlans(int value) {
-		if (value < 1) {
-			throw new IllegalArgumentException("MAX_FACTOR_PLANS must be positive.");
+		if (value < 2) {
+			throw new IllegalArgumentException("MAX_FACTOR_PLANS must be at least 2.");
 		}
 		MAX_FACTOR_PLANS = value;
+	}
+
+	public int getNewFactorMinDwell() {
+		return NEW_FACTOR_MIN_DWELL;
+	}
+
+	public void setNewFactorMinDwell(int value) {
+		NEW_FACTOR_MIN_DWELL = requirePositive(value, "NEW_FACTOR_MIN_DWELL");
+	}
+
+	public int getRevisitFactorMinDwell() {
+		return REVISIT_FACTOR_MIN_DWELL;
+	}
+
+	public void setRevisitFactorMinDwell(int value) {
+		REVISIT_FACTOR_MIN_DWELL = requirePositive(value, "REVISIT_FACTOR_MIN_DWELL");
+	}
+
+	public int getStabilityWindow() {
+		return STABILITY_WINDOW;
+	}
+
+	public void setStabilityWindow(int value) {
+		STABILITY_WINDOW = requirePositive(value, "STABILITY_WINDOW");
+	}
+
+	public int getMaxAdaptDwell() {
+		return MAX_ADAPT_DWELL;
+	}
+
+	public void setMaxAdaptDwell(int value) {
+		MAX_ADAPT_DWELL = requirePositive(value, "MAX_ADAPT_DWELL");
+	}
+
+	public int getEvaluationWindow() {
+		return EVALUATION_WINDOW;
+	}
+
+	public void setEvaluationWindow(int value) {
+		EVALUATION_WINDOW = requirePositive(value, "EVALUATION_WINDOW");
+	}
+
+	public double getStabilityRelativeTolerance() {
+		return STABILITY_RELATIVE_TOLERANCE;
+	}
+
+	public void setStabilityRelativeTolerance(double value) {
+		STABILITY_RELATIVE_TOLERANCE = requireNonNegativeFinite(value,
+			"STABILITY_RELATIVE_TOLERANCE");
+	}
+
+	public double getParticipationRelativeTolerance() {
+		return PARTICIPATION_RELATIVE_TOLERANCE;
+	}
+
+	public void setParticipationRelativeTolerance(double value) {
+		PARTICIPATION_RELATIVE_TOLERANCE = requireNonNegativeFinite(value,
+			"PARTICIPATION_RELATIVE_TOLERANCE");
+	}
+
+	public double getMinExplorationProbability() {
+		return MIN_EXPLORATION_PROBABILITY;
+	}
+
+	public void setMinExplorationProbability(double value) {
+		MIN_EXPLORATION_PROBABILITY = requireProbability(value, "MIN_EXPLORATION_PROBABILITY");
+	}
+
+	public double getMaxExplorationProbability() {
+		return MAX_EXPLORATION_PROBABILITY;
+	}
+
+	public void setMaxExplorationProbability(double value) {
+		MAX_EXPLORATION_PROBABILITY = requireProbability(value, "MAX_EXPLORATION_PROBABILITY");
+	}
+
+	public double getExploitationBeta() {
+		return EXPLOITATION_BETA;
+	}
+
+	public void setExploitationBeta(double value) {
+		if (!Double.isFinite(value) || value <= 0.0) {
+			throw new IllegalArgumentException("EXPLOITATION_BETA must be finite and positive.");
+		}
+		EXPLOITATION_BETA = value;
+	}
+
+	public int getMaxReceiverPlansPerFactor() {
+		return MAX_RECEIVER_PLANS_PER_FACTOR;
+	}
+
+	public void setMaxReceiverPlansPerFactor(int value) {
+		MAX_RECEIVER_PLANS_PER_FACTOR = requirePositive(value, "MAX_RECEIVER_PLANS_PER_FACTOR");
 	}
 
 	public int gridPointCount() {
@@ -161,10 +287,49 @@ public final class MutableAllocationFactorConfigGroup extends ReflectiveConfigGr
 			|| DISABLE_INNOVATION_FRACTION <= 0.0 || DISABLE_INNOVATION_FRACTION > 1.0) {
 			throw new IllegalArgumentException("DISABLE_INNOVATION_FRACTION must be in (0,1].");
 		}
-		if (MAX_FACTOR_PLANS < gridPoints) {
-			throw new IllegalArgumentException("MAX_FACTOR_PLANS must be at least the number of grid points ("
+		if (MAX_FACTOR_PLANS < 2 || MAX_FACTOR_PLANS > gridPoints) {
+			throw new IllegalArgumentException("MAX_FACTOR_PLANS must be between 2 and the number of grid points ("
 				+ gridPoints + ").");
 		}
+		if (NEW_FACTOR_MIN_DWELL < 1 || REVISIT_FACTOR_MIN_DWELL < 1 || STABILITY_WINDOW < 1
+			|| MAX_ADAPT_DWELL < 1 || EVALUATION_WINDOW < 1) {
+			throw new IllegalArgumentException("Mutable-AF dwell and window parameters must be positive.");
+		}
+		if (NEW_FACTOR_MIN_DWELL < REVISIT_FACTOR_MIN_DWELL) {
+			throw new IllegalArgumentException("NEW_FACTOR_MIN_DWELL must be at least REVISIT_FACTOR_MIN_DWELL.");
+		}
+		if (MAX_ADAPT_DWELL < NEW_FACTOR_MIN_DWELL) {
+			throw new IllegalArgumentException("MAX_ADAPT_DWELL must be at least NEW_FACTOR_MIN_DWELL.");
+		}
+		requireNonNegativeFinite(STABILITY_RELATIVE_TOLERANCE, "STABILITY_RELATIVE_TOLERANCE");
+		requireNonNegativeFinite(PARTICIPATION_RELATIVE_TOLERANCE, "PARTICIPATION_RELATIVE_TOLERANCE");
+		requireProbability(MIN_EXPLORATION_PROBABILITY, "MIN_EXPLORATION_PROBABILITY");
+		requireProbability(MAX_EXPLORATION_PROBABILITY, "MAX_EXPLORATION_PROBABILITY");
+		if (MIN_EXPLORATION_PROBABILITY > MAX_EXPLORATION_PROBABILITY) {
+			throw new IllegalArgumentException("MIN_EXPLORATION_PROBABILITY must not exceed MAX_EXPLORATION_PROBABILITY.");
+		}
+		if (!Double.isFinite(EXPLOITATION_BETA) || EXPLOITATION_BETA <= 0.0) {
+			throw new IllegalArgumentException("EXPLOITATION_BETA must be finite and positive.");
+		}
+		if (MAX_RECEIVER_PLANS_PER_FACTOR < 1) {
+			throw new IllegalArgumentException("MAX_RECEIVER_PLANS_PER_FACTOR must be positive.");
+		}
+	}
+
+	public int finalizationIteration(int firstIteration, int lastIteration) {
+		validateGrid();
+		if (lastIteration <= firstIteration) {
+			throw new IllegalArgumentException("Mutable allocation-factor learning needs lastIteration > firstIteration.");
+		}
+		int finalization = firstIteration + (int) Math.round(
+			(lastIteration - firstIteration) * DISABLE_INNOVATION_FRACTION);
+		int firstEvaluationComplete = firstIteration + 1 + NEW_FACTOR_MIN_DWELL + EVALUATION_WINDOW;
+		if (finalization < firstEvaluationComplete) {
+			throw new IllegalArgumentException("Mutable allocation-factor run is too short: finalization iteration "
+				+ finalization + " occurs before a first factor can finish dwell and evaluation at iteration "
+				+ firstEvaluationComplete + ".");
+		}
+		return finalization;
 	}
 
 	@Override
@@ -189,5 +354,26 @@ public final class MutableAllocationFactorConfigGroup extends ReflectiveConfigGr
 
 	private static double canonicalize(double value) {
 		return Math.rint(value * 1_000_000_000_000L) / 1_000_000_000_000L;
+	}
+
+	private static int requirePositive(int value, String name) {
+		if (value < 1) {
+			throw new IllegalArgumentException(name + " must be positive.");
+		}
+		return value;
+	}
+
+	private static double requireNonNegativeFinite(double value, String name) {
+		if (!Double.isFinite(value) || value < 0.0) {
+			throw new IllegalArgumentException(name + " must be finite and non-negative.");
+		}
+		return value;
+	}
+
+	private static double requireProbability(double value, String name) {
+		if (!Double.isFinite(value) || value < 0.0 || value > 1.0) {
+			throw new IllegalArgumentException(name + " must be in [0,1].");
+		}
+		return value;
 	}
 }

@@ -133,13 +133,15 @@ class CarrierAllocationFactorStrategyTest {
 	}
 
 	@Test
-	void providerStartsAfterBaselineAndFreezesToBestSelectionAtNinetyPercent() {
+	void providerIsAKeepSelectedNoOpBecauseTheCoordinatorOwnsFactorChanges() {
 		Config config = ConfigUtils.createConfig();
 		config.controller().setFirstIteration(0);
 		config.controller().setLastIteration(10);
 		Scenario scenario = ScenarioUtils.createScenario(config);
 		Carrier carrier = carrierWithPlan("carrier");
 		carrier.getSelectedPlan().setScore(1.0);
+		CarrierAllocationFactor.set(carrier.getSelectedPlan(), 0.8,
+			new MutableAllocationFactorConfigGroup());
 		CarriersUtils.addOrGetCarriers(scenario).addCarrier(carrier);
 		MutableAllocationFactorConfigGroup mutableConfig = new MutableAllocationFactorConfigGroup();
 		MutableAfCarrierStrategyManagerProvider provider =
@@ -152,13 +154,14 @@ class CarrierAllocationFactorStrategyTest {
 		}).injectMembers(provider);
 
 		CarrierStrategyManager manager = provider.get();
-		assertEquals(List.of(1.0, 0.0, 0.0), manager.getWeights(null));
+		assertEquals(List.of(1.0), manager.getWeights(null));
 		assertEquals(0.8, CarrierAllocationFactor.require(carrier.getSelectedPlan()));
 
 		manager.run(List.<Carrier>of(), 1, null);
-		assertEquals(List.of(1.0, 1.0, 0.0), manager.getWeights(null));
+		assertEquals(List.of(1.0), manager.getWeights(null));
 		manager.run(List.<Carrier>of(), 9, null);
-		assertEquals(List.of(0.0, 0.0, 1.0), manager.getWeights(null));
+		assertEquals(List.of(1.0), manager.getWeights(null));
+		assertEquals(1, carrier.getPlans().size());
 	}
 
 	@Test
@@ -178,7 +181,7 @@ class CarrierAllocationFactorStrategyTest {
 		}).injectMembers(provider);
 
 		CarrierStrategyManager manager = provider.get();
-		assertEquals(List.of(1.0, 0.0, 0.0), manager.getWeights(null));
+		assertEquals(List.of(1.0), manager.getWeights(null));
 		assertEquals(0, carrier.getPlans().size());
 	}
 

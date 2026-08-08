@@ -3,8 +3,15 @@ package org.matsim.contrib.freightcollaboration.listener;
 import org.junit.jupiter.api.Test;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.Scenario;
+import org.matsim.api.core.v01.population.BasicPlan;
+import org.matsim.contrib.freightcollaboration.CollaboratorRole;
 import org.matsim.contrib.freightcollaboration.FreightCollaborationTestFixtures;
+import org.matsim.contrib.freightcollaboration.allocation.CollaborationDataStore;
 import org.matsim.contrib.freightcollaboration.config.MutableAllocationFactorConfigGroup;
+import org.matsim.contrib.freightcollaboration.controller.FreightCoalitionManager;
+import org.matsim.contrib.freightcollaboration.learning.MutableAfLearningStore;
+import org.matsim.contrib.freightcollaboration.learning.MutableAfPhase;
+import org.matsim.contrib.freightcollaboration.learning.MutableAfPlanUtils;
 import org.matsim.contrib.freightcollaboration.strategy.CarrierAllocationFactor;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
@@ -21,6 +28,7 @@ import org.matsim.freight.carriers.ScheduledTour;
 import org.matsim.freight.carriers.TimeWindow;
 import org.matsim.freight.carriers.Tour;
 import org.matsim.freight.receiver.Receiver;
+import org.matsim.freight.receiver.ReceiverConfigGroup;
 import org.matsim.freight.receiver.ReceiverPlan;
 import org.matsim.freight.receiver.ReceiverUtils;
 import org.matsim.freight.receiver.Receivers;
@@ -28,12 +36,14 @@ import org.matsim.freight.receiver.collaboration.CollaborationUtils;
 
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PreservingReceiverTriggeredCarrierReplanningListenerTest {
 
@@ -69,15 +79,12 @@ class PreservingReceiverTriggeredCarrierReplanningListenerTest {
 		assertEquals(2, fixture.carrier.getPlans().size());
 		assertSame(fixture.selected, fixture.carrier.getSelectedPlan());
 		assertEquals(11.0, fixture.first.getScore());
-		assertEquals(22.0, fixture.selected.getScore());
+		assertNull(fixture.selected.getScore());
 		assertEquals(0.3, CarrierAllocationFactor.require(fixture.first));
 		assertEquals(0.7, CarrierAllocationFactor.require(fixture.selected));
-		ScheduledTour firstTour = fixture.first.getScheduledTours().iterator().next();
+		assertEquals(0, fixture.first.getScheduledTours().size());
 		ScheduledTour selectedTour = fixture.selected.getScheduledTours().iterator().next();
-		assertEquals("solved-1", firstTour.getTour().getId().toString());
 		assertEquals("solved-1", selectedTour.getTour().getId().toString());
-		assertNotSame(firstTour, selectedTour);
-		assertNotSame(firstTour.getTour(), selectedTour.getTour());
 	}
 
 	@Test
@@ -106,12 +113,87 @@ class PreservingReceiverTriggeredCarrierReplanningListenerTest {
 		assertEquals(0.3, CarrierAllocationFactor.require(fixture.first));
 		assertEquals(0.7, CarrierAllocationFactor.require(fixture.selected));
 		assertEquals(11.0, fixture.first.getScore());
-		assertEquals(22.0, fixture.selected.getScore());
+		assertNull(fixture.selected.getScore());
 		CarrierShipment changedShipment = fixture.carrier.getShipments().values().iterator().next();
 		assertEquals(10 * 3600.0, changedShipment.getDeliveryStartingTimeWindow().getStart());
-		for (CarrierPlan plan : fixture.carrier.getPlans()) {
-			assertEquals("solved-2", plan.getScheduledTours().iterator().next().getTour().getId().toString());
-		}
+		assertEquals(0, fixture.first.getScheduledTours().size());
+		assertEquals("solved-2",
+			fixture.selected.getScheduledTours().iterator().next().getTour().getId().toString());
+	}
+
+	@Test
+	void unchangedReceiverProfileReusesTheActiveRoute() {
+		Fixture fixture = fixture();
+		AtomicInteger solves = new AtomicInteger();
+		PreservingReceiverTriggeredCarrierReplanningListener listener =
+			new PreservingReceiverTriggeredCarrierReplanningListener(fixture.scenario, fixture.mutableConfig,
+				(carrier, scenario) -> solvedPlan(carrier, solves.incrementAndGet()));
+
+		listener.notifyBeforeMobsim(new BeforeMobsimEvent(null, 0, false));
+		ScheduledTour firstExecution = fixture.selected.getScheduledTours().iterator().next();
+		listener.notifyBeforeMobsim(new BeforeMobsimEvent(null, 1, false));
+
+		assertEquals(1, solves.get());
+		assertEquals("solved-1",
+			fixture.selected.getScheduledTours().iterator().next().getTour().getId().toString());
+		assertSame(firstExecution, fixture.selected.getScheduledTours().iterator().next());
+	}
+
+	@Test
+	void warmStartTrialBypassesTheOrdinaryIntervalAndClearsScoreOnlyBeforeMobsim() {
+		WarmFixture fixture = warmFixture();
+		ReceiverPlan warmStart = fixture.receiver.getSelectedPlan();
+		CarrierPlan dormant = fixture.dormantPlan;
+		assertEquals(MutableAfPhase.WARM_START_TRIAL,
+			fixture.store.snapshot(fixture.carrier.getId()).phase());
+		assertTrue(Double.isFinite(warmStart.getScore()),
+			"the default Receiver replanning listener must still be able to unbox this score");
+		assertTrue(MutableAfPlanUtils.isPendingEvaluation(warmStart));
+
+		AtomicInteger solves = new AtomicInteger();
+		PreservingReceiverTriggeredCarrierReplanningListener listener =
+			new PreservingReceiverTriggeredCarrierReplanningListener(fixture.scenario, fixture.mutableConfig,
+				fixture.store, (carrier, scenario) -> solvedPlan(carrier, solves.incrementAndGet()));
+		listener.notifyBeforeMobsim(new BeforeMobsimEvent(null, 4, false));
+
+		assertNull(warmStart.getScore(), "BeforeMobsim must remove the cross-AF compatibility score");
+		assertTrue(MutableAfPlanUtils.isPendingEvaluation(warmStart));
+		assertEquals(1, solves.get(),
+			"iteration 4 is not normally due at interval 3, but a factor switch must force route handling");
+		assertSame(dormant, fixture.carrier.getPlans().stream()
+			.filter(plan -> CarrierAllocationFactor.require(plan) == 0.5).findFirst().orElseThrow());
+		assertEquals(12.0, dormant.getScore());
+		assertEquals("solved-0", dormant.getScheduledTours().iterator().next().getTour().getId().toString());
+		assertTrue(fixture.store.snapshot(fixture.carrier.getId())
+			.warmStartScoreClearedBeforeMobsim());
+
+		fixture.carrier.getSelectedPlan().setScore(13.0);
+		warmStart.setScore(9.0);
+		fixture.store.observeIterationEnd(4);
+		assertEquals(MutableAfPhase.ADAPT, fixture.store.snapshot(fixture.carrier.getId()).phase());
+		assertEquals(1, fixture.store.snapshot(fixture.carrier.getId()).dwell());
+		assertTrue(!MutableAfPlanUtils.isPendingEvaluation(warmStart));
+	}
+
+	@Test
+	void matchingRouteProfileCanBeReusedWithoutSkippingWarmStartExecution() {
+		WarmFixture fixture = warmFixture();
+		CarrierPlan active = fixture.carrier.getSelectedPlan();
+		String profile = MutableAfPlanUtils.selectedReceiverProfile(fixture.carrier,
+			ReceiverUtils.getReceivers(fixture.scenario).getReceivers().values());
+		active.getAttributes().putAttribute(MutableAfPlanUtils.CARRIER_ROUTE_PROFILE, profile);
+		AtomicInteger solves = new AtomicInteger();
+		PreservingReceiverTriggeredCarrierReplanningListener listener =
+			new PreservingReceiverTriggeredCarrierReplanningListener(fixture.scenario, fixture.mutableConfig,
+				fixture.store, (carrier, scenario) -> solvedPlan(carrier, solves.incrementAndGet()));
+
+		listener.notifyBeforeMobsim(new BeforeMobsimEvent(null, 4, false));
+
+		assertEquals(0, solves.get());
+		assertNull(fixture.receiver.getSelectedPlan().getScore());
+		assertTrue(fixture.store.snapshot(fixture.carrier.getId())
+			.warmStartScoreClearedBeforeMobsim(),
+			"route reuse must not make the trial look as if it was never executed");
 	}
 
 	private static Fixture fixture() {
@@ -141,6 +223,71 @@ class PreservingReceiverTriggeredCarrierReplanningListenerTest {
 		CollaborationUtils.linkReceiverOrdersToCarriers(receivers, CarriersUtils.getCarriers(scenario));
 		CollaborationUtils.createCoalitionWithCarriersAndAddCollaboratingReceivers(scenario);
 		return new Fixture(scenario, mutableConfig, carrier, receiver, first, selected);
+	}
+
+	private static WarmFixture warmFixture() {
+		MutableAllocationFactorConfigGroup mutableConfig = new MutableAllocationFactorConfigGroup();
+		mutableConfig.setMinAllocationFactor(0.5);
+		mutableConfig.setMaxAllocationFactor(0.6);
+		mutableConfig.setAllocationFactorStep(0.1);
+		mutableConfig.setInitialAllocationFactor(0.5);
+		mutableConfig.setMaxFactorPlans(2);
+		mutableConfig.setNewFactorMinDwell(1);
+		mutableConfig.setRevisitFactorMinDwell(1);
+		mutableConfig.setStabilityWindow(1);
+		mutableConfig.setMaxAdaptDwell(2);
+		mutableConfig.setEvaluationWindow(1);
+		Config config = ConfigUtils.createConfig(mutableConfig);
+		config.controller().setFirstIteration(0);
+		config.controller().setLastIteration(100);
+		ConfigUtils.addOrGetModule(config, ReceiverConfigGroup.class).setReceiverReplanningInterval(3);
+		Scenario scenario = ScenarioUtils.createScenario(config);
+		Carrier carrier = carrierWithCapabilities("warm-carrier");
+		CarrierPlan initial = solvedPlan(carrier, 0);
+		initial.setScore(10.0);
+		CarrierAllocationFactor.set(initial, 0.5, mutableConfig);
+		carrier.addPlan(initial);
+		carrier.setSelectedPlan(initial);
+		CarriersUtils.addOrGetCarriers(scenario).addCarrier(carrier);
+
+		Receiver receiver = FreightCollaborationTestFixtures.receiverWithOrder(
+			"warm-receiver", carrier.getId().toString(), 600.0,
+			TimeWindow.newInstance(8 * 3600.0, 10 * 3600.0));
+		firstProductOrder(receiver.getSelectedPlan()).setDailyOrderQuantity(1.0);
+		receiver.getSelectedPlan().setScore(5.0);
+		receiver.getAttributes().putAttribute(CollaborationUtils.ATTR_COLLABORATION_STATUS, true);
+		Receivers receivers = ReceiverUtils.createReceivers();
+		receivers.addReceiver(receiver);
+		ReceiverUtils.setReceivers(receivers, scenario);
+		CollaborationUtils.linkReceiverOrdersToCarriers(receivers, CarriersUtils.getCarriers(scenario));
+		CollaborationUtils.createCoalitionWithCarriersAndAddCollaboratingReceivers(scenario);
+		initial.getAttributes().putAttribute(MutableAfPlanUtils.CARRIER_ROUTE_PROFILE,
+			MutableAfPlanUtils.selectedReceiverProfile(carrier, receivers.getReceivers().values()));
+
+		ReceiverPlan original = MutableAfPlanUtils.copyReceiverPlan(receiver.getSelectedPlan(), false);
+		Map<Id<?>, ? extends BasicPlan> originals = Map.of(receiver.getId(), original);
+		CollaborationDataStore dataStore = new CollaborationDataStore(
+			Map.of(CollaboratorRole.RECEIVER, originals));
+		FreightCoalitionManager coalitionManager = new FreightCoalitionManager(scenario);
+		coalitionManager.setMutableFreightCoalitions(List.of());
+		MutableAfLearningStore store = new MutableAfLearningStore(
+			scenario, mutableConfig, dataStore, coalitionManager);
+		store.initialize();
+		store.observeIterationEnd(0);
+		store.prepareReplanning(1);
+		carrier.getSelectedPlan().setScore(12.0);
+		receiver.getSelectedPlan().setScore(8.0);
+		store.observeIterationEnd(1);
+		store.prepareReplanning(2);
+		carrier.getSelectedPlan().setScore(12.0);
+		receiver.getSelectedPlan().setScore(8.0);
+		store.observeIterationEnd(2);
+		store.prepareReplanning(3);
+		carrier.getSelectedPlan().setScore(12.0);
+		receiver.getSelectedPlan().setScore(8.0);
+		store.observeIterationEnd(3);
+		store.prepareReplanning(4);
+		return new WarmFixture(scenario, mutableConfig, carrier, receiver, initial, store);
 	}
 
 	private static Carrier carrierWithCapabilities(String id) {
@@ -173,5 +320,9 @@ class PreservingReceiverTriggeredCarrierReplanningListenerTest {
 
 	private record Fixture(Scenario scenario, MutableAllocationFactorConfigGroup mutableConfig,
 			Carrier carrier, Receiver receiver, CarrierPlan first, CarrierPlan selected) {
+	}
+
+	private record WarmFixture(Scenario scenario, MutableAllocationFactorConfigGroup mutableConfig,
+			Carrier carrier, Receiver receiver, CarrierPlan dormantPlan, MutableAfLearningStore store) {
 	}
 }
