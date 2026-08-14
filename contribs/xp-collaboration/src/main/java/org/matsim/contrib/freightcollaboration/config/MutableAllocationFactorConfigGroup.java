@@ -1,7 +1,12 @@
 package org.matsim.contrib.freightcollaboration.config;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.matsim.contrib.freightcollaboration.learning.MutableAfSelectionPolicy;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ReflectiveConfigGroup;
+
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Opt-in configuration for allowing carriers to learn their allocation factor.
@@ -11,6 +16,7 @@ public final class MutableAllocationFactorConfigGroup extends ReflectiveConfigGr
 
 	public static final String GROUP_NAME = "mutableAllocationFactor";
 	private static final double EPSILON = 1e-9;
+	private static final Logger LOG = LogManager.getLogger(MutableAllocationFactorConfigGroup.class);
 
 	@Parameter
 	public double INITIAL_ALLOCATION_FACTOR = 0.8;
@@ -40,16 +46,24 @@ public final class MutableAllocationFactorConfigGroup extends ReflectiveConfigGr
 	public int REVISIT_FACTOR_MIN_DWELL = 3;
 
 	@Parameter
-	public int STABILITY_WINDOW = 3;
+	public int STABILITY_WINDOW = 5;
 
 	@Parameter
 	public int MAX_ADAPT_DWELL = 15;
 
+	/** @deprecated Repeated EVALUATE was removed; retained only for old XML/CLI compatibility. */
+	@Deprecated
 	@Parameter
 	public int EVALUATION_WINDOW = 3;
 
 	@Parameter
-	public double STABILITY_RELATIVE_TOLERANCE = 1e-3;
+	public double STABILITY_RELATIVE_TOLERANCE = 0.05;
+
+	@Parameter
+	public double COALITION_STABILITY_THRESHOLD = 0.70;
+
+	@Parameter
+	public String SOLUTION_SELECTION_POLICY = MutableAfSelectionPolicy.CARRIER_BEST.configValue();
 
 	@Parameter
 	public double PARTICIPATION_RELATIVE_TOLERANCE = 1e-6;
@@ -65,6 +79,8 @@ public final class MutableAllocationFactorConfigGroup extends ReflectiveConfigGr
 
 	@Parameter
 	public int MAX_RECEIVER_PLANS_PER_FACTOR = 5;
+
+	private static final AtomicBoolean EVALUATION_WINDOW_WARNING_LOGGED = new AtomicBoolean();
 
 	public MutableAllocationFactorConfigGroup() {
 		super(GROUP_NAME);
@@ -179,12 +195,17 @@ public final class MutableAllocationFactorConfigGroup extends ReflectiveConfigGr
 		MAX_ADAPT_DWELL = requirePositive(value, "MAX_ADAPT_DWELL");
 	}
 
+	/** @deprecated Accepted for compatibility but ignored by the learning state machine. */
+	@Deprecated
 	public int getEvaluationWindow() {
 		return EVALUATION_WINDOW;
 	}
 
+	/** @deprecated Accepted for compatibility but ignored by the learning state machine. */
+	@Deprecated
 	public void setEvaluationWindow(int value) {
 		EVALUATION_WINDOW = requirePositive(value, "EVALUATION_WINDOW");
+		warnEvaluationWindowIgnored();
 	}
 
 	public double getStabilityRelativeTolerance() {
@@ -194,6 +215,27 @@ public final class MutableAllocationFactorConfigGroup extends ReflectiveConfigGr
 	public void setStabilityRelativeTolerance(double value) {
 		STABILITY_RELATIVE_TOLERANCE = requireNonNegativeFinite(value,
 			"STABILITY_RELATIVE_TOLERANCE");
+	}
+
+	public double getCoalitionStabilityThreshold() {
+		return COALITION_STABILITY_THRESHOLD;
+	}
+
+	public void setCoalitionStabilityThreshold(double value) {
+		COALITION_STABILITY_THRESHOLD = requireProbability(value,
+			"COALITION_STABILITY_THRESHOLD");
+	}
+
+	public MutableAfSelectionPolicy getSolutionSelectionPolicy() {
+		return MutableAfSelectionPolicy.parse(SOLUTION_SELECTION_POLICY);
+	}
+
+	public void setSolutionSelectionPolicy(MutableAfSelectionPolicy value) {
+		SOLUTION_SELECTION_POLICY = java.util.Objects.requireNonNull(value, "value").configValue();
+	}
+
+	public void setSolutionSelectionPolicy(String value) {
+		SOLUTION_SELECTION_POLICY = MutableAfSelectionPolicy.parse(value).configValue();
 	}
 
 	public double getParticipationRelativeTolerance() {
@@ -295,13 +337,14 @@ public final class MutableAllocationFactorConfigGroup extends ReflectiveConfigGr
 			|| MAX_ADAPT_DWELL < 1 || EVALUATION_WINDOW < 1) {
 			throw new IllegalArgumentException("Mutable-AF dwell and window parameters must be positive.");
 		}
-		if (NEW_FACTOR_MIN_DWELL < REVISIT_FACTOR_MIN_DWELL) {
-			throw new IllegalArgumentException("NEW_FACTOR_MIN_DWELL must be at least REVISIT_FACTOR_MIN_DWELL.");
-		}
-		if (MAX_ADAPT_DWELL < NEW_FACTOR_MIN_DWELL) {
-			throw new IllegalArgumentException("MAX_ADAPT_DWELL must be at least NEW_FACTOR_MIN_DWELL.");
+		if (MAX_ADAPT_DWELL < NEW_FACTOR_MIN_DWELL
+			|| MAX_ADAPT_DWELL < REVISIT_FACTOR_MIN_DWELL
+			|| MAX_ADAPT_DWELL < STABILITY_WINDOW) {
+			throw new IllegalArgumentException("MAX_ADAPT_DWELL must be at least STABILITY_WINDOW, "
+				+ "NEW_FACTOR_MIN_DWELL, and REVISIT_FACTOR_MIN_DWELL.");
 		}
 		requireNonNegativeFinite(STABILITY_RELATIVE_TOLERANCE, "STABILITY_RELATIVE_TOLERANCE");
+		requireProbability(COALITION_STABILITY_THRESHOLD, "COALITION_STABILITY_THRESHOLD");
 		requireNonNegativeFinite(PARTICIPATION_RELATIVE_TOLERANCE, "PARTICIPATION_RELATIVE_TOLERANCE");
 		requireProbability(MIN_EXPLORATION_PROBABILITY, "MIN_EXPLORATION_PROBABILITY");
 		requireProbability(MAX_EXPLORATION_PROBABILITY, "MAX_EXPLORATION_PROBABILITY");
@@ -314,6 +357,8 @@ public final class MutableAllocationFactorConfigGroup extends ReflectiveConfigGr
 		if (MAX_RECEIVER_PLANS_PER_FACTOR < 1) {
 			throw new IllegalArgumentException("MAX_RECEIVER_PLANS_PER_FACTOR must be positive.");
 		}
+		getSolutionSelectionPolicy();
+		warnEvaluationWindowIgnored();
 	}
 
 	public int finalizationIteration(int firstIteration, int lastIteration) {
@@ -323,11 +368,11 @@ public final class MutableAllocationFactorConfigGroup extends ReflectiveConfigGr
 		}
 		int finalization = firstIteration + (int) Math.round(
 			(lastIteration - firstIteration) * DISABLE_INNOVATION_FRACTION);
-		int firstEvaluationComplete = firstIteration + 1 + NEW_FACTOR_MIN_DWELL + EVALUATION_WINDOW;
-		if (finalization < firstEvaluationComplete) {
+		int firstVisitComplete = firstIteration + 1 + Math.max(NEW_FACTOR_MIN_DWELL, STABILITY_WINDOW);
+		if (finalization < firstVisitComplete) {
 			throw new IllegalArgumentException("Mutable allocation-factor run is too short: finalization iteration "
-				+ finalization + " occurs before a first factor can finish dwell and evaluation at iteration "
-				+ firstEvaluationComplete + ".");
+				+ finalization + " occurs before a first factor can fill its dwell/stability window at iteration "
+				+ firstVisitComplete + ".");
 		}
 		return finalization;
 	}
@@ -375,5 +420,12 @@ public final class MutableAllocationFactorConfigGroup extends ReflectiveConfigGr
 			throw new IllegalArgumentException(name + " must be in [0,1].");
 		}
 		return value;
+	}
+
+	private void warnEvaluationWindowIgnored() {
+		if (EVALUATION_WINDOW_WARNING_LOGGED.compareAndSet(false, true)) {
+			LOG.warn("EVALUATION_WINDOW is deprecated and ignored: mutable-AF checkpoints now use "
+				+ "real ADAPT iteration snapshots without repeated EVALUATE rounds.");
+		}
 	}
 }

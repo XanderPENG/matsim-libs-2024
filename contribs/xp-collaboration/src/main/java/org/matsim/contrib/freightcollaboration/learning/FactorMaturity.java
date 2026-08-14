@@ -4,7 +4,8 @@ package org.matsim.contrib.freightcollaboration.learning;
 public enum FactorMaturity {
 	UNVISITED,
 	ADAPTING,
-	MATURE_STABLE,
-	VALIDATED_UNSTABLE,
+	STABLE_CHECKPOINT,
+	FALLBACK_CHECKPOINT,
+	NO_FEASIBLE_CHECKPOINT,
 	EVICTED
 }

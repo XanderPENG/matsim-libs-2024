@@ -5,6 +5,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
 import org.matsim.core.config.ConfigWriter;
+import org.matsim.contrib.freightcollaboration.learning.MutableAfSelectionPolicy;
 
 import java.nio.file.Path;
 
@@ -30,10 +31,13 @@ class MutableAllocationFactorConfigGroupTest {
 			() -> assertEquals(5, config.getMaxFactorPlans()),
 			() -> assertEquals(6, config.getNewFactorMinDwell()),
 			() -> assertEquals(3, config.getRevisitFactorMinDwell()),
-			() -> assertEquals(3, config.getStabilityWindow()),
+			() -> assertEquals(5, config.getStabilityWindow()),
 			() -> assertEquals(15, config.getMaxAdaptDwell()),
 			() -> assertEquals(3, config.getEvaluationWindow()),
-			() -> assertEquals(1e-3, config.getStabilityRelativeTolerance()),
+			() -> assertEquals(0.05, config.getStabilityRelativeTolerance()),
+			() -> assertEquals(0.70, config.getCoalitionStabilityThreshold()),
+			() -> assertEquals(MutableAfSelectionPolicy.CARRIER_BEST,
+				config.getSolutionSelectionPolicy()),
 			() -> assertEquals(1e-6, config.getParticipationRelativeTolerance()),
 			() -> assertEquals(0.10, config.getMinExplorationProbability()),
 			() -> assertEquals(0.80, config.getMaxExplorationProbability()),
@@ -60,16 +64,19 @@ class MutableAllocationFactorConfigGroupTest {
 		assertInvalid(config -> config.DISABLE_INNOVATION_FRACTION = 1.1);
 		assertInvalid(config -> config.MAX_FACTOR_PLANS = 1);
 		assertInvalid(config -> config.MAX_FACTOR_PLANS = 12);
-		assertInvalid(config -> config.NEW_FACTOR_MIN_DWELL = 2);
-		assertInvalid(config -> config.REVISIT_FACTOR_MIN_DWELL = 7);
+		assertInvalid(config -> config.NEW_FACTOR_MIN_DWELL = 16);
+		assertInvalid(config -> config.REVISIT_FACTOR_MIN_DWELL = 16);
 		assertInvalid(config -> config.MAX_ADAPT_DWELL = 5);
 		assertInvalid(config -> config.STABILITY_WINDOW = 0);
 		assertInvalid(config -> config.EVALUATION_WINDOW = 0);
 		assertInvalid(config -> config.STABILITY_RELATIVE_TOLERANCE = -1.0);
+		assertInvalid(config -> config.COALITION_STABILITY_THRESHOLD = -0.1);
+		assertInvalid(config -> config.COALITION_STABILITY_THRESHOLD = 1.1);
 		assertInvalid(config -> config.MIN_EXPLORATION_PROBABILITY = 0.9);
 		assertInvalid(config -> config.MAX_EXPLORATION_PROBABILITY = 0.05);
 		assertInvalid(config -> config.EXPLOITATION_BETA = 0.0);
 		assertInvalid(config -> config.MAX_RECEIVER_PLANS_PER_FACTOR = 0);
+		assertInvalid(config -> config.SOLUTION_SELECTION_POLICY = "unknown");
 		assertInvalid(config -> config.INITIAL_ALLOCATION_FACTOR = Double.NaN);
 
 		MutableAllocationFactorConfigGroup config = new MutableAllocationFactorConfigGroup();
@@ -118,6 +125,10 @@ class MutableAllocationFactorConfigGroupTest {
 			() -> assertThrows(IllegalArgumentException.class,
 				() -> config.setStabilityRelativeTolerance(-1.0)),
 			() -> assertThrows(IllegalArgumentException.class,
+				() -> config.setCoalitionStabilityThreshold(-0.1)),
+			() -> assertThrows(IllegalArgumentException.class,
+				() -> config.setCoalitionStabilityThreshold(1.1)),
+			() -> assertThrows(IllegalArgumentException.class,
 				() -> config.setMinExplorationProbability(1.1)),
 			() -> assertThrows(IllegalArgumentException.class,
 				() -> config.setExploitationBeta(0.0)),
@@ -145,6 +156,8 @@ class MutableAllocationFactorConfigGroupTest {
 		config.MAX_ADAPT_DWELL = 20;
 		config.EVALUATION_WINDOW = 4;
 		config.STABILITY_RELATIVE_TOLERANCE = 2e-3;
+		config.COALITION_STABILITY_THRESHOLD = 0.75;
+		config.SOLUTION_SELECTION_POLICY = "best-surplus";
 		config.PARTICIPATION_RELATIVE_TOLERANCE = 2e-6;
 		config.MIN_EXPLORATION_PROBABILITY = 0.2;
 		config.MAX_EXPLORATION_PROBABILITY = 0.7;
@@ -173,6 +186,9 @@ class MutableAllocationFactorConfigGroupTest {
 			() -> assertEquals(20, loaded.getMaxAdaptDwell()),
 			() -> assertEquals(4, loaded.getEvaluationWindow()),
 			() -> assertEquals(2e-3, loaded.getStabilityRelativeTolerance()),
+			() -> assertEquals(0.75, loaded.getCoalitionStabilityThreshold()),
+			() -> assertEquals(MutableAfSelectionPolicy.BEST_SURPLUS,
+				loaded.getSolutionSelectionPolicy()),
 			() -> assertEquals(2e-6, loaded.getParticipationRelativeTolerance()),
 			() -> assertEquals(0.2, loaded.getMinExplorationProbability()),
 			() -> assertEquals(0.7, loaded.getMaxExplorationProbability()),
@@ -186,7 +202,8 @@ class MutableAllocationFactorConfigGroupTest {
 		MutableAllocationFactorConfigGroup config = new MutableAllocationFactorConfigGroup();
 
 		assertEquals(90, config.finalizationIteration(0, 100));
-		assertThrows(IllegalArgumentException.class, () -> config.finalizationIteration(0, 10));
+		assertEquals(9, config.finalizationIteration(0, 10));
+		assertThrows(IllegalArgumentException.class, () -> config.finalizationIteration(0, 6));
 		assertThrows(IllegalArgumentException.class, () -> config.finalizationIteration(10, 10));
 	}
 

@@ -73,10 +73,8 @@ public final class MutableAfReceiverStrategyManager implements ReceiverStrategyM
 			MutableAfPhase phase = learningStore.phaseForReceiver(receiver.getId());
 			switch (phase) {
 				case WARM_START_TRIAL -> keepWarmStartSelected(receiver, phase);
-				case EVALUATE, FINAL_VALIDATION ->
-					learningStore.incumbent(receiver).ifPresent(receiver::setSelectedPlan);
 				case ADAPT -> selectOrMutate(receiver);
-				case BASELINE, SWITCH_PENDING -> {
+				case BASELINE, SWITCH_PENDING, FINAL_REVISIT, FINAL_SELECTION -> {
 					// Keep the current plan. Factor/context changes are owned by the coordinator.
 				}
 			}

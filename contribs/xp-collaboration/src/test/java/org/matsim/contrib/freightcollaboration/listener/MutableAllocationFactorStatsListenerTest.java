@@ -75,9 +75,13 @@ class MutableAllocationFactorStatsListenerTest {
 			Map.of(CollaboratorRole.RECEIVER, receiverOriginals));
 		MutableAfLearningStore learningStore = new MutableAfLearningStore(
 			scenario, mutableConfig, collaborationStore, coalitionManager);
+		carrier.getSelectedPlan().getAttributes().putAttribute(
+			MutableAfPlanUtils.CARRIER_ROUTE_PROFILE,
+			MutableAfPlanUtils.selectedReceiverProfile(carrier, List.of(receiver)));
 		OutputDirectoryHierarchy output = new OutputDirectoryHierarchy(config);
 		MutableAllocationFactorStatsListener listener = new MutableAllocationFactorStatsListener(
 			scenario, output, learningStore);
+		assertEquals(-100.0, listener.priority());
 
 		listener.notifyStartup(new StartupEvent(null));
 		learningStore.observeIterationEnd(0);
@@ -89,6 +93,10 @@ class MutableAllocationFactorStatsListenerTest {
 		assertTrue(lines.getFirst().startsWith("iteration,carrierId,phase,activeFactorIndex"));
 		assertTrue(lines.getFirst().contains(
 			"warmStartTrial,warmStartSourceFactorIndex,warmStartScoreClearedBeforeMobsim"));
+		assertTrue(lines.getFirst().contains(
+			"coalitionWindowSimilarity,receiverParticipationWindowFeasible"));
+		assertTrue(lines.getFirst().contains(
+			"finalRevisitCandidateIndices,finalRevisitSelectionCount"));
 		assertTrue(lines.get(1).startsWith("0,\"carrier,quoted\",BASELINE,8,0.8"));
 		assertTrue(lines.get(1).contains(",false,,false,"));
 		assertEquals(1, Files.readAllLines(directory.resolve(

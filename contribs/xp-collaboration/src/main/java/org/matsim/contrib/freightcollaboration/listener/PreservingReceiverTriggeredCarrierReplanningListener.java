@@ -76,13 +76,17 @@ public final class PreservingReceiverTriggeredCarrierReplanningListener implemen
 			throw new IllegalStateException("Receiver replanning interval must be positive.");
 		}
 		boolean warmStartTrial = learningStore != null && learningStore.hasPendingWarmStartTrial();
+		boolean finalExecution = learningStore != null && learningStore.hasPendingFinalExecution();
 		boolean normallyDue = event.getIteration() <= scenario.getConfig().controller().getFirstIteration()
 			|| (event.getIteration() + 1) % interval == 0;
-		if (!normallyDue && !warmStartTrial) {
+		if (!normallyDue && !warmStartTrial && !finalExecution) {
 			return;
 		}
 		if (warmStartTrial) {
 			learningStore.beginWarmStartExecution(event.getIteration());
+		}
+		if (finalExecution) {
+			learningStore.beginFinalExecution(event.getIteration());
 		}
 
 		LOG.info("Rebuilding shipments and updating only active mutable-AF carrier plans.");

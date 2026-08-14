@@ -73,6 +73,7 @@ class MutableAfReceiverStrategyManagerTest {
 		MutableAfLearningStore store = new MutableAfLearningStore(
 			scenario, mutableConfig, dataStore, coalitionManager);
 		store.initialize();
+		setRouteProfile(carrier, receiver);
 		store.observeIterationEnd(0);
 		store.prepareReplanning(1);
 		MutableAfReceiverStrategyManager manager = new MutableAfReceiverStrategyManager(
@@ -145,6 +146,7 @@ class MutableAfReceiverStrategyManagerTest {
 		assertEquals(compatibilityScore, fixture.receiver.getSelectedPlan().getScore());
 
 		fixture.store.beginWarmStartExecution(4);
+		fixture.dataStore.reset(4);
 		fixture.carrier.getSelectedPlan().setScore(13.0);
 		warmStart.setScore(9.0);
 		fixture.store.observeIterationEnd(4);
@@ -188,6 +190,25 @@ class MutableAfReceiverStrategyManagerTest {
 		nonFiniteScore.receiver.getSelectedPlan().setScore(Double.NaN);
 		assertThrows(IllegalStateException.class,
 			() -> nonFiniteScore.manager.run(List.of(nonFiniteScore.receiver), 4, null));
+	}
+
+	@Test
+	void finalRevisitDisablesReceiverMutationAndContextPlanCreation() {
+		Fixture fixture = fixture();
+		advanceToFirstWarmStartTrial(fixture);
+		// Finalization at replanning restores the stable AF=0.5 checkpoint before Receiver strategy.
+		fixture.store.prepareReplanning(90);
+		assertEquals(org.matsim.contrib.freightcollaboration.learning.MutableAfPhase.FINAL_REVISIT,
+			fixture.store.snapshot(fixture.carrier.getId()).phase());
+		ReceiverPlan restored = fixture.receiver.getSelectedPlan();
+		int planCount = fixture.receiver.getPlans().size();
+
+		for (int iteration = 90; iteration <= 95; iteration++) {
+			fixture.manager.run(List.of(fixture.receiver), iteration, null);
+		}
+
+		assertSame(restored, fixture.receiver.getSelectedPlan());
+		assertEquals(planCount, fixture.receiver.getPlans().size());
 	}
 
 	@Test
@@ -261,8 +282,8 @@ class MutableAfReceiverStrategyManagerTest {
 		mutableConfig.setMaxFactorPlans(2);
 		mutableConfig.setNewFactorMinDwell(1);
 		mutableConfig.setRevisitFactorMinDwell(1);
-		mutableConfig.setStabilityWindow(1);
-		mutableConfig.setMaxAdaptDwell(2);
+		mutableConfig.setStabilityWindow(3);
+		mutableConfig.setMaxAdaptDwell(3);
 		mutableConfig.setEvaluationWindow(1);
 		Config config = ConfigUtils.createConfig(mutableConfig);
 		config.controller().setLastIteration(100);
@@ -285,28 +306,39 @@ class MutableAfReceiverStrategyManagerTest {
 		MutableAfLearningStore store = new MutableAfLearningStore(
 			scenario, mutableConfig, dataStore, coalitionManager);
 		store.initialize();
-		return new Fixture(mutableConfig, carrier, receiver, store,
+		setRouteProfile(carrier, receiver);
+		return new Fixture(mutableConfig, carrier, receiver, dataStore, store,
 			new MutableAfReceiverStrategyManager(store, mutableConfig, dataStore));
 	}
 
 	private static void advanceToFirstWarmStartTrial(Fixture fixture) {
 		fixture.store.observeIterationEnd(0);
 		fixture.store.prepareReplanning(1);
+		fixture.dataStore.reset(1);
 		fixture.carrier.getSelectedPlan().setScore(12.0);
 		fixture.receiver.getSelectedPlan().setScore(8.0);
 		fixture.store.observeIterationEnd(1);
 		fixture.store.prepareReplanning(2);
+		fixture.dataStore.reset(2);
 		fixture.carrier.getSelectedPlan().setScore(12.0);
 		fixture.receiver.getSelectedPlan().setScore(8.0);
 		fixture.store.observeIterationEnd(2);
 		fixture.store.prepareReplanning(3);
+		fixture.dataStore.reset(3);
 		fixture.carrier.getSelectedPlan().setScore(12.0);
 		fixture.receiver.getSelectedPlan().setScore(8.0);
 		fixture.store.observeIterationEnd(3);
 		fixture.store.prepareReplanning(4);
 	}
 
+	private static void setRouteProfile(Carrier carrier, Receiver receiver) {
+		carrier.getSelectedPlan().getAttributes().putAttribute(
+			MutableAfPlanUtils.CARRIER_ROUTE_PROFILE,
+			MutableAfPlanUtils.selectedReceiverProfile(carrier, List.of(receiver)));
+	}
+
 	private record Fixture(MutableAllocationFactorConfigGroup config, Carrier carrier, Receiver receiver,
-			MutableAfLearningStore store, MutableAfReceiverStrategyManager manager) {
+			CollaborationDataStore dataStore, MutableAfLearningStore store,
+			MutableAfReceiverStrategyManager manager) {
 	}
 }

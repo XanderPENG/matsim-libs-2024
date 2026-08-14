@@ -32,6 +32,7 @@ public class CollaborationDataStore {
 	private volatile Map<Id<Carrier>, Double> iter0CarrierBaselineFeeIncluded;
 	private final Map<MutableFreightCoalition, Double> appliedAllocationFactors = new ConcurrentHashMap<>();
 	private final Map<CollaboratorKey, Double> distributorPlayerTransfers = new ConcurrentHashMap<>();
+	private volatile int collaborationResultIteration = -1;
 
 	public CollaborationDataStore(Map<CollaboratorRole, Map<Id<?>, ? extends BasicPlan>> originalPlans) {
 		this.originalPlans = copyOriginalPlans(originalPlans);
@@ -104,12 +105,31 @@ public class CollaborationDataStore {
 		return distributorPlayerTransfers.getOrDefault(new CollaboratorKey(role, id), 0.0);
 	}
 
+	/** Iteration whose reset/PSim/allocation cycle produced the currently stored mutable results. */
+	public int getCollaborationResultIteration() {
+		return collaborationResultIteration;
+	}
+
+	public void markCollaborationResultIteration(int iteration) {
+		if (iteration < 0) {
+			throw new IllegalArgumentException("Collaboration result iteration must be non-negative.");
+		}
+		collaborationResultIteration = iteration;
+	}
+
 	// Reset the entire data store (only used at the beginning of a new simulation)
 	public void reset(){
 		resetSimulatedCoalitionScores();
 		allocatedValues = null;
 		appliedAllocationFactors.clear();
 		distributorPlayerTransfers.clear();
+		collaborationResultIteration = -1;
+	}
+
+	/** Starts a new iteration-scoped collaboration result buffer. */
+	public void reset(int iteration) {
+		reset();
+		markCollaborationResultIteration(iteration);
 	}
 
 	public Scenario getScenario() {

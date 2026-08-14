@@ -19,7 +19,7 @@ import java.util.Comparator;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-/** Writes iteration diagnostics and append-only factor-conditioned checkpoints. */
+/** Writes immutable iteration observations and append-only real-execution checkpoints. */
 public final class MutableAllocationFactorStatsListener implements StartupListener, IterationEndsListener {
 
 	public static final String OUTPUT_FILE = "mutable_allocation_factor_stats.csv";
@@ -48,15 +48,23 @@ public final class MutableAllocationFactorStatsListener implements StartupListen
 	public void notifyStartup(StartupEvent event) {
 		learningStore.initialize();
 		writeHeader(OUTPUT_FILE, "iteration,carrierId,phase,activeFactorIndex,activeFactor,visit,dwell,"
-			+ "stableStreak,evaluationCount,decision,routeReplanned,warmStartTrial,"
-			+ "warmStartSourceFactorIndex,warmStartScoreClearedBeforeMobsim,carrierScore,carrierBaseline,"
-			+ "stableMean,stableVariance,incumbentProfileHash,activeCoalition,receiverCount,totalSurplus,"
-			+ "signedTransfer,retainedFactorIndices,evictionEvent,factorStates,finalStatus\n");
-		writeHeader(LOCAL_OPTIMA_FILE, "sequence,eventType,carrierId,factorIndex,factor,visit,maturity,"
-			+ "evaluationStart,evaluationEnd,carrierScoreMean,carrierBaseline,carrierGain,totalSurplus,"
-			+ "participationFeasible,retained,finalSelection\n");
+			+ "decision,routeReplanned,warmStartTrial,warmStartSourceFactorIndex,"
+			+ "warmStartScoreClearedBeforeMobsim,executionIteration,carrierScore,carrierBaseline,"
+			+ "executedProfileHash,carrierRouteProfileHash,stabilityWindowSize,carrierWindowMin,"
+			+ "carrierWindowMax,carrierWindowRelativeRange,receiverWindowMin,receiverWindowMax,"
+			+ "receiverWindowRelativeRange,coalitionWindowSimilarity,"
+			+ "receiverParticipationWindowFeasible,activeCoalition,receiverCount,"
+			+ "totalSurplus,signedTransfer,selectionPolicy,visitBestObjective,checkpointReason,"
+			+ "checkpointSourceIteration,retainedFactorIndices,evictionEvent,factorStates,finalStatus,"
+			+ "finalRevisitCandidateIndices,finalRevisitSelectionCount,checkpointSelectionScore,"
+			+ "finalSelectionExecutedScore\n");
+		writeHeader(LOCAL_OPTIMA_FILE, "sequence,eventType,carrierId,factorIndex,factor,visit,"
+			+ "checkpointReason,maturity,sourceIteration,selectionPolicy,objectiveValue,carrierScore,"
+			+ "carrierBaseline,carrierGain,receiverAggregateScore,receiverAggregateBaseline,"
+			+ "receiverAggregateGain,minimumReceiverGain,totalSurplus,participationFeasible,"
+			+ "stableWindow,retained,finalSelection,finalSelectionTier\n");
 		writeHeader(RECEIVER_OUTCOMES_FILE, "sequence,eventType,carrierId,factor,checkpointIteration,"
-			+ "receiverId,timeWindowStart,timeWindowEnd,collaborating,scoreMean,baseline,gain\n");
+			+ "receiverId,timeWindowStart,timeWindowEnd,collaborating,score,baseline,gain\n");
 	}
 
 	@Override
@@ -79,21 +87,27 @@ public final class MutableAllocationFactorStatsListener implements StartupListen
 			return;
 		}
 		try (BufferedWriter optima = IOUtils.getAppendingBufferedWriter(output.getOutputFilename(LOCAL_OPTIMA_FILE));
-			 BufferedWriter receivers = IOUtils.getAppendingBufferedWriter(
-				 output.getOutputFilename(RECEIVER_OUTCOMES_FILE))) {
+				 BufferedWriter receivers = IOUtils.getAppendingBufferedWriter(
+					 output.getOutputFilename(RECEIVER_OUTCOMES_FILE))) {
 			for (MutableAfLearningStore.CheckpointEvent event : events) {
-				optima.write(event.sequence() + "," + event.eventType() + "," + csv(event.carrierId().toString())
-					+ "," + event.factorIndex() + "," + event.factor() + "," + event.visit() + ","
-					+ event.maturity() + "," + event.evaluationStart() + "," + event.evaluationEnd() + ","
-					+ event.carrierScoreMean() + "," + event.carrierBaseline() + "," + event.carrierGain()
-					+ "," + event.totalSurplus() + "," + event.participationFeasible() + ","
-					+ event.retained() + "," + event.finalSelection() + "\n");
+				optima.write(event.sequence() + "," + event.eventType() + ","
+					+ csv(event.carrierId().toString()) + "," + event.factorIndex() + "," + event.factor()
+					+ "," + event.visit() + "," + nullable(event.checkpointReason()) + ","
+					+ event.maturity() + "," + event.sourceIteration() + ","
+					+ event.selectionPolicy().configValue()
+					+ "," + event.objectiveValue() + "," + event.carrierScore() + ","
+					+ event.carrierBaseline() + "," + event.carrierGain() + ","
+					+ event.receiverAggregateScore() + "," + event.receiverAggregateBaseline() + ","
+					+ event.receiverAggregateGain() + "," + event.minimumReceiverGain() + ","
+					+ event.totalSurplus() + "," + event.participationFeasible() + ","
+					+ event.stableWindow() + "," + event.retained() + "," + event.finalSelection()
+					+ "," + event.finalSelectionTier() + "\n");
 				for (MutableAfLearningStore.ReceiverOutcome outcome : event.receiverOutcomes()) {
 					receivers.write(event.sequence() + "," + event.eventType() + ","
 						+ csv(event.carrierId().toString()) + "," + event.factor() + ","
-						+ event.evaluationEnd() + "," + csv(outcome.receiverId().toString()) + ","
+						+ event.sourceIteration() + "," + csv(outcome.receiverId().toString()) + ","
 						+ outcome.timeWindowStart() + "," + outcome.timeWindowEnd() + ","
-						+ outcome.collaborating() + "," + outcome.scoreMean() + "," + outcome.baseline()
+						+ outcome.collaborating() + "," + outcome.score() + "," + outcome.baseline()
 						+ "," + outcome.gain() + "\n");
 				}
 				lastWrittenCheckpointSequence = event.sequence();
@@ -107,20 +121,29 @@ public final class MutableAllocationFactorStatsListener implements StartupListen
 			MutableAfLearningStore.CarrierSnapshot snapshot) throws IOException {
 		String retained = snapshot.retainedFactorIndices().stream().map(String::valueOf)
 			.collect(Collectors.joining(";"));
+		String finalCandidates = snapshot.finalRevisitCandidateIndices().stream().map(String::valueOf)
+			.collect(Collectors.joining(";"));
 		String factorStates = String.join(";", snapshot.factorStates());
-		String profileHash = Integer.toUnsignedString(snapshot.incumbentProfile().hashCode(), 16);
 		writer.write(iteration + "," + csv(snapshot.carrierId().toString()) + "," + snapshot.phase()
 			+ "," + snapshot.activeFactorIndex() + "," + snapshot.activeFactor() + "," + snapshot.visit()
-			+ "," + snapshot.dwell() + "," + snapshot.stableStreak() + "," + snapshot.evaluationCount()
-			+ "," + snapshot.decision() + "," + snapshot.routeReplanned() + ","
-			+ snapshot.warmStartTrial() + "," + nullable(snapshot.warmStartSourceFactorIndex()) + ","
-			+ snapshot.warmStartScoreClearedBeforeMobsim() + ","
-			+ nullable(snapshot.carrierScore()) + "," + snapshot.baselineCarrierScore() + ","
-			+ snapshot.stableMean() + "," + snapshot.stableVariance() + "," + profileHash + ","
-			+ snapshot.activeCoalition() + "," + snapshot.receiverCount() + "," + snapshot.totalSurplus()
-			+ "," + snapshot.signedTransfer() + "," + csv(retained) + ","
-			+ csv(snapshot.evictionEvent()) + "," + csv(factorStates) + ","
-			+ snapshot.finalStatus() + "\n");
+			+ "," + snapshot.dwell() + "," + snapshot.decision() + "," + snapshot.routeReplanned()
+			+ "," + snapshot.warmStartTrial() + "," + nullable(snapshot.warmStartSourceFactorIndex())
+			+ "," + snapshot.warmStartScoreClearedBeforeMobsim() + ","
+			+ nullable(snapshot.executionIteration()) + "," + nullable(snapshot.carrierScore()) + ","
+			+ snapshot.baselineCarrierScore() + "," + snapshot.executedProfileHash() + ","
+			+ snapshot.carrierRouteProfileHash() + "," + snapshot.stabilityWindowSize() + ","
+			+ snapshot.carrierWindowMin() + "," + snapshot.carrierWindowMax() + ","
+			+ snapshot.carrierWindowRelativeRange() + "," + snapshot.receiverWindowMin() + ","
+			+ snapshot.receiverWindowMax() + "," + snapshot.receiverWindowRelativeRange() + ","
+			+ snapshot.coalitionWindowSimilarity() + ","
+			+ snapshot.receiverParticipationWindowFeasible() + "," + snapshot.activeCoalition() + ","
+			+ snapshot.receiverCount() + "," + snapshot.totalSurplus() + "," + snapshot.signedTransfer()
+			+ "," + snapshot.selectionPolicy().configValue() + "," + snapshot.visitBestObjective() + ","
+			+ nullable(snapshot.checkpointReason()) + "," + nullable(snapshot.checkpointSourceIteration())
+			+ "," + csv(retained) + "," + csv(snapshot.evictionEvent()) + "," + csv(factorStates)
+			+ "," + snapshot.finalStatus() + "," + csv(finalCandidates) + ","
+			+ snapshot.finalRevisitSelectionCount() + "," + snapshot.checkpointSelectionScore() + ","
+			+ snapshot.finalSelectionExecutedScore() + "\n");
 	}
 
 	private void writeHeader(String file, String header) {
@@ -131,11 +154,7 @@ public final class MutableAllocationFactorStatsListener implements StartupListen
 		}
 	}
 
-	private static String nullable(Double value) {
-		return value == null ? "" : value.toString();
-	}
-
-	private static String nullable(Integer value) {
+	private static String nullable(Object value) {
 		return value == null ? "" : value.toString();
 	}
 

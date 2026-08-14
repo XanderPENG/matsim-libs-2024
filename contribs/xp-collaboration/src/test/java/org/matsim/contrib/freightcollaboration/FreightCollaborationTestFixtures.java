@@ -27,7 +27,7 @@ public final class FreightCollaborationTestFixtures {
 
 	public static Carrier carrier(String id) {
 		Carrier carrier = CarriersUtils.createCarrier(Id.create(id, Carrier.class));
-		CarrierPlan plan = new CarrierPlan(carrier, List.of());
+		CarrierPlan plan = new CarrierPlan(carrier, new java.util.ArrayList<>());
 		carrier.addPlan(plan);
 		carrier.setSelectedPlan(plan);
 		return carrier;

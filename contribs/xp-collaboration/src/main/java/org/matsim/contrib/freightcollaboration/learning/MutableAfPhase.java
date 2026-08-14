@@ -4,8 +4,8 @@ package org.matsim.contrib.freightcollaboration.learning;
 public enum MutableAfPhase {
 	BASELINE,
 	ADAPT,
-	EVALUATE,
 	SWITCH_PENDING,
 	WARM_START_TRIAL,
-	FINAL_VALIDATION
+	FINAL_REVISIT,
+	FINAL_SELECTION
 }

@@ -47,6 +47,8 @@ class FreightCollaborationListenerTest {
 		assertEquals(1, context.events.removed);
 		assertEquals(1, context.dataStore.getAllocatedValues().size(),
 			"First-iteration baseline state must not be reset by the skipped collaboration");
+		assertEquals(-1, context.dataStore.getCollaborationResultIteration(),
+			"Iteration 0 has no collaboration result and must not be stamped");
 	}
 
 	@Test
@@ -65,6 +67,8 @@ class FreightCollaborationListenerTest {
 
 			assertEquals(0, runs.get());
 			assertNull(context.dataStore.getAllocatedValues());
+			assertEquals(1, context.dataStore.getCollaborationResultIteration(),
+				"Even an empty-coalition cycle must be stamped as the current iteration");
 			assertEquals(1, context.events.removed);
 		}
 	}
@@ -82,6 +86,7 @@ class FreightCollaborationListenerTest {
 		assertThrows(IllegalStateException.class,
 			() -> context.listener.notifyAfterMobsim(new AfterMobsimEvent(null, 1, false)));
 		assertEquals(1, runs.get());
+		assertEquals(1, context.dataStore.getCollaborationResultIteration());
 		assertEquals(1, context.events.removed);
 
 		context.listener.notifyIterationStarts(new IterationStartsEvent(null, 2, false));

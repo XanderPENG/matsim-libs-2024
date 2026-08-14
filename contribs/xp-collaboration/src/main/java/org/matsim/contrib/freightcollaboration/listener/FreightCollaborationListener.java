@@ -91,7 +91,7 @@ public class FreightCollaborationListener implements IterationStartsListener, Af
 				return;
 			}
 
-			collaborationDataStore.reset();
+			collaborationDataStore.reset(event.getIteration());
 			TravelTime travelTime = current.getLinkTravelTimes();
 			List<MutableFreightCoalition> coalitions = freightCollaborationManager.getMutableFreightCoalitions();
 			if (coalitions == null || coalitions.isEmpty()

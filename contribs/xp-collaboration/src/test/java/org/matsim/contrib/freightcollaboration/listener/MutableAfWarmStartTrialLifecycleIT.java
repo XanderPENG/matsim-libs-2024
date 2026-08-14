@@ -57,6 +57,8 @@ class MutableAfWarmStartTrialLifecycleIT {
 	@Test
 	void firstFactorSwitchExecutesOneFrozenTrialBeforeReceiverAdaptation() {
 		Fixture fixture = fixture();
+		assertEquals(200.0, new MutableAfReplanningCoordinator(fixture.store).priority());
+		assertEquals(100.0, new MutableAfLearningListener(fixture.store).priority());
 		advanceInitialFactorToSwitch(fixture);
 		fixture.store.prepareReplanning(4);
 
@@ -83,10 +85,12 @@ class MutableAfWarmStartTrialLifecycleIT {
 				fixture.store, (carrier, scenario) -> solvedPlan(carrier, solves.incrementAndGet()));
 		routeListener.notifyBeforeMobsim(new BeforeMobsimEvent(null, 4, false));
 		assertNull(warmStart.getScore());
-		assertEquals(1, solves.get());
+		assertEquals(0, solves.get(),
+			"an unchanged Receiver profile may reuse the copied route during the real trial");
 		assertEquals(12.0, fixture.initialPlan.getScore(),
 			"the dormant source-factor plan must remain untouched");
 
+		fixture.dataStore.reset(4);
 		fixture.dataStore.addSimulatedCoalitionScores(fixture.coalition, Map.of(
 			Set.of(), 10.0, Set.of(fixture.receiver.getId()), 20.0));
 		new AllocationModelShapleyValue(fixture.dataStore,
@@ -104,7 +108,7 @@ class MutableAfWarmStartTrialLifecycleIT {
 		assertEquals(9.0, warmStart.getScore());
 		assertEquals(MutableAfPhase.ADAPT, fixture.store.snapshot(fixture.carrier.getId()).phase());
 		assertEquals(1, fixture.store.snapshot(fixture.carrier.getId()).dwell());
-		assertEquals(0, fixture.store.snapshot(fixture.carrier.getId()).stableStreak());
+		assertEquals(1, fixture.store.snapshot(fixture.carrier.getId()).stabilityWindowSize());
 		assertEquals("WARM_START_TRIAL_COMPLETE",
 			fixture.store.snapshot(fixture.carrier.getId()).decision());
 	}
@@ -122,8 +126,8 @@ class MutableAfWarmStartTrialLifecycleIT {
 		mutableConfig.setMaxFactorPlans(2);
 		mutableConfig.setNewFactorMinDwell(1);
 		mutableConfig.setRevisitFactorMinDwell(1);
-		mutableConfig.setStabilityWindow(1);
-		mutableConfig.setMaxAdaptDwell(2);
+		mutableConfig.setStabilityWindow(3);
+		mutableConfig.setMaxAdaptDwell(3);
 		mutableConfig.setEvaluationWindow(1);
 		Config config = ConfigUtils.createConfig(freightConfig, mutableConfig);
 		config.controller().setFirstIteration(0);
@@ -172,14 +176,28 @@ class MutableAfWarmStartTrialLifecycleIT {
 	private static void advanceInitialFactorToSwitch(Fixture fixture) {
 		fixture.store.observeIterationEnd(0);
 		fixture.store.prepareReplanning(1);
+		fixture.dataStore.reset(1);
 		setScores(fixture, 12.0, 8.0);
+		recordCollaborationResult(fixture, 10.0);
 		fixture.store.observeIterationEnd(1);
 		fixture.store.prepareReplanning(2);
+		fixture.dataStore.reset(2);
 		setScores(fixture, 12.0, 8.0);
+		recordCollaborationResult(fixture, 10.0);
 		fixture.store.observeIterationEnd(2);
 		fixture.store.prepareReplanning(3);
+		fixture.dataStore.reset(3);
 		setScores(fixture, 12.0, 8.0);
+		recordCollaborationResult(fixture, 10.0);
 		fixture.store.observeIterationEnd(3);
+	}
+
+	private static void recordCollaborationResult(Fixture fixture, double surplus) {
+		fixture.dataStore.addSimulatedCoalitionScores(fixture.coalition, Map.of(
+			Set.of(), 10.0,
+			Set.of(fixture.receiver.getId()), 10.0 + surplus));
+		fixture.dataStore.recordAppliedAllocationFactor(fixture.coalition,
+			CarrierAllocationFactor.require(fixture.carrier.getSelectedPlan(), fixture.mutableConfig));
 	}
 
 	private static void setScores(Fixture fixture, double carrierScore, double receiverScore) {

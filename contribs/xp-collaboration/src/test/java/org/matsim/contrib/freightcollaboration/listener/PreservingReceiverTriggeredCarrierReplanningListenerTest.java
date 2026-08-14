@@ -55,6 +55,7 @@ class PreservingReceiverTriggeredCarrierReplanningListenerTest {
 		PreservingReceiverTriggeredCarrierReplanningListener listener =
 			new PreservingReceiverTriggeredCarrierReplanningListener(fixture.scenario, fixture.mutableConfig,
 				(carrier, scenario) -> solvedPlan(carrier, solves.incrementAndGet()));
+		assertEquals(100.0, listener.priority());
 
 		listener.notifyBeforeMobsim(new BeforeMobsimEvent(null, 0, false));
 
@@ -158,8 +159,8 @@ class PreservingReceiverTriggeredCarrierReplanningListenerTest {
 
 		assertNull(warmStart.getScore(), "BeforeMobsim must remove the cross-AF compatibility score");
 		assertTrue(MutableAfPlanUtils.isPendingEvaluation(warmStart));
-		assertEquals(1, solves.get(),
-			"iteration 4 is not normally due at interval 3, but a factor switch must force route handling");
+		assertEquals(0, solves.get(),
+			"iteration 4 bypasses the interval, but the unchanged profile may reuse the copied route");
 		assertSame(dormant, fixture.carrier.getPlans().stream()
 			.filter(plan -> CarrierAllocationFactor.require(plan) == 0.5).findFirst().orElseThrow());
 		assertEquals(12.0, dormant.getScore());
@@ -167,6 +168,7 @@ class PreservingReceiverTriggeredCarrierReplanningListenerTest {
 		assertTrue(fixture.store.snapshot(fixture.carrier.getId())
 			.warmStartScoreClearedBeforeMobsim());
 
+		fixture.dataStore.reset(4);
 		fixture.carrier.getSelectedPlan().setScore(13.0);
 		warmStart.setScore(9.0);
 		fixture.store.observeIterationEnd(4);
@@ -194,6 +196,32 @@ class PreservingReceiverTriggeredCarrierReplanningListenerTest {
 		assertTrue(fixture.store.snapshot(fixture.carrier.getId())
 			.warmStartScoreClearedBeforeMobsim(),
 			"route reuse must not make the trial look as if it was never executed");
+	}
+
+	@Test
+	void finalRevisitForcesExecutionOutsideTheOrdinaryIntervalAndClearsHistoricalScores() {
+		WarmFixture fixture = warmFixture();
+		fixture.store.prepareReplanning(90);
+		assertEquals(MutableAfPhase.FINAL_REVISIT,
+			fixture.store.snapshot(fixture.carrier.getId()).phase());
+		assertTrue(Double.isFinite(fixture.carrier.getSelectedPlan().getScore()));
+		assertTrue(Double.isFinite(fixture.receiver.getSelectedPlan().getScore()));
+		AtomicInteger solves = new AtomicInteger();
+		PreservingReceiverTriggeredCarrierReplanningListener listener =
+			new PreservingReceiverTriggeredCarrierReplanningListener(fixture.scenario,
+				fixture.mutableConfig, fixture.store,
+				(carrier, scenario) -> solvedPlan(carrier, solves.incrementAndGet()));
+
+		listener.notifyBeforeMobsim(new BeforeMobsimEvent(null, 90, false));
+
+		assertNull(fixture.carrier.getSelectedPlan().getScore());
+		assertNull(fixture.receiver.getSelectedPlan().getScore());
+		assertEquals(0, solves.get(), "the exact checkpoint route can be reused");
+		fixture.dataStore.reset(90);
+		fixture.carrier.getSelectedPlan().setScore(13.0);
+		fixture.receiver.getSelectedPlan().setScore(9.0);
+		fixture.store.observeIterationEnd(90);
+		assertEquals(13.0, fixture.store.snapshot(fixture.carrier.getId()).carrierScore());
 	}
 
 	private static Fixture fixture() {
@@ -234,8 +262,8 @@ class PreservingReceiverTriggeredCarrierReplanningListenerTest {
 		mutableConfig.setMaxFactorPlans(2);
 		mutableConfig.setNewFactorMinDwell(1);
 		mutableConfig.setRevisitFactorMinDwell(1);
-		mutableConfig.setStabilityWindow(1);
-		mutableConfig.setMaxAdaptDwell(2);
+		mutableConfig.setStabilityWindow(3);
+		mutableConfig.setMaxAdaptDwell(3);
 		mutableConfig.setEvaluationWindow(1);
 		Config config = ConfigUtils.createConfig(mutableConfig);
 		config.controller().setFirstIteration(0);
@@ -275,19 +303,22 @@ class PreservingReceiverTriggeredCarrierReplanningListenerTest {
 		store.initialize();
 		store.observeIterationEnd(0);
 		store.prepareReplanning(1);
+		dataStore.reset(1);
 		carrier.getSelectedPlan().setScore(12.0);
 		receiver.getSelectedPlan().setScore(8.0);
 		store.observeIterationEnd(1);
 		store.prepareReplanning(2);
+		dataStore.reset(2);
 		carrier.getSelectedPlan().setScore(12.0);
 		receiver.getSelectedPlan().setScore(8.0);
 		store.observeIterationEnd(2);
 		store.prepareReplanning(3);
+		dataStore.reset(3);
 		carrier.getSelectedPlan().setScore(12.0);
 		receiver.getSelectedPlan().setScore(8.0);
 		store.observeIterationEnd(3);
 		store.prepareReplanning(4);
-		return new WarmFixture(scenario, mutableConfig, carrier, receiver, initial, store);
+		return new WarmFixture(scenario, mutableConfig, carrier, receiver, initial, dataStore, store);
 	}
 
 	private static Carrier carrierWithCapabilities(String id) {
@@ -323,6 +354,7 @@ class PreservingReceiverTriggeredCarrierReplanningListenerTest {
 	}
 
 	private record WarmFixture(Scenario scenario, MutableAllocationFactorConfigGroup mutableConfig,
-			Carrier carrier, Receiver receiver, CarrierPlan dormantPlan, MutableAfLearningStore store) {
+			Carrier carrier, Receiver receiver, CarrierPlan dormantPlan,
+			CollaborationDataStore dataStore, MutableAfLearningStore store) {
 	}
 }

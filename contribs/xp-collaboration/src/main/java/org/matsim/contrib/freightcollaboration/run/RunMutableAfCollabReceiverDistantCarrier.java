@@ -16,6 +16,7 @@ import org.matsim.contrib.freightcollaboration.controller.CollaborationModule;
 import org.matsim.contrib.freightcollaboration.controller.CollaboratorModules;
 import org.matsim.contrib.freightcollaboration.learning.MutableAfLearningStore;
 import org.matsim.contrib.freightcollaboration.learning.MutableAfPlanUtils;
+import org.matsim.contrib.freightcollaboration.learning.MutableAfSelectionPolicy;
 import org.matsim.contrib.freightcollaboration.listener.MutableAfLearningListener;
 import org.matsim.contrib.freightcollaboration.listener.MutableAfReplanningCoordinator;
 import org.matsim.contrib.freightcollaboration.listener.MutableAllocationFactorStatsListener;
@@ -83,7 +84,9 @@ public final class RunMutableAfCollabReceiverDistantCarrier {
 			double allocationFactorStep, double mutationWeight, double freezeFraction,
 			int maxFactorPlans, int newFactorMinDwell, int revisitFactorMinDwell,
 			int stabilityWindow, int maxAdaptDwell, int evaluationWindow,
-			double stabilityRelativeTolerance, double minExplorationProbability,
+			double stabilityRelativeTolerance, double coalitionStabilityThreshold,
+			MutableAfSelectionPolicy selectionPolicy,
+			double minExplorationProbability,
 			double maxExplorationProbability, double exploitationBeta,
 			int receiverPlansPerFactor, int lastIteration) {
 
@@ -101,6 +104,8 @@ public final class RunMutableAfCollabReceiverDistantCarrier {
 			config.setMaxAdaptDwell(maxAdaptDwell);
 			config.setEvaluationWindow(evaluationWindow);
 			config.setStabilityRelativeTolerance(stabilityRelativeTolerance);
+			config.setCoalitionStabilityThreshold(coalitionStabilityThreshold);
+			config.setSolutionSelectionPolicy(selectionPolicy);
 			config.setMinExplorationProbability(minExplorationProbability);
 			config.setMaxExplorationProbability(maxExplorationProbability);
 			config.setExploitationBeta(exploitationBeta);
@@ -138,7 +143,8 @@ public final class RunMutableAfCollabReceiverDistantCarrier {
 				RunCollabReceiverDistantCarrier.ReceiverAreaPolicy.CENTERED_CHESSBOARD_EXAMPLE_AREA,
 				true);
 		return new MutableOptions(experimentOptions, 0.8, 0.1, 0.9, 0.05, 1.0, 0.9,
-			5, 6, 3, 3, 15, 3, 1e-3, 0.10, 0.80, 4.0, 5, 100);
+			5, 6, 3, 5, 15, 3, 0.05, 0.70, MutableAfSelectionPolicy.CARRIER_BEST,
+			0.10, 0.80, 4.0, 5, 100);
 	}
 
 	static MutableOptions parseOptions(String[] args, MutableOptions defaults) {
@@ -156,6 +162,8 @@ public final class RunMutableAfCollabReceiverDistantCarrier {
 		int maxAdaptDwell = defaults.maxAdaptDwell();
 		int evaluationWindow = defaults.evaluationWindow();
 		double stabilityTolerance = defaults.stabilityRelativeTolerance();
+		double coalitionStabilityThreshold = defaults.coalitionStabilityThreshold();
+		MutableAfSelectionPolicy selectionPolicy = defaults.selectionPolicy();
 		double minExploration = defaults.minExplorationProbability();
 		double maxExploration = defaults.maxExplorationProbability();
 		double exploitationBeta = defaults.exploitationBeta();
@@ -190,6 +198,12 @@ public final class RunMutableAfCollabReceiverDistantCarrier {
 			} else if (argument.startsWith("--allocation-factor-stability-relative-tolerance=")) {
 				stabilityTolerance = parseFiniteDouble(argument,
 					"--allocation-factor-stability-relative-tolerance");
+			} else if (argument.startsWith("--allocation-factor-coalition-stability-threshold=")) {
+				coalitionStabilityThreshold = parseFiniteDouble(argument,
+					"--allocation-factor-coalition-stability-threshold");
+			} else if (argument.startsWith("--allocation-factor-selection-policy=")) {
+				selectionPolicy = MutableAfSelectionPolicy.parse(
+					argument.substring(argument.indexOf('=') + 1));
 			} else if (argument.startsWith("--allocation-factor-min-exploration-probability=")) {
 				minExploration = parseFiniteDouble(argument,
 					"--allocation-factor-min-exploration-probability");
@@ -212,7 +226,9 @@ public final class RunMutableAfCollabReceiverDistantCarrier {
 				defaults.experimentOptions());
 		MutableOptions parsed = new MutableOptions(experimentOptions, initial, min, max, step, mutationWeight,
 			freezeFraction, maxFactorPlans, newFactorMinDwell, revisitFactorMinDwell, stabilityWindow,
-			maxAdaptDwell, evaluationWindow, stabilityTolerance, minExploration, maxExploration,
+			maxAdaptDwell, evaluationWindow, stabilityTolerance, coalitionStabilityThreshold,
+			selectionPolicy,
+			minExploration, maxExploration,
 			exploitationBeta, receiverPlans, lastIteration);
 		parsed.createConfigGroup();
 		return parsed;
@@ -275,13 +291,16 @@ public final class RunMutableAfCollabReceiverDistantCarrier {
 			case CENTERED_CHESSBOARD_EXAMPLE_AREA -> "centeredChessboardArea";
 		};
 		String runId = ("%s-%s-%s-mutableAf-init%.2f-min%.2f-max%.2f-step%.2f-w%.2f-freeze%.2f-"
-			+ "cap%d-dwell%d-%d-%d-last%d-p%.4f-exactShapley-i%02d").formatted(
+			+ "cap%d-dwell%d-%d-stabW%d-tol%.3f-coal%.2f-sel%s-last%d-p%.4f-exactShapley-i%02d").formatted(
 			depot.label(), distributionLabel, areaLabel, mutableOptions.initialAllocationFactor(),
 			mutableOptions.minAllocationFactor(), mutableOptions.maxAllocationFactor(),
 			mutableOptions.allocationFactorStep(), mutableOptions.mutationWeight(),
 			mutableOptions.freezeFraction(), mutableOptions.maxFactorPlans(),
 			mutableOptions.newFactorMinDwell(), mutableOptions.revisitFactorMinDwell(),
-			mutableOptions.evaluationWindow(), mutableOptions.lastIteration(), receiverPenalty, instance);
+			mutableOptions.stabilityWindow(), mutableOptions.stabilityRelativeTolerance(),
+			mutableOptions.coalitionStabilityThreshold(),
+			mutableOptions.selectionPolicy().configValue().replace("-", ""),
+			mutableOptions.lastIteration(), receiverPenalty, instance);
 
 		Config config = createChessboardConfig(mutableOptions, runId);
 		Path outputDirectory = Path.of(config.controller().getOutputDirectory());
@@ -490,17 +509,19 @@ public final class RunMutableAfCollabReceiverDistantCarrier {
 			  RunMutableAfCollabReceiverDistantCarrier [shared distant-carrier options]
 			    --initial-allocation-factor=0.8
 			    --allocation-factor-min=0.1
-			    --allocation-factor-max=1.0
+			    --allocation-factor-max=0.9
 			    --allocation-factor-step=0.05
 			    --allocation-factor-mutation-weight=1.0
 			    --allocation-factor-freeze-fraction=0.9
 			    --allocation-factor-max-plans=5
 			    --allocation-factor-new-dwell=6
 			    --allocation-factor-revisit-dwell=3
-			    --allocation-factor-stability-window=3
+			    --allocation-factor-stability-window=5
 			    --allocation-factor-max-dwell=15
-			    --allocation-factor-evaluation-window=3
-			    --allocation-factor-stability-relative-tolerance=0.001
+			    --allocation-factor-evaluation-window=3  (deprecated; accepted but ignored)
+			    --allocation-factor-stability-relative-tolerance=0.05
+			    --allocation-factor-coalition-stability-threshold=0.70
+			    --allocation-factor-selection-policy=carrier-best
 			    --allocation-factor-min-exploration-probability=0.10
 			    --allocation-factor-max-exploration-probability=0.80
 			    --allocation-factor-exploitation-beta=4.0

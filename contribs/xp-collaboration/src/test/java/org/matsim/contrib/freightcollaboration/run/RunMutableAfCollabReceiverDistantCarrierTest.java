@@ -3,6 +3,7 @@ package org.matsim.contrib.freightcollaboration.run;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.matsim.contrib.freightcollaboration.config.MutableAllocationFactorConfigGroup;
+import org.matsim.contrib.freightcollaboration.learning.MutableAfSelectionPolicy;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
 import org.matsim.core.controler.Injector;
@@ -32,6 +33,10 @@ class RunMutableAfCollabReceiverDistantCarrierTest {
 		assertEquals(0.05, config.getAllocationFactorStep());
 		assertEquals(5, config.getMaxFactorPlans());
 		assertEquals(6, config.getNewFactorMinDwell());
+		assertEquals(5, config.getStabilityWindow());
+		assertEquals(0.05, config.getStabilityRelativeTolerance());
+		assertEquals(0.70, config.getCoalitionStabilityThreshold());
+		assertEquals(MutableAfSelectionPolicy.CARRIER_BEST, config.getSolutionSelectionPolicy());
 		assertEquals(3, config.getEvaluationWindow());
 		assertEquals(100, options.lastIteration());
 	}
@@ -67,6 +72,8 @@ class RunMutableAfCollabReceiverDistantCarrierTest {
 				"--allocation-factor-max-dwell=20",
 				"--allocation-factor-evaluation-window=4",
 				"--allocation-factor-stability-relative-tolerance=0.002",
+				"--allocation-factor-coalition-stability-threshold=0.75",
+				"--allocation-factor-selection-policy=receiver-best",
 				"--allocation-factor-min-exploration-probability=0.2",
 				"--allocation-factor-max-exploration-probability=0.7",
 				"--allocation-factor-exploitation-beta=5.0",
@@ -91,6 +98,9 @@ class RunMutableAfCollabReceiverDistantCarrierTest {
 		assertEquals(20, config.getMaxAdaptDwell());
 		assertEquals(4, config.getEvaluationWindow());
 		assertEquals(0.002, config.getStabilityRelativeTolerance());
+		assertEquals(0.75, config.getCoalitionStabilityThreshold());
+		assertEquals(MutableAfSelectionPolicy.RECEIVER_BEST,
+			config.getSolutionSelectionPolicy());
 		assertEquals(0.2, config.getMinExplorationProbability());
 		assertEquals(0.7, config.getMaxExplorationProbability());
 		assertEquals(5.0, config.getExploitationBeta());
