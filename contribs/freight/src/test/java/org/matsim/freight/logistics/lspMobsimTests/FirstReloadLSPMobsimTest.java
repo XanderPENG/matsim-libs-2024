@@ -36,6 +36,7 @@ import org.matsim.api.core.v01.network.Link;
 import org.matsim.api.core.v01.network.Network;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
+import org.matsim.core.config.groups.ControllerConfigGroup;
 import org.matsim.core.config.groups.VspExperimentalConfigGroup;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controller;
@@ -68,8 +69,7 @@ public class FirstReloadLSPMobsimTest {
 
 	@BeforeEach
 	public void initialize() {
-		Config config = new Config();
-		config.addCoreModules();
+		Config config = ConfigUtils.createConfig();
 
 		var freightConfig = ConfigUtils.addOrGetModule(config, FreightCarriersConfigGroup.class);
 		freightConfig.setTimeWindowHandling(FreightCarriersConfigGroup.TimeWindowHandling.ignore);
@@ -196,14 +196,11 @@ public class FirstReloadLSPMobsimTest {
 			builder.setStartTimeWindow(startTimeWindow);
 			builder.setDeliveryServiceTime(capacityDemand * 60);
 			LspShipment shipment = builder.build();
-			lsp.assignShipmentToLSP(shipment);
+			lsp.assignShipmentToLspPlan(shipment);
 		}
 		lsp.scheduleLogisticChains();
 
-		ArrayList<LSP> lspList = new ArrayList<>();
-		lspList.add(lsp);
-		LSPs lsps = new LSPs(lspList);
-		LSPUtils.addLSPs(scenario, lsps);
+		LSPUtils.loadLspsIntoScenario(scenario, Collections.singletonList(lsp));
 
 		Controller controller = ControllerUtils.createController(scenario);
 
@@ -217,6 +214,7 @@ public class FirstReloadLSPMobsimTest {
 		config.controller().setLastIteration(0);
 		config.controller().setOverwriteFileSetting(OverwriteFileSetting.deleteDirectoryIfExists);
 		config.controller().setOutputDirectory(utils.getOutputDirectory());
+		config.controller().setCompressionType(ControllerConfigGroup.CompressionType.gzip);
 		//The VSP default settings are designed for person transport simulation. After talking to Kai, they will be set to WARN here. Kai MT may'23
 		controller.getConfig().vspExperimental().setVspDefaultsCheckingLevel(VspExperimentalConfigGroup.VspDefaultsCheckingLevel.warn);
 		controller.run();

@@ -39,11 +39,11 @@ public class TrafficCountsDashboardTest {
 		generateDummyCounts(config);
 
 		SimWrapperConfigGroup simWrapperConfigGroup = ConfigUtils.addOrGetModule(config, SimWrapperConfigGroup.class);
-		simWrapperConfigGroup.sampleSize = 0.01;
+		simWrapperConfigGroup.setSampleSize(0.01);
 
 		SimWrapperConfigGroup.ContextParams contextParams = simWrapperConfigGroup.defaultParams();
-		contextParams.mapCenter = "12,48.95";
-		contextParams.mapZoomLevel = 9.0;
+		contextParams.setMapCenter("12,48.95");
+		contextParams.setMapZoomLevel(9.0);
 
 		SimWrapper sw = SimWrapper.create(config)
 			.addDashboard(new TrafficCountsDashboard()
@@ -72,7 +72,7 @@ public class TrafficCountsDashboardTest {
 		}
 	}
 
-	public void generateDummyCounts(Config config) {
+	private void generateDummyCounts(Config config) {
 
 		SplittableRandom random = new SplittableRandom(1234);
 
@@ -106,6 +106,7 @@ public class TrafficCountsDashboardTest {
 			String absolutPath = Path.of(utils.getPackageInputDirectory()).normalize().toAbsolutePath() + "/dummy_counts.xml";
 
 			config.counts().setInputFile(absolutPath);
+			config.counts().setCountsScaleFactor( config.qsim().getFlowCapFactor() );
 			new CountsWriter(counts).write(absolutPath);
 		} catch (IOException e) {
 			e.printStackTrace();

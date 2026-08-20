@@ -27,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.File;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.nio.file.Path;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -73,7 +74,7 @@ public class FreeSpeedTravelTimeMatrixTest {
 	@Test
 	void matrix() throws MalformedURLException {
 		DvrpTravelTimeMatrixParams params = new DvrpTravelTimeMatrixParams();
-		params.maxNeighborDistance = 0;
+		params.setMaxNeighborDistance(0);
 		ZoneSystem zoneSystem = new SquareGridZoneSystem(network, 100.);
 		var matrix = FreeSpeedTravelTimeMatrix.createFreeSpeedMatrix(network, zoneSystem, params, 1, 1);
 
@@ -110,7 +111,7 @@ public class FreeSpeedTravelTimeMatrixTest {
 	@Test
 	void sparseMatrix() throws MalformedURLException {
 		DvrpTravelTimeMatrixParams params = new DvrpTravelTimeMatrixParams();
-		params.maxNeighborDistance = 9999;
+		params.setMaxNeighborDistance(9999);
 
 		ZoneSystem zoneSystem = new SquareGridZoneSystem(network, 100.);
 		var matrix = FreeSpeedTravelTimeMatrix.createFreeSpeedMatrix(network, zoneSystem, params, 1, 1);
@@ -157,11 +158,11 @@ public class FreeSpeedTravelTimeMatrixTest {
 		DvrpConfigGroup dvrpConfig = DvrpConfigGroup.get(config);
 
 		DvrpTravelTimeMatrixParams params = dvrpConfig.getTravelTimeMatrixParams();
-		params.maxNeighborDistance = 9999;
-		params.cachePath = cachePath;
+		params.setMaxNeighborDistance(9999);
+		params.setCachePath(cachePath);
 
 		SquareGridZoneSystemParams zoneParams = new SquareGridZoneSystemParams();
-		zoneParams.cellSize = 1000;
+		zoneParams.setCellSize(1000);
 		params.addParameterSet(zoneParams);
 
 		Scenario scenario = ScenarioUtils.createScenario(config);
@@ -171,7 +172,8 @@ public class FreeSpeedTravelTimeMatrixTest {
 			// generate from scratch
             assertFalse(new File(cachePath).exists());
 
-			config.controller().setOutputDirectory( "test\\output\\generic_dvrp_one_taxi_cacheViaConfig_1");
+			config.controller().setOutputDirectory(
+					Path.of("test", "output", "generic_dvrp_one_taxi_cacheViaConfig_1").toString());
 			Controler controller = new Controler(scenario);
 			controller.addOverridingModule(new DvrpModule());
 			controller.getInjector().getInstance(TravelTimeMatrix.class);
@@ -180,7 +182,8 @@ public class FreeSpeedTravelTimeMatrixTest {
 		{
 			// read from cache
 			assertTrue(new File(cachePath).exists());
-			config.controller().setOutputDirectory( "test\\output\\generic_dvrp_one_taxi_cacheViaConfig_2");
+			config.controller().setOutputDirectory(
+					Path.of("test", "output", "generic_dvrp_one_taxi_cacheViaConfig_2").toString());
 			Controler controller = new Controler(scenario);
 			controller.addOverridingModule(new DvrpModule());
 			controller.getInjector().getInstance(TravelTimeMatrix.class);

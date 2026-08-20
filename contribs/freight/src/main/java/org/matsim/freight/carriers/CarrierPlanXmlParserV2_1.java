@@ -198,7 +198,7 @@ class CarrierPlanXmlParserV2_1 extends MatsimXmlParser {
 
 				String typeId = atts.getValue("typeId");
 				if (typeId == null) throw new IllegalStateException("vehicleTypeId is missing.");
-				VehicleType vehicleType = this.carrierVehicleTypes.getVehicleTypes().get(Id.create(typeId, VehicleType.class));
+				VehicleType vehicleType = this.carrierVehicleTypes.getVehicleTypes().get(Id.createVehicleTypeId(typeId));
 				if (vehicleType == null) {
 					throw new RuntimeException("vehicleTypeId=" + typeId + " is missing.");
 				}
@@ -225,7 +225,7 @@ class CarrierPlanXmlParserV2_1 extends MatsimXmlParser {
 				if (selected == null) this.selected = false;
 				else this.selected = selected.equals("true");
 				scheduledTours = new ArrayList<>();
-				currentPlan = new CarrierPlan(currentCarrier, scheduledTours);
+				currentPlan = new CarrierPlan(scheduledTours);
 				break;
 			case "tour":
 				String tourId = atts.getValue("tourId");

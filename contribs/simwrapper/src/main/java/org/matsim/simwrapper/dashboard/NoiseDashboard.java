@@ -27,7 +27,7 @@ public class NoiseDashboard implements Dashboard {
 	}
 
 	@Override
-	public void configure(Header header, Layout layout) {
+	public void configure(Header header, Layout layout, SimWrapperConfigGroup configGroup) {
 
 		header.title = "Noise";
 		header.description = "Shows the noise footprint and spatial distribution.";
@@ -43,7 +43,7 @@ public class NoiseDashboard implements Dashboard {
 				viz.description = "Maximum Noise Level per day [dB]";
 				viz.height = 12.0;
 				viz.center = data.context().getCenter();
-				viz.zoom = data.context().mapZoomLevel;
+				viz.zoom = data.context().getMapZoomLevel();
 				viz.minValue = minDb;
 				viz.maxValue = maxDb;
 				viz.setShape(data.compute(CreateAvroNetwork.class, "network.avro", "--with-properties"), "id");

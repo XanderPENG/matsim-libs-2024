@@ -39,6 +39,7 @@ import org.matsim.api.core.v01.TransportMode;
 import org.matsim.api.core.v01.network.Link;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
+import org.matsim.core.config.groups.ControllerConfigGroup;
 import org.matsim.core.config.groups.VspExperimentalConfigGroup;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controller;
@@ -77,6 +78,7 @@ public class CollectionLSPMobsimTest {
 		config.controller().setOutputDirectory(utils.getOutputDirectory());
 		config.controller().setFirstIteration(0);
 		config.controller().setLastIteration(0);
+		config.controller().setCompressionType(ControllerConfigGroup.CompressionType.gzip);
 
 		var freightConfig = ConfigUtils.addOrGetModule(config, FreightCarriersConfigGroup.class);
 		freightConfig.setTimeWindowHandling(FreightCarriersConfigGroup.TimeWindowHandling.ignore);
@@ -173,18 +175,13 @@ public class CollectionLSPMobsimTest {
 				builder.setStartTimeWindow(startTimeWindow);
 				builder.setDeliveryServiceTime(capacityDemand * 60);
 				LspShipment shipment = builder.build();
-				collectionLSP.assignShipmentToLSP(shipment);
+				collectionLSP.assignShipmentToLspPlan(shipment);
 			}
 			collectionLSP.scheduleLogisticChains();
 		}
-		final LSPs lsps;
-		{
-			ArrayList<LSP> lspList = new ArrayList<>();
-			lspList.add(collectionLSP);
-			lsps = new LSPs(lspList);
-		}
+
 		Controller controller = ControllerUtils.createController(scenario);
-		controller.getEvents().addHandler((BasicEventHandler) event -> log.warn(event));
+		controller.getEvents().addHandler((BasicEventHandler) log::warn);
 
 		controller.addOverridingModule(new AbstractModule() {
 			@Override
@@ -193,7 +190,7 @@ public class CollectionLSPMobsimTest {
 			}
 		});
 
-		LSPUtils.addLSPs(scenario, lsps);
+		LSPUtils.loadLspsIntoScenario(scenario, Collections.singletonList(collectionLSP));
 		//The VSP default settings are designed for person transport simulation. After talking to Kai, they will be set to WARN here. Kai MT may'23
 		controller.getConfig().vspExperimental().setVspDefaultsCheckingLevel(VspExperimentalConfigGroup.VspDefaultsCheckingLevel.warn);
 		controller.run();

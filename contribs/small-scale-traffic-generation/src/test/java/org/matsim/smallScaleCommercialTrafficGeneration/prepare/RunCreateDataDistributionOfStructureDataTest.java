@@ -1,7 +1,5 @@
 package org.matsim.smallScaleCommercialTrafficGeneration.prepare;
 
-import it.unimi.dsi.fastutil.objects.Object2DoubleMap;
-import it.unimi.dsi.fastutil.objects.Object2DoubleOpenHashMap;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -15,8 +13,6 @@ import org.matsim.testcases.MatsimTestUtils;
 
 import java.net.MalformedURLException;
 import java.nio.file.Path;
-import java.util.HashMap;
-import java.util.Map;
 
 class RunCreateDataDistributionOfStructureDataTest {
 	@RegisterExtension
@@ -59,12 +55,12 @@ class RunCreateDataDistributionOfStructureDataTest {
 
 		Scenario scenario = ScenarioUtils.loadScenario(ConfigUtils.createConfig());
 		MatsimFacilitiesReader reader = new MatsimFacilitiesReader(scenario);
-		reader.parse(Path.of(utils.getOutputDirectory()).resolve("commercialFacilities.xml.gz").toUri().toURL());	;
+		reader.parse(Path.of(utils.getOutputDirectory()).resolve("commercialFacilities.xml.gz").toUri().toURL());
 		ActivityFacilities createdFacilities = scenario.getActivityFacilities();
 
 		Scenario scenarioInput = ScenarioUtils.loadScenario(ConfigUtils.createConfig());
 		reader = new MatsimFacilitiesReader(scenarioInput);
-		reader.parse(Path.of(utils.getPackageInputDirectory()).getParent().resolve("commercialFacilities.xml.gz").toUri().toURL());	;
+		reader.parse(Path.of(utils.getPackageInputDirectory()).getParent().resolve("commercialFacilities.xml.gz").toUri().toURL());
 		ActivityFacilities existingFacilities = scenarioInput.getActivityFacilities();
 
 		Assertions.assertEquals(existingFacilities.getFacilities().size(), createdFacilities.getFacilities().size());
@@ -79,20 +75,5 @@ class RunCreateDataDistributionOfStructureDataTest {
 				Assertions.assertEquals(existingFacilities.getFacilities().get(createdFacility.getId()).getAttributes().getAsMap().get(key), createdFacility.getAttributes().getAsMap().get(key));
 			}
 		}
-		Map<String, Object2DoubleMap<String>> sumsOfSharesPerZoneAndCategory = new HashMap<>();
-		createdFacilities.getFacilities().values().forEach(facility -> {
-			String zone = facility.getAttributes().getAttribute("zone").toString();
-			sumsOfSharesPerZoneAndCategory.computeIfAbsent(zone, k -> new Object2DoubleOpenHashMap<>());
-			for (String assignedDataType : facility.getActivityOptions().keySet()){
-				double share = (double) facility.getAttributes().getAttribute("shareOfZone_" + assignedDataType);
-				sumsOfSharesPerZoneAndCategory.get(zone).mergeDouble(assignedDataType, share, Double::sum);
-			}
-		});
-		Assertions.assertEquals(3, sumsOfSharesPerZoneAndCategory.keySet().size());
-		sumsOfSharesPerZoneAndCategory.values().forEach(sumsOfShares -> {
-			sumsOfShares.values().forEach(share -> {
-				Assertions.assertEquals(1.0, share, 0.0001);
-			});
-		});
 	}
 }

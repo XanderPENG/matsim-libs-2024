@@ -1,5 +1,6 @@
 package org.matsim.simwrapper;
 
+import org.apache.commons.math3.util.Precision;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigGroup;
 import org.matsim.core.config.ReflectiveConfigGroup;
@@ -18,24 +19,24 @@ public class SimWrapperConfigGroup extends ReflectiveConfigGroup {
 	private final Map<String, ContextParams> params = new HashMap<>();
 
 	@Parameter
-	@Comment("Whether default dashboards are loaded via SPI.")
-	public Mode defaultDashboards = Mode.enabled;
+	@Comment("Whether default dashboards are created.")
+	private DefaultDashboardsMode defaultDashboards = DefaultDashboardsMode.enabled;
 
 	@Parameter
 	@Comment("Set of packages to scan for dashboard provider classes.")
-	public Set<String> packages = new HashSet<>();
+	private Set<String> packages = new HashSet<>();
 
 	@Parameter
 	@Comment("Set of simple class names or fully qualified class names of dashboards to exclude")
-	public Set<String> exclude = new HashSet<>();
+	private Set<String> exclude = new HashSet<>();
 
 	@Parameter
 	@Comment("Set of simple class names or fully qualified class names of dashboards to include. Any none included dashboard will be excluded.")
-	public Set<String> include = new HashSet<>();
+	private Set<String> include = new HashSet<>();
 
 	@Parameter
 	@Comment("Sample size of the run, which may be required by certain analysis functions.")
-	public Double sampleSize = 1.0d;
+	private Double sampleSize = 1.0d;
 
 	public SimWrapperConfigGroup() {
 		super(NAME);
@@ -55,12 +56,12 @@ public class SimWrapperConfigGroup extends ReflectiveConfigGroup {
 	public ContextParams get(String context) {
 		if (!params.containsKey(context)) {
 			ContextParams p = new ContextParams();
-			p.context = context;
+			p.setContext(context);
 			if (!context.isEmpty()) {
 				// Copy default params from the global config
-				p.shp = defaultParams().shp;
-				p.mapCenter = defaultParams().mapCenter;
-				p.mapZoomLevel = defaultParams().mapZoomLevel;
+				p.setShp(defaultParams().getShp());
+				p.setMapCenter(defaultParams().getMapCenter());
+				p.setMapZoomLevel(defaultParams().getMapZoomLevel());
 			}
 			addParameterSet(p);
 			return p;
@@ -82,7 +83,7 @@ public class SimWrapperConfigGroup extends ReflectiveConfigGroup {
 	public void addParameterSet(ConfigGroup set) {
 		if (set instanceof ContextParams ctx) {
 			super.addParameterSet(set);
-			params.put(ctx.context, ctx);
+			params.put(ctx.getContext(), ctx);
 		} else {
 			throw new IllegalArgumentException("Unsupported parameter set class: " + set);
 		}
@@ -92,15 +93,64 @@ public class SimWrapperConfigGroup extends ReflectiveConfigGroup {
 	protected void checkConsistency(Config config) {
 		super.checkConsistency(config);
 
-		if (!include.isEmpty() && !exclude.isEmpty()) {
+		if (!getInclude().isEmpty() && !getExclude().isEmpty()) {
 			throw new IllegalStateException("Include and exclude option can't be set both.");
 		}
+
+		// check the (available) scale factors:
+		final double flowCapFactor = config.qsim().getFlowCapFactor();
+		final double relativeTolerance = config.global().getRelativeToleranceForSampleSizeFactor();
+		if ( !Precision.equalsWithRelativeTolerance( flowCapFactor, this.sampleSize, relativeTolerance ) ) {
+			throw new RuntimeException("your storageCapFactor=" + config.qsim().getStorageCapFactor() + " is more than the relativeTolerance=" + relativeTolerance + " different from the flowCapFactor=" + flowCapFactor
+			+ ". Relative tolerance can be set in the global config group.");
+		}
+
+	}
+
+	public DefaultDashboardsMode getDefaultDashboards() {
+		return defaultDashboards;
+	}
+
+	public void setDefaultDashboards( DefaultDashboardsMode defaultDashboards ) {
+		this.defaultDashboards = defaultDashboards;
+	}
+
+	public Set<String> getPackages() {
+		return packages;
+	}
+
+	public void setPackages(Set<String> packages) {
+		this.packages = packages;
+	}
+
+	public Set<String> getExclude() {
+		return exclude;
+	}
+
+	public void setExclude(Set<String> exclude) {
+		this.exclude = exclude;
+	}
+
+	public Set<String> getInclude() {
+		return include;
+	}
+
+	public void setInclude(Set<String> include) {
+		this.include = include;
+	}
+
+	public Double getSampleSize() {
+		return sampleSize;
+	}
+
+	public void setSampleSize(Double sampleSize) {
+		this.sampleSize = sampleSize;
 	}
 
 	/**
 	 * Mode how default dashboards are loaded.
 	 */
-	public enum Mode {
+	public enum DefaultDashboardsMode{
 		enabled,
 		disabled
 	}
@@ -113,19 +163,19 @@ public class SimWrapperConfigGroup extends ReflectiveConfigGroup {
 
 		@Parameter
 		@Comment("Name of the context, empty string means default context.")
-		public String context = "";
+		private String context = "";
 
 		@Parameter
 		@Comment("Shp file that may be used by analysis functions that support shp file input.")
-		public String shp = null;
+		private String shp = null;
 
 		@Parameter
 		@Comment("Tuple of two coordinate separated with ',' that may be used to define the center of map views.")
-		public String mapCenter = null;
+		private String mapCenter = null;
 
 		@Parameter
 		@Comment("Default zoom level used for map view.")
-		public Double mapZoomLevel = null;
+		private Double mapZoomLevel = null;
 
 		public ContextParams() {
 			super(GROUP_NAME, true);
@@ -135,10 +185,10 @@ public class SimWrapperConfigGroup extends ReflectiveConfigGroup {
 		 * Return center coordinates, or null if not set.
 		 */
 		public double[] getCenter() {
-			if (mapCenter == null || !mapCenter.contains(","))
+			if (getMapCenter() == null || !getMapCenter().contains(","))
 				return null;
 
-			return Arrays.stream(mapCenter.split(",")).mapToDouble(Double::parseDouble).toArray();
+			return Arrays.stream(getMapCenter().split(",")).mapToDouble(Double::parseDouble).toArray();
 		}
 
 		/**
@@ -157,6 +207,43 @@ public class SimWrapperConfigGroup extends ReflectiveConfigGroup {
 			super.getParams().put(key, value);
 			return this;
 		}
+
+		public String getContext() {
+			return context;
+		}
+
+		public ContextParams setContext(String context) {
+			this.context = context;
+			return this;
+		}
+
+		public String getShp() {
+			return shp;
+		}
+
+		public ContextParams setShp(String shp) {
+			this.shp = shp;
+			return this;
+		}
+
+		public String getMapCenter() {
+			return mapCenter;
+		}
+
+		public ContextParams setMapCenter(String mapCenter) {
+			this.mapCenter = mapCenter;
+			return this;
+		}
+
+		public Double getMapZoomLevel() {
+			return mapZoomLevel;
+		}
+
+		public ContextParams setMapZoomLevel(Double mapZoomLevel) {
+			this.mapZoomLevel = mapZoomLevel;
+			return this;
+		}
 	}
+
 
 }

@@ -33,7 +33,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.Scenario;
-import org.matsim.freight.carriers.Carriers;
 import org.matsim.freight.carriers.events.CarrierShipmentDeliveryStartEvent;
 import org.matsim.freight.carriers.events.CarrierShipmentPickupStartEvent;
 import org.matsim.freight.carriers.events.eventhandler.CarrierShipmentDeliveryStartEventHandler;
@@ -45,18 +44,16 @@ import org.matsim.vehicles.VehicleUtils;
 /**
  * @author Kai Martins-Turner (kturner)
  */
-public class CarrierLoadAnalysis implements CarrierShipmentPickupStartEventHandler, CarrierShipmentDeliveryStartEventHandler {
+/*package-private*/ class CarrierLoadAnalysis implements CarrierShipmentPickupStartEventHandler, CarrierShipmentDeliveryStartEventHandler {
 
 	private static final Logger log = LogManager.getLogger(CarrierLoadAnalysis.class);
 	private final String delimiter;
-	final Carriers carriers;
 
 	private final Map<Id<Vehicle>, LinkedList<Integer>> vehicle2Load = new LinkedHashMap<>();
 	private final Map<Id<Vehicle>, Integer> vehicle2DemandPerTour = new HashMap<>();
 
-	public CarrierLoadAnalysis(String delimiter, Carriers carriers) {
+	/*package-private*/ CarrierLoadAnalysis(String delimiter) {
 		this.delimiter = delimiter;
-		this.carriers = carriers;
 	}
 
 	@Override
@@ -87,7 +84,7 @@ public class CarrierLoadAnalysis implements CarrierShipmentPickupStartEventHandl
 		vehicle2Load.put(vehicleId, list);
 	}
 
-	void writeLoadPerVehicle(String analysisOutputDirectory, Scenario scenario) {
+	/*package-private*/ void writeLoadPerVehicle(String analysisOutputDirectory, Scenario scenario) {
 		log.info("Writing out vehicle load analysis ...");
 		//Load per vehicle
 		String fileName = Path.of(analysisOutputDirectory).resolve("Load_perVehicle.tsv").toString();

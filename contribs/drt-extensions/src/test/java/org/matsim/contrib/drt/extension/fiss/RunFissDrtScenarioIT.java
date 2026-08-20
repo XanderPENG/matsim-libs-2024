@@ -1,7 +1,5 @@
 package org.matsim.contrib.drt.extension.fiss;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -10,13 +8,12 @@ import org.matsim.api.core.v01.TransportMode;
 import org.matsim.api.core.v01.events.LinkLeaveEvent;
 import org.matsim.api.core.v01.events.handler.LinkLeaveEventHandler;
 import org.matsim.contrib.common.zones.systems.grid.square.SquareGridZoneSystemParams;
-import org.matsim.contrib.drt.analysis.zonal.DrtZoneSystemParams;
 import org.matsim.contrib.drt.extension.DrtWithExtensionsConfigGroup;
 import org.matsim.contrib.drt.extension.operations.DrtOperationsControlerCreator;
 import org.matsim.contrib.drt.extension.operations.DrtOperationsParams;
 import org.matsim.contrib.drt.extension.operations.operationFacilities.OperationFacilitiesParams;
 import org.matsim.contrib.drt.extension.operations.shifts.config.ShiftsParams;
-import org.matsim.contrib.drt.optimizer.constraints.DefaultDrtOptimizationConstraintsSet;
+import org.matsim.contrib.drt.optimizer.constraints.DrtOptimizationConstraintsSetImpl;
 import org.matsim.contrib.drt.optimizer.insertion.extensive.ExtensiveInsertionSearchParams;
 import org.matsim.contrib.drt.optimizer.rebalancing.RebalancingParams;
 import org.matsim.contrib.drt.optimizer.rebalancing.mincostflow.MinCostFlowRebalancingStrategyParams;
@@ -27,7 +24,9 @@ import org.matsim.contrib.zone.skims.DvrpTravelTimeMatrixParams;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigGroup;
 import org.matsim.core.config.ConfigUtils;
+import org.matsim.core.config.groups.ControllerConfigGroup;
 import org.matsim.core.config.groups.QSimConfigGroup;
+import org.matsim.core.config.groups.RoutingConfigGroup;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controler;
 import org.matsim.core.controler.OutputDirectoryHierarchy;
@@ -43,11 +42,11 @@ import java.util.HashSet;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.matsim.core.config.groups.ReplanningConfigGroup.*;
-import static org.matsim.core.config.groups.ScoringConfigGroup.*;
+import static org.matsim.core.config.groups.ReplanningConfigGroup.StrategySettings;
+import static org.matsim.core.config.groups.ScoringConfigGroup.ActivityParams;
+import static org.matsim.core.config.groups.ScoringConfigGroup.ModeParams;
 
 public class RunFissDrtScenarioIT {
-	private static final Logger LOG = LogManager.getLogger( RunFissDrtScenarioIT.class );
 
 	@RegisterExtension public MatsimTestUtils utils = new MatsimTestUtils() ;
 
@@ -64,45 +63,45 @@ public class RunFissDrtScenarioIT {
 		DrtWithExtensionsConfigGroup drtWithShiftsConfigGroup = (DrtWithExtensionsConfigGroup) multiModeDrtConfigGroup.createParameterSet("drt");
 
 		DrtConfigGroup drtConfigGroup = drtWithShiftsConfigGroup;
-		drtConfigGroup.mode = TransportMode.drt;
-		drtConfigGroup.stopDuration = 30.;
-		DefaultDrtOptimizationConstraintsSet defaultConstraintsSet =
-				(DefaultDrtOptimizationConstraintsSet) drtConfigGroup.addOrGetDrtOptimizationConstraintsParams()
-						.addOrGetDefaultDrtOptimizationConstraintsSet();
-		defaultConstraintsSet.maxTravelTimeAlpha = 1.5;
-		defaultConstraintsSet.maxTravelTimeBeta = 10. * 60.;
-		defaultConstraintsSet.maxWaitTime = 600.;
-		defaultConstraintsSet.rejectRequestIfMaxWaitOrTravelTimeViolated = true;
-		defaultConstraintsSet.maxWalkDistance = 1000.;
-		drtConfigGroup.useModeFilteredSubnetwork = false;
-		drtConfigGroup.vehiclesFile = fleetFile;
-		drtConfigGroup.operationalScheme = DrtConfigGroup.OperationalScheme.door2door;
-		drtConfigGroup.plotDetailedCustomerStats = true;
-		drtConfigGroup.idleVehiclesReturnToDepots = false;
+		drtConfigGroup.setMode(TransportMode.drt);
+		drtConfigGroup.setStopDuration(30.);
+		DrtOptimizationConstraintsSetImpl defaultConstraintsSet =
+                drtConfigGroup.addOrGetDrtOptimizationConstraintsParams()
+                        .addOrGetDefaultDrtOptimizationConstraintsSet();
+		defaultConstraintsSet.setMaxTravelTimeAlpha(1.5);
+		defaultConstraintsSet.setMaxTravelTimeBeta(10. * 60.);
+		defaultConstraintsSet.setMaxWaitTime(600.);
+		defaultConstraintsSet.setRejectRequestIfMaxWaitOrTravelTimeViolated(true);
+		defaultConstraintsSet.setMaxWalkDistance(1000.);
+		drtConfigGroup.setUseModeFilteredSubnetwork(false);
+		drtConfigGroup.setVehiclesFile(fleetFile);
+		drtConfigGroup.setOperationalScheme(DrtConfigGroup.OperationalScheme.door2door);
+		drtConfigGroup.setPlotDetailedCustomerStats(true);
+		drtConfigGroup.setIdleVehiclesReturnToDepots(false);
 
 		drtConfigGroup.addParameterSet(new ExtensiveInsertionSearchParams());
 
 		ConfigGroup rebalancing = drtConfigGroup.createParameterSet("rebalancing");
 		drtConfigGroup.addParameterSet(rebalancing);
-		((RebalancingParams) rebalancing).interval = 600;
+		((RebalancingParams) rebalancing).setInterval(600);
 
 		MinCostFlowRebalancingStrategyParams strategyParams = new MinCostFlowRebalancingStrategyParams();
-		strategyParams.targetAlpha = 0.3;
-		strategyParams.targetBeta = 0.3;
+		strategyParams.setTargetAlpha(0.3);
+		strategyParams.setTargetBeta(0.3);
 
-		drtConfigGroup.getRebalancingParams().get().addParameterSet(strategyParams);
+		RebalancingParams rebalancingParams = drtConfigGroup.getRebalancingParams().get();
+		rebalancingParams.addParameterSet(strategyParams);
 
-		DrtZoneSystemParams drtZoneSystemParams = new DrtZoneSystemParams();
-		SquareGridZoneSystemParams zoneSystemParams = (SquareGridZoneSystemParams) drtZoneSystemParams.createParameterSet(SquareGridZoneSystemParams.SET_NAME);
-		zoneSystemParams.cellSize = 500.;
-		drtZoneSystemParams.addParameterSet(zoneSystemParams);
-		drtZoneSystemParams.targetLinkSelection = DrtZoneSystemParams.TargetLinkSelection.mostCentral;
-		drtConfigGroup.addParameterSet(drtZoneSystemParams);
+		SquareGridZoneSystemParams zoneSystemParams = (SquareGridZoneSystemParams) rebalancingParams.createParameterSet(SquareGridZoneSystemParams.SET_NAME);
+		zoneSystemParams.setCellSize(500.);
+		rebalancingParams.addParameterSet(zoneSystemParams);
+		rebalancingParams.setTargetLinkSelection(RebalancingParams.TargetLinkSelection.mostCentral);
 
 		multiModeDrtConfigGroup.addParameterSet(drtWithShiftsConfigGroup);
 
 		DvrpConfigGroup dvrpConfigGroup = new DvrpConfigGroup();
 		final Config config = ConfigUtils.createConfig(multiModeDrtConfigGroup, dvrpConfigGroup);
+		config.routing().setAccessEgressType(RoutingConfigGroup.AccessEgressType.none);
 		config.setContext(ExamplesUtils.getTestScenarioURL("holzkirchen"));
 
 		Set<String> modes = new HashSet<>();
@@ -134,6 +133,7 @@ public class RunFissDrtScenarioIT {
 
 		config.controller().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
 		config.controller().setOutputDirectory( utils.getOutputDirectory() );
+		config.controller().setCompressionType(ControllerConfigGroup.CompressionType.gzip);
 
 		DrtOperationsParams operationsParams = (DrtOperationsParams) drtWithShiftsConfigGroup.createParameterSet(DrtOperationsParams.SET_NAME);
 		ShiftsParams shiftsParams = (ShiftsParams) operationsParams.createParameterSet(ShiftsParams.SET_NAME);
@@ -141,9 +141,10 @@ public class RunFissDrtScenarioIT {
 		operationsParams.addParameterSet(shiftsParams);
 		operationsParams.addParameterSet(operationFacilitiesParams);
 
-		operationFacilitiesParams.operationFacilityInputFile = opFacilitiesFile;
-		shiftsParams.shiftInputFile = shiftsFile;
-		shiftsParams.allowInFieldChangeover = true;
+		operationFacilitiesParams.setOperationFacilityInputFile(opFacilitiesFile);
+		shiftsParams.setShiftInputFile(shiftsFile);
+		shiftsParams.setAllowInFieldChangeover(true);
+		shiftsParams.setShiftEndRelocationArrival(ShiftsParams.ShiftEndRelocationArrival.immediate);
 		drtWithShiftsConfigGroup.addParameterSet(operationsParams);
 
 
@@ -159,13 +160,13 @@ public class RunFissDrtScenarioIT {
 		{
 			// FISS config:
 			FISSConfigGroup fissConfigGroup = ConfigUtils.addOrGetModule(config, FISSConfigGroup.class);
-			fissConfigGroup.sampleFactor = 0.1;
-			fissConfigGroup.sampledModes = Set.of(TransportMode.car);
-			fissConfigGroup.switchOffFISSLastIteration = true;
+			fissConfigGroup.setSampleFactor(0.1);
+			fissConfigGroup.setSampledModes(Set.of(TransportMode.car));
+			fissConfigGroup.setSwitchOffFISSLastIteration(true);
 
 			// provide mode vehicle types (in production code, one should set them more diligently):
 			Vehicles vehiclesContainer = controler.getScenario().getVehicles();
-			for( String sampledMode : fissConfigGroup.sampledModes ){
+			for( String sampledMode : fissConfigGroup.getSampledModes()){
 				vehiclesContainer.addVehicleType( VehicleUtils.createVehicleType( Id.create( sampledMode, VehicleType.class ) ) );
 			}
 

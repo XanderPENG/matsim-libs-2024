@@ -2,6 +2,7 @@ package org.matsim.contrib.drt.prebooking;
 
 import com.google.common.base.Preconditions;
 import com.google.common.base.Verify;
+import jakarta.annotation.Nullable;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.IdMap;
 import org.matsim.api.core.v01.IdSet;
@@ -19,7 +20,6 @@ import org.matsim.contrib.dvrp.passenger.*;
 import org.matsim.core.api.experimental.events.EventsManager;
 import org.matsim.core.mobsim.framework.MobsimAgent;
 import org.matsim.core.mobsim.framework.MobsimAgent.State;
-import org.matsim.core.mobsim.framework.MobsimPassengerAgent;
 import org.matsim.core.mobsim.framework.MobsimTimer;
 import org.matsim.core.mobsim.framework.events.MobsimAfterSimStepEvent;
 import org.matsim.core.mobsim.framework.listeners.MobsimAfterSimStepListener;
@@ -28,7 +28,6 @@ import org.matsim.core.mobsim.qsim.agents.HasModifiablePlan;
 import org.matsim.core.mobsim.qsim.agents.WithinDayAgentUtils;
 import org.matsim.core.mobsim.qsim.interfaces.MobsimEngine;
 
-import javax.annotation.Nullable;
 import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -51,7 +50,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * @author Sebastian Hörl (sebhoerl), IRT SystemX
  */
 public class PrebookingManager implements MobsimEngine, MobsimAfterSimStepListener, AdvanceRequestProvider,
-		PassengerRequestScheduledEventHandler, PassengerRequestRejectedEventHandler, PersonStuckEventHandler {
+	PassengerRequestScheduledEventHandler, PassengerRequestRejectedEventHandler, PersonStuckEventHandler {
 	private final String mode;
 
 	private final Network network;
@@ -132,7 +131,7 @@ public class PrebookingManager implements MobsimEngine, MobsimAfterSimStepListen
 	private record RejectionItem(Id<Request> requestId, List<Id<Person>> personIds, String cause) {
 	}
 
-	public record PersonLeg(MobsimAgent agent, Leg leg){}
+	public record PersonLeg(MobsimAgent agent, Leg leg) {}
 
 	private final ConcurrentLinkedQueue<RejectionItem> rejections = new ConcurrentLinkedQueue<>();
 
@@ -143,7 +142,7 @@ public class PrebookingManager implements MobsimEngine, MobsimAfterSimStepListen
 	private void flushRejections(double now) {
 		for (RejectionItem item : rejections) {
 			eventsManager.processEvent(
-					new PassengerRequestRejectedEvent(now, mode, item.requestId, item.personIds, item.cause));
+				new PassengerRequestRejectedEvent(now, mode, item.requestId, item.personIds, item.cause));
 		}
 
 		rejections.clear();
@@ -176,8 +175,8 @@ public class PrebookingManager implements MobsimEngine, MobsimAfterSimStepListen
 		List<Route> routes = personsLegs.stream().map(PersonLeg::leg).map(Leg::getRoute).toList();
 		Route representativeRoute = routes.get(0);
 		PassengerRequest request = requestCreator.createRequest(requestId, personIds, routes,
-				getLink(representativeRoute.getStartLinkId()), getLink(representativeRoute.getEndLinkId()), earliestDepartureTime,
-				now);
+			getLink(representativeRoute.getStartLinkId()), getLink(representativeRoute.getEndLinkId()), earliestDepartureTime,
+			now);
 
 		Set<String> violations = requestValidator.validateRequest(request);
 
@@ -218,8 +217,8 @@ public class PrebookingManager implements MobsimEngine, MobsimAfterSimStepListen
 
 	private Link getLink(Id<Link> linkId) {
 		return Preconditions.checkNotNull(network.getLinks().get(linkId),
-				"Link id=%s does not exist in network for mode %s. Agent departs from a link that does not belong to that network?",
-				linkId, mode);
+			"Link id=%s does not exist in network for mode %s. Agent departs from a link that does not belong to that network?",
+			linkId, mode);
 	}
 
 	// Interface with PassengerEngine
@@ -378,6 +377,9 @@ public class PrebookingManager implements MobsimEngine, MobsimAfterSimStepListen
 
 	// Rejections
 
+	private static final String ABORT_STUCK_REASON = " rejected prebooked request";
+	private final IdSet<Person> stuckUponActivity = new IdSet<>(Person.class);
+
 	private void processRejections(double now) {
 		for (Id<Request> requestId : rejectedEventIds) {
 			RequestItem item = requests.remove(requestId);
@@ -393,7 +395,7 @@ public class PrebookingManager implements MobsimEngine, MobsimAfterSimStepListen
 					unscheduleUponVehicleAssignment.add(requestId);
 				}
 
-				if(abortRejectedPrebookings) {
+				if (abortRejectedPrebookings) {
 					for (Id<Person> passengerId : item.request.getPassengerIds()) {
 						MobsimAgent agent = internalInterface.getMobsim().getAgents().get(passengerId);
 
@@ -401,25 +403,20 @@ public class PrebookingManager implements MobsimEngine, MobsimAfterSimStepListen
 						Plan plan = WithinDayAgentUtils.getModifiablePlan(agent);
 						PlanElement planElement = plan.getPlanElements().get(index);
 
-						if (planElement instanceof Activity currentActivity) {
-							Activity activity = currentActivity;
-							activity.setEndTime(Double.POSITIVE_INFINITY);
-							activity.setMaximumDurationUndefined();
-
-							((HasModifiablePlan) agent).resetCaches();
-							internalInterface.getMobsim().rescheduleActivityEnd(agent);
-							eventsManager.processEvent(new PersonStuckEvent(now, agent.getId(), agent.getCurrentLinkId(),
-									this.mode));
-
-							internalInterface.getMobsim().getAgentCounter().incLost();
-							internalInterface.getMobsim().getAgentCounter().decLiving();
+						if (planElement instanceof Activity) {
+							// the agent is on an activity, let it get stuck further below
+							stuckUponActivity.add(passengerId);
 						} else {
-							// If the current element is a leg, the agent is walking towards the pickup location
-							// We make the agent stuck at the interaction activity
+							// the agent is on a leg, so we cannot make it stuck directly.
+							// instead, we set the next activity to an infinite duration and
+							// make the agent get stuck right after the activity starts
+
 							while (index < plan.getPlanElements().size()) {
 								if (plan.getPlanElements().get(index) instanceof Activity activity) {
-									activity.setEndTime(Double.POSITIVE_INFINITY);
+									activity.setEndTime(Double.MAX_VALUE); // very long but not infinite (= regular last activity)
 									activity.setMaximumDurationUndefined();
+									stuckUponActivity.add(agent.getId());
+									break;
 								}
 
 								index++;
@@ -431,6 +428,44 @@ public class PrebookingManager implements MobsimEngine, MobsimAfterSimStepListen
 		}
 
 		rejectedEventIds.clear();
+
+		Iterator<Id<Person>> stuckIterator = stuckUponActivity.iterator();
+		while (stuckIterator.hasNext()) {
+			Id<Person> personId = stuckIterator.next();
+			MobsimAgent agent = internalInterface.getMobsim().getAgents().get(personId);
+
+			if (agent != null) {
+				if (WithinDayAgentUtils.getCurrentPlanElement(agent) instanceof Activity activity) {
+					abortAgent(agent, activity, now);
+					stuckIterator.remove();
+				}
+			} else {
+				// the agent no longer exists in the mobsim, we assume it is already been handled elsewhere. nkuehnel, march'25
+				stuckIterator.remove();
+			}
+		}
+	}
+
+	private void abortAgent(MobsimAgent agent, Activity activity, double now) {
+		// this would be the simple way, but then it looks like the agent is stuck
+		// because of something related to the activity. however, we want to make
+		//it clear that drt is the cause here
+
+		// agent.setStateToAbort(now);
+		// internalInterface.arrangeNextAgentState(agent);
+
+		activity.setEndTime(Double.POSITIVE_INFINITY);
+		activity.setMaximumDurationUndefined();
+
+		((HasModifiablePlan) agent).resetCaches();
+		internalInterface.getMobsim().rescheduleActivityEnd(agent);
+		eventsManager.processEvent(new PersonStuckEvent(now, agent.getId(), agent.getCurrentLinkId(),
+			null, mode + ABORT_STUCK_REASON));
+
+		internalInterface.getMobsim().getAgentCounter().incLost();
+
+		// will be called by the activity engine
+		// internalInterface.getMobsim().getAgentCounter().decLiving();
 	}
 
 	// Stuck
@@ -450,7 +485,7 @@ public class PrebookingManager implements MobsimEngine, MobsimAfterSimStepListen
 	// Engine code
 
 	@Override
-	public void onPrepareSim() {
+	public void beforeMobsim() {
 		eventsManager.addHandler(this);
 	}
 
@@ -489,7 +524,7 @@ public class PrebookingManager implements MobsimEngine, MobsimAfterSimStepListen
 	}
 
 	@Override
-	public void afterSim() {
+	public void afterMobsim() {
 		eventsManager.removeHandler(this);
 	}
 

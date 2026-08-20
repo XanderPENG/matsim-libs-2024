@@ -52,25 +52,117 @@ public class TariffBasedChargingCostsParameters extends ReflectiveConfigGroup im
 
 		@Parameter
 		@NotEmpty
-		public String name;
+		private String name;
 
 		@Parameter
-		public Set<String> subscriptions = new HashSet<>();
+		private Set<String> subscriptions = new HashSet<>();
 
 		@Parameter
-		public double costPerUse = 0.0;
+		private double costPerUse = 0.0;
 
 		@Parameter
-		public double costPerDuration_min = 0.0;
+		private double costPerDuration_min = 0.0;
 
 		@Parameter
-		public double costPerEnergy_kWh = 0.0;
+		private double costPerEnergy_kWh = 0.0;
 
 		@Parameter
-		public double costPerBlockingDuration_min = 0.0;
+		private double costPerBlockingDuration_min = 0.0;
 
 		@Parameter
-		public double blockingDuration_min = 0.0;
+		private double blockingDuration_min = 0.0;
+
+		@Parameter
+		private String dynamicCostPerEnergy_kWh = null;
+
+		@Parameter
+		private double costPerReservation = 0.0;
+
+		public String getTariffName() {
+			return name;
+		}
+
+		public void setTariffName(String name) {
+			this.name = name;
+		}
+
+		public Set<String> getSubscriptions() {
+			return subscriptions;
+		}
+
+		public void setSubscriptions(Set<String> subscriptions) {
+			this.subscriptions = subscriptions;
+		}
+
+		public double getCostPerUse() {
+			return costPerUse;
+		}
+
+		public void setCostPerUse(double costPerUse) {
+			this.costPerUse = costPerUse;
+		}
+
+		public double getCostPerDuration_min() {
+			return costPerDuration_min;
+		}
+
+		public void setCostPerDuration_min(double costPerDuration_min) {
+			this.costPerDuration_min = costPerDuration_min;
+		}
+
+		public double getCostPerEnergy_kWh() {
+			return costPerEnergy_kWh;
+		}
+
+		public void setCostPerEnergy_kWh(double costPerEnergy_kWh) {
+			this.costPerEnergy_kWh = costPerEnergy_kWh;
+		}
+
+		public double getCostPerBlockingDuration_min() {
+			return costPerBlockingDuration_min;
+		}
+
+		public void setCostPerBlockingDuration_min(double costPerBlockingDuration_min) {
+			this.costPerBlockingDuration_min = costPerBlockingDuration_min;
+		}
+
+		public double getBlockingDuration_min() {
+			return blockingDuration_min;
+		}
+
+		public void setBlockingDuration_min(double blockingDuration_min) {
+			this.blockingDuration_min = blockingDuration_min;
+		}
+
+		public String getDynamicCostPerEnergy_kWh() {
+			return dynamicCostPerEnergy_kWh;
+		}
+
+		public void setDynamicCostPerEnergy_kWh(String dynamicCostPerEnergy_kWh) {
+			this.dynamicCostPerEnergy_kWh = dynamicCostPerEnergy_kWh;
+		}
+
+		public double getCostPerReservation() {
+			return costPerReservation;
+		}
+
+		public void setCostPerReservation(double costPerReservation) {
+			this.costPerReservation = costPerReservation;
+		}
+
+		@Override
+		public boolean equals(Object other) {
+			if (other instanceof TariffParameters o) {
+				return o.getTariffName().equals(getTariffName());
+			}
+
+			return false;
+		}
+
+		@Override
+		public int hashCode() {
+			return getTariffName().hashCode();
+		}
 	}
 
 	public Map<String, TariffParameters> getTariffParameters() {

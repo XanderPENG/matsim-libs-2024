@@ -16,6 +16,7 @@ import org.matsim.contrib.drt.extension.reconfiguration.run.CapacityReconfigurat
 import org.matsim.contrib.drt.run.DrtConfigGroup;
 import org.matsim.contrib.drt.run.DrtControlerCreator;
 import org.matsim.contrib.drt.run.MultiModeDrtConfigGroup;
+import org.matsim.contrib.dvrp.load.DvrpLoadParams;
 import org.matsim.contrib.dvrp.load.DvrpLoadType;
 import org.matsim.contrib.dvrp.passenger.DefaultDvrpLoadFromTrip;
 import org.matsim.contrib.dvrp.run.DvrpConfigGroup;
@@ -62,7 +63,7 @@ public class CapacityReconfigurationTest {
 		assertEquals(198, tracker.pickedUpPassengers);
 		assertEquals(0, tracker.pickedUpGoods);
 	}
-	
+
 	@Test
 	void testSimpleReconfiguration() {
 		Id.resetCaches();
@@ -82,7 +83,7 @@ public class CapacityReconfigurationTest {
 		Controler controller = DrtControlerCreator.createControler(config, false);
 		prepareLoads(controller.getScenario().getPopulation());
 
-		controller.addOverridingModule(new CapacityReconfigurationModule(drtConfig.mode, 300));
+		controller.addOverridingModule(new CapacityReconfigurationModule(drtConfig.getMode(), 300));
 		SimpleReconfigurationLogic.install(controller, drtConfig.getMode());
 
 		ReconfigurationTracker tracker = ReconfigurationTracker.install(controller);
@@ -109,10 +110,13 @@ public class CapacityReconfigurationTest {
 
 		DrtConfigGroup drtConfig = configureDrt(config, true);
 
+		// do not rebalance before planned reconfiguration stops
+		drtConfig.getRebalancingParams().get().setRebalancingMinIdleGap(Double.MAX_VALUE);
+
 		Controler controller = DrtControlerCreator.createControler(config, false);
 		prepareLoads(controller.getScenario().getPopulation());
 
-		controller.addOverridingModule(new CapacityReconfigurationModule(drtConfig.mode, 300));
+		controller.addOverridingModule(new CapacityReconfigurationModule(drtConfig.getMode(), 300));
 
 		DefaultCapacityReconfigurationLogic.install(controller, drtConfig.getMode(), loadType -> {
 			return Set.of( //
@@ -148,7 +152,7 @@ public class CapacityReconfigurationTest {
 		Controler controller = DrtControlerCreator.createControler(config, false);
 		prepareLoads(controller.getScenario().getPopulation());
 
-		controller.addOverridingModule(new CapacityReconfigurationModule(drtConfig.mode, 300));
+		controller.addOverridingModule(new CapacityReconfigurationModule(drtConfig.getMode(), 300));
 
 		DefaultCapacityReconfigurationLogic.install(controller, drtConfig.getMode(), loadType -> {
 			return Set.of( //
@@ -170,13 +174,15 @@ public class CapacityReconfigurationTest {
 
 		// rejections?
 		drtConfig.addOrGetDrtOptimizationConstraintsParams()
-				.addOrGetDefaultDrtOptimizationConstraintsSet().rejectRequestIfMaxWaitOrTravelTimeViolated = useRejections;
+				.addOrGetDefaultDrtOptimizationConstraintsSet().setRejectRequestIfMaxWaitOrTravelTimeViolated(useRejections);
+
+		DvrpLoadParams loadParams = drtConfig.addOrGetLoadParams();
 
 		// produce analysis output on capacities and loads
-		drtConfig.loadParams.analysisInterval = 1;
+		loadParams.setAnalysisInterval(1);
 
 		// set up two dimensions
-		drtConfig.loadParams.dimensions = List.of("passengers", "goods");
+		loadParams.setDimensions(List.of("passengers", "goods"));
 
 		return drtConfig;
 	}

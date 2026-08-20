@@ -202,15 +202,14 @@ import org.matsim.vehicles.VehicleUtils;
 
     // assign the lspShipments to the LSP
     for (LspShipment lspShipment : lspShipments) {
-      lsp.assignShipmentToLSP(lspShipment);
+      lsp.assignShipmentToLspPlan(lspShipment);
     }
 
     // schedule the LSP with the lspShipments and according to the scheduler of the Resource
     lsp.scheduleLogisticChains();
 
     // Prepare LSPModule and add the LSP
-    LSPs lsps = new LSPs(Collections.singletonList(lsp));
-    LSPUtils.addLSPs(scenario, lsps);
+	  LSPUtils.loadLspsIntoScenario(scenario, Collections.singletonList(lsp));
     return scenario;
   }
 

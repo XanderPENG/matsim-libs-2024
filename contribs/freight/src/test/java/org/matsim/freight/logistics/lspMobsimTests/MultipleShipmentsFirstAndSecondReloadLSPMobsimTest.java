@@ -36,6 +36,7 @@ import org.matsim.api.core.v01.network.Link;
 import org.matsim.api.core.v01.network.Network;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
+import org.matsim.core.config.groups.ControllerConfigGroup;
 import org.matsim.core.config.groups.VspExperimentalConfigGroup;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controller;
@@ -72,11 +73,11 @@ public class MultipleShipmentsFirstAndSecondReloadLSPMobsimTest {
 
 	@BeforeEach
 	public void initialize() {
-		Config config = new Config();
-		config.addCoreModules();
+		Config config = ConfigUtils.createConfig();
 
 		var freightConfig = ConfigUtils.addOrGetModule(config, FreightCarriersConfigGroup.class);
 		freightConfig.setTimeWindowHandling(FreightCarriersConfigGroup.TimeWindowHandling.ignore);
+		config.controller().setCompressionType(ControllerConfigGroup.CompressionType.gzip);
 
 
 		Scenario scenario = ScenarioUtils.createScenario(config);
@@ -255,17 +256,13 @@ public class MultipleShipmentsFirstAndSecondReloadLSPMobsimTest {
 			builder.setStartTimeWindow(startTimeWindow);
 			builder.setDeliveryServiceTime(capacityDemand * 60);
 			LspShipment shipment = builder.build();
-			lsp.assignShipmentToLSP(shipment);
+			lsp.assignShipmentToLspPlan(shipment);
 		}
 		lsp.scheduleLogisticChains();
 
-		ArrayList<LSP> lspList = new ArrayList<>();
-		lspList.add(lsp);
-		LSPs lsps = new LSPs(lspList);
-
 		Controller controller = ControllerUtils.createController(scenario);
 
-		LSPUtils.addLSPs(scenario, lsps);
+		LSPUtils.loadLspsIntoScenario(scenario, Collections.singletonList(lsp));
 		controller.addOverridingModule(new LSPModule());
 		controller.addOverridingModule( new AbstractModule(){
 			@Override public void install(){

@@ -24,11 +24,13 @@ import com.google.common.base.MoreObjects;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.network.Link;
 import org.matsim.api.core.v01.population.Person;
+import org.matsim.contrib.drt.optimizer.constraints.DrtRouteConstraints;
 import org.matsim.contrib.dvrp.load.DvrpLoad;
 import org.matsim.contrib.dvrp.optimizer.Request;
 import org.matsim.contrib.dvrp.passenger.PassengerRequest;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.stream.Collectors;
 
 /**
@@ -37,10 +39,6 @@ import java.util.stream.Collectors;
 public class DrtRequest implements PassengerRequest {
 	private final Id<Request> id;
 	private final double submissionTime;
-	private final double earliestStartTime;
-	private final double latestStartTime;
-	private final double latestArrivalTime;
-	private final double maxRideDuration;
 
 	private final List<Id<Person>> passengerIds = new ArrayList<>();
 	private final String mode;
@@ -49,13 +47,19 @@ public class DrtRequest implements PassengerRequest {
 	private final Link toLink;
 	private final DvrpLoad load;
 
+	private final DrtRouteConstraints constraints;
+
+	private final double earliestStartTime;
+	private final double latestStartTime;
+	private final double latestArrivalTime;
+
 	private DrtRequest(Builder builder) {
 		id = builder.id;
 		submissionTime = builder.submissionTime;
-		earliestStartTime = builder.earliestStartTime;
-		latestStartTime = builder.latestStartTime;
-		latestArrivalTime = builder.latestArrivalTime;
-		maxRideDuration = builder.maxRideDuration;
+		earliestStartTime = builder.earliestDepartureTime;
+		latestStartTime = earliestStartTime + builder.constraints.maxWaitDuration();
+		latestArrivalTime = earliestStartTime + builder.constraints.maxTravelDuration();
+		constraints = builder.constraints;
 		passengerIds.addAll(builder.passengerIds);
 		mode = builder.mode;
 		fromLink = builder.fromLink;
@@ -71,14 +75,12 @@ public class DrtRequest implements PassengerRequest {
 		Builder builder = new Builder();
 		builder.id = copy.getId();
 		builder.submissionTime = copy.getSubmissionTime();
-		builder.earliestStartTime = copy.getEarliestStartTime();
-		builder.latestStartTime = copy.getLatestStartTime();
-		builder.latestArrivalTime = copy.getLatestArrivalTime();
-		builder.maxRideDuration = copy.getMaxRideDuration();
 		builder.passengerIds = new ArrayList<>(copy.getPassengerIds());
 		builder.mode = copy.getMode();
 		builder.fromLink = copy.getFromLink();
 		builder.toLink = copy.getToLink();
+		builder.earliestDepartureTime = copy.earliestStartTime;
+		builder.constraints = copy.constraints;
 		builder.load = copy.load;
 		return builder;
 	}
@@ -107,8 +109,8 @@ public class DrtRequest implements PassengerRequest {
 		return latestArrivalTime;
 	}
 
-	public double getMaxRideDuration() {
-		return maxRideDuration;
+	public DrtRouteConstraints getConstraints() {
+		return constraints;
 	}
 
 	@Override
@@ -144,7 +146,7 @@ public class DrtRequest implements PassengerRequest {
 				.add("earliestStartTime", earliestStartTime)
 				.add("latestStartTime", latestStartTime)
 				.add("latestArrivalTime", latestArrivalTime)
-				.add("maxRideDuration", maxRideDuration)
+				.add("maxRideDuration", constraints.maxRideDuration())
 				.add("passengerIds", passengerIds.stream().map(Object::toString).collect(Collectors.joining(",")))
 				.add("mode", mode)
 				.add("fromLink", fromLink)
@@ -155,11 +157,12 @@ public class DrtRequest implements PassengerRequest {
 	public static final class Builder {
 		private Id<Request> id;
 		private double submissionTime;
-		private double earliestStartTime;
-		private double latestStartTime;
-		private double latestArrivalTime;
-		private double maxRideDuration;
+		private double earliestDepartureTime;
+
+		private DrtRouteConstraints constraints = DrtRouteConstraints.UNDEFINED;
+
 		private List<Id<Person>> passengerIds = new ArrayList<>();
+
 		private String mode;
 		private Link fromLink;
 		private Link toLink;
@@ -178,23 +181,13 @@ public class DrtRequest implements PassengerRequest {
 			return this;
 		}
 
-		public Builder earliestStartTime(double val) {
-			earliestStartTime = val;
+		public Builder constraints(DrtRouteConstraints val) {
+			constraints = val;
 			return this;
 		}
 
-		public Builder latestStartTime(double val) {
-			latestStartTime = val;
-			return this;
-		}
-
-		public Builder latestArrivalTime(double val) {
-			latestArrivalTime = val;
-			return this;
-		}
-
-		public Builder maxRideDuration(double maxRideDuration) {
-			this.maxRideDuration = maxRideDuration;
+		public Builder earliestDepartureTime(double val) {
+			earliestDepartureTime = val;
 			return this;
 		}
 

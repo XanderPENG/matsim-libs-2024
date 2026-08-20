@@ -181,17 +181,14 @@ import org.matsim.vehicles.VehicleUtils;
 
     // assign the lspShipments to the LSP
     for (LspShipment lspShipment : lspShipments) {
-      lsp.assignShipmentToLSP(lspShipment);
+      lsp.assignShipmentToLspPlan(lspShipment);
     }
 
     // schedule the LSP with the lspShipments and according to the scheduler of the Resource
     lsp.scheduleLogisticChains();
 
     // Prepare LSPModule and add the LSP
-    ArrayList<LSP> lspList = new ArrayList<>();
-    lspList.add(lsp);
-    LSPs lsps = new LSPs(lspList);
-    LSPUtils.addLSPs(scenario, lsps);
+    LSPUtils.loadLspsIntoScenario(scenario, Collections.singletonList(lsp));
 
     // Start the Mobsim one iteration is sufficient for tracking
     Controler controler = new Controler(config);

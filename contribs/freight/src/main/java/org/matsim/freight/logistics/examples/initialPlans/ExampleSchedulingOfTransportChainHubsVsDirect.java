@@ -32,6 +32,7 @@ import org.matsim.api.core.v01.network.Network;
 import org.matsim.core.config.CommandLine;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
+import org.matsim.core.config.groups.ControllerConfigGroup;
 import org.matsim.core.config.groups.VspExperimentalConfigGroup;
 import org.matsim.core.controler.*;
 import org.matsim.core.replanning.GenericPlanStrategyImpl;
@@ -102,6 +103,7 @@ import org.matsim.vehicles.VehicleUtils;
         .controller()
         .setOverwriteFileSetting(
             OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
+	  config.controller().setCompressionType(ControllerConfigGroup.CompressionType.gzip);
     // The VSP default settings are designed for person transport simulation. After talking to Kai,
     // they will be set to WARN here. Kai MT may'23
     config.vspExperimental().setVspDefaultsCheckingLevel(VspExperimentalConfigGroup.VspDefaultsCheckingLevel.warn);
@@ -126,14 +128,14 @@ import org.matsim.vehicles.VehicleUtils;
     log.info("create initial LSPShipments");
     log.info("assign the shipments to the LSP");
     for (LspShipment lspShipment : createInitialLSPShipments(scenario.getNetwork())) {
-      lsp.assignShipmentToLSP(lspShipment);
+      lsp.assignShipmentToLspPlan(lspShipment);
     }
 
     log.info("schedule the LSP with the shipments and according to the scheduler of the Resource");
     lsp.scheduleLogisticChains();
 
     log.info("Set up simulation controller and LSPModule");
-    LSPUtils.addLSPs(scenario, new LSPs(Collections.singletonList(lsp)));
+    LSPUtils.loadLspsIntoScenario(scenario, Collections.singletonList(lsp));
 
     // @KMT: LSPModule ist vom Design her nur im Zusammenhang mit dem Controler sinnvoll. Damit kann
     // man dann auch vollständig auf
@@ -185,19 +187,15 @@ import org.matsim.vehicles.VehicleUtils;
 
   private static LSP createInitialLSP(Scenario scenario, SolutionType solutionType) {
 
-    Network network = scenario.getNetwork();
 
     LSPUtils.LSPBuilder lspBuilder =
         switch (solutionType) {
-          case onePlan_withHub -> LSPUtils.LSPBuilder.getInstance(
-              Id.create("LSPwithReloading", LSP.class));
+          case onePlan_withHub -> LSPUtils.LSPBuilder.getInstance(Id.create("LSPwithReloading", LSP.class));
           case onePlan_direct, twoPlans_directAndHub -> LSPUtils.LSPBuilder.getInstance(Id.create("LSPdirect", LSP.class));
         };
 
-    //		lspBuilder.setSolutionScorer(new MyLSPScorer());
 
-    final Id<Link> depotLinkId =
-        Id.createLinkId("(4 2) (4 3)"); // TODO: Hochziehen aber non-static.
+    final Id<Link> depotLinkId = Id.createLinkId("(4 2) (4 3)"); // TODO: Hochziehen aber non-static.
     final Id<Link> hubLinkId = Id.createLinkId("(14 2) (14 3)");
 
     LogisticChainElement depotElement;
@@ -476,11 +474,11 @@ import org.matsim.vehicles.VehicleUtils;
 
   private static LSPPlan createLSPPlan_direct(
       LogisticChainElement depotElement, LogisticChainElement directDistributionElement) {
-    log.info("");
+
     log.info("The order of the logisticsSolutionElements is now specified");
     depotElement.connectWithNextElement(directDistributionElement);
 
-    log.info("");
+
     log.info("set up logistic Solution - direct distribution from the depot is created");
 
     LogisticChain completeSolutionDirect =
@@ -490,9 +488,7 @@ import org.matsim.vehicles.VehicleUtils;
             .addLogisticChainElement(directDistributionElement)
             .build();
 
-    log.info("");
-    log.info(
-        "The initial plan of the lsp is generated and the assigner and the solution from above are added");
+    log.info("The initial plan of the lsp is generated and the assigner and the solution from above are added");
 
     return LSPUtils.createLSPPlan()
         .setInitialShipmentAssigner(ResourceImplementationUtils.createSingleLogisticChainShipmentAssigner())
@@ -504,7 +500,7 @@ import org.matsim.vehicles.VehicleUtils;
       LogisticChainElement mainRunElement,
       LogisticChainElement hubElement,
       LogisticChainElement distributionElement) {
-    log.info("");
+
     log.info("set up logistic Solution - original with hub usage solution is created");
 
     // Das ist wichtig, damit er die Kette zur Verfügung hat.
@@ -521,9 +517,7 @@ import org.matsim.vehicles.VehicleUtils;
             .addLogisticChainElement(distributionElement)
             .build();
 
-    log.info("");
-    log.info(
-        "The initial plan of the lsp is generated and the assigner and the solution from above are added");
+    log.info("The initial plan of the lsp is generated and the assigner and the solution from above are added");
 
     return LSPUtils.createLSPPlan()
         .setInitialShipmentAssigner(ResourceImplementationUtils.createSingleLogisticChainShipmentAssigner())
@@ -531,7 +525,7 @@ import org.matsim.vehicles.VehicleUtils;
   }
 
   private static VehicleType createCarrierVehicleType(String vehicleTypeId) {
-    VehicleType vehicleType = VehicleUtils.createVehicleType(Id.create(vehicleTypeId, VehicleType.class), TransportMode.car);
+    VehicleType vehicleType = VehicleUtils.createVehicleType(Id.createVehicleTypeId(vehicleTypeId), TransportMode.car);
     vehicleType.getCapacity().setOther(10);
     vehicleType.getCostInformation().setCostsPerMeter(0.0004);
     vehicleType.getCostInformation().setCostsPerSecond(0.38);

@@ -32,6 +32,7 @@ import org.matsim.api.core.v01.network.Link;
 import org.matsim.api.core.v01.network.Network;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
+import org.matsim.core.config.groups.ControllerConfigGroup;
 import org.matsim.core.config.groups.VspExperimentalConfigGroup;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controller;
@@ -62,6 +63,8 @@ import org.matsim.vehicles.VehicleUtils;
       ConfigUtils.applyCommandline(config, args);
     }
 
+	config.controller().setCompressionType(ControllerConfigGroup.CompressionType.gzip);
+
     FreightCarriersConfigGroup freightConfig =
         ConfigUtils.addOrGetModule(config, FreightCarriersConfigGroup.class);
     freightConfig.setTimeWindowHandling(FreightCarriersConfigGroup.TimeWindowHandling.ignore);
@@ -76,17 +79,15 @@ import org.matsim.vehicles.VehicleUtils;
 
     // assign the lspShipments to the LSP
     for (LspShipment lspShipment : lspShipments) {
-      lsp.assignShipmentToLSP(lspShipment);
+      lsp.assignShipmentToLspPlan(lspShipment);
     }
 
     // schedule the LSP with the lspShipments and according to the scheduler of the Resource
     lsp.scheduleLogisticChains();
 
     // set up simulation controller and LSPModule
-    ArrayList<LSP> lspList = new ArrayList<>();
-    lspList.add(lsp);
-    LSPs lsps = new LSPs(lspList);
-    LSPUtils.addLSPs(scenario, lsps);
+	LSPUtils.loadLspsIntoScenario(scenario, Collections.singletonList(lsp));
+
 
     config.controller().setFirstIteration(0);
     config.controller().setLastIteration(0);

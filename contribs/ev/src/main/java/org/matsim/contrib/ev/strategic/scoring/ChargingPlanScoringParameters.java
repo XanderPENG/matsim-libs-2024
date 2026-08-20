@@ -1,6 +1,13 @@
 package org.matsim.contrib.ev.strategic.scoring;
 
+import java.util.Collection;
+import java.util.stream.Collectors;
+
+import org.matsim.core.config.ConfigGroup;
 import org.matsim.core.config.ReflectiveConfigGroup;
+import org.matsim.core.config.ReflectiveConfigGroup.Parameter;
+
+import picocli.CommandLine.Command;
 
 /**
  * This parameter set represents the weights that are used in charging plan
@@ -17,39 +24,187 @@ public class ChargingPlanScoringParameters extends ReflectiveConfigGroup {
 
 	@Parameter
 	@Comment("scoring utility applied per money paid")
-	public double cost = -1.0;
+	private double cost = -1.0;
 
 	@Parameter
 	@Comment("scoring utility applied per minute waited")
-	public double waitTime_min = 0.0;
+	private double waitTime_min = 0.0;
 
 	@Parameter
 	@Comment("scoring utility applied per detour minutes induced for charging (during routing)")
-	public double detourTime_min = 0.0;
+	private double detourTime_min = 0.0;
 
 	@Parameter
 	@Comment("scoring utility applied per detour kilometres induced for charging (during routing)")
-	public double detourDistance_km = 0.0;
+	private double detourDistance_km = 0.0;
 
 	@Parameter
-	@Comment("scorign utility applied every time the SoC goes to zero")
-	public double zeroSoc = -100.0;
+	@Comment("scoring utility applied every time the SoC goes to zero")
+	private double zeroSoc = -100.0;
 
 	@Parameter
 	@Comment("scoring utility applied every time a charging attempt is unsuccessful (going to next charger)")
-	public double failedChargingAttempt = -10.0;
+	private double failedChargingAttempt = -10.0;
 
 	@Parameter
 	@Comment("scoring utility applied every time a charging process (multiple retries) is unsuccessful")
-	public double failedChargingProcess = -100.0;
+	private double failedChargingProcess = -100.0;
 
 	@Parameter
 	@Comment("scoring utility applied every time the SoC goes from above to below the per-person minium soc (person attriute "
 			+ ChargingPlanScoring.MINIMUM_SOC_PERSON_ATTRIBUTE + ")")
-	public double belowMinimumSoc = 0.0;
+	private double belowMinimumSoc = 0.0;
 
 	@Parameter
 	@Comment("scoring utility applied at the end of the day if the SoC is below the per-person requirement (person attriute "
 			+ ChargingPlanScoring.MINIMUM_END_SOC_PERSON_ATTRIBUTE + ")")
-	public double belowMinimumEndSoc = 0.0;
+	private double belowMinimumEndSoc = 0.0;
+
+	@Parameter
+	@Comment("applied every time an agent planned to do a reservation but it was unsuccessful")
+	private double failedReservation = -100.0;
+
+	@Parameter
+	@Comment("applied to the absolute delta between the end-of-day soc and the per-person target soc")
+	private double targetSoc = 0.0;
+
+	public double getCost() {
+		return cost;
+	}
+
+	public void setCost(double cost) {
+		this.cost = cost;
+	}
+
+	public double getWaitTime_min() {
+		return waitTime_min;
+	}
+
+	public void setWaitTime_min(double waitTime_min) {
+		this.waitTime_min = waitTime_min;
+	}
+
+	public double getDetourTime_min() {
+		return detourTime_min;
+	}
+
+	public void setDetourTime_min(double detourTime_min) {
+		this.detourTime_min = detourTime_min;
+	}
+
+	public double getDetourDistance_km() {
+		return detourDistance_km;
+	}
+
+	public void setDetourDistance_km(double detourDistance_km) {
+		this.detourDistance_km = detourDistance_km;
+	}
+
+	public double getZeroSoc() {
+		return zeroSoc;
+	}
+
+	public void setZeroSoc(double zeroSoc) {
+		this.zeroSoc = zeroSoc;
+	}
+
+	public double getFailedChargingAttempt() {
+		return failedChargingAttempt;
+	}
+
+	public void setFailedChargingAttempt(double failedChargingAttempt) {
+		this.failedChargingAttempt = failedChargingAttempt;
+	}
+
+	public double getFailedChargingProcess() {
+		return failedChargingProcess;
+	}
+
+	public void setFailedChargingProcess(double failedChargingProcess) {
+		this.failedChargingProcess = failedChargingProcess;
+	}
+
+	public double getBelowMinimumSoc() {
+		return belowMinimumSoc;
+	}
+
+	public void setBelowMinimumSoc(double belowMinimumSoc) {
+		this.belowMinimumSoc = belowMinimumSoc;
+	}
+
+	public double getBelowMinimumEndSoc() {
+		return belowMinimumEndSoc;
+	}
+
+	public void setBelowMinimumEndSoc(double belowMinimumEndSoc) {
+		this.belowMinimumEndSoc = belowMinimumEndSoc;
+	}
+
+	public double getFailedReservation() {
+		return failedReservation;
+	}
+
+	public void setFailedReservation(double failedReservation) {
+		this.failedReservation = failedReservation;
+	}
+
+	public double getTargetSoc() {
+		return targetSoc;
+	}
+
+	public void setTargetSoc(double targetSoc) {
+		this.targetSoc = targetSoc;
+	}
+
+	static public class ChargerTypeParams extends ReflectiveConfigGroup {
+		static public final String SET_NAME = "chargerType";
+
+		@Parameter
+		private String chargerType;
+
+		@Parameter
+		private double constant = 0.0;
+
+		public ChargerTypeParams() {
+			super(SET_NAME);
+		}
+
+		public String getChargerType() {
+			return chargerType;
+		}
+
+		public void setChargerType(String val) {
+			this.chargerType = val;
+		}
+
+		public double getConstant() {
+			return constant;
+		}
+
+		public void setConstant(double val) {
+			this.constant = val;
+		}
+	}
+
+	public Collection<ChargerTypeParams> getChargerTypeParams() {
+		return getParameterSets(ChargerTypeParams.SET_NAME).stream().map(ChargerTypeParams.class::cast)
+				.collect(Collectors.toSet());
+	}
+
+	public void removeChargerTypeParms(ChargerTypeParams params) {
+		removeParameterSet(params);
+	}
+
+	public void clearChargerTypeParams() {
+		clearParameterSetsForType(ChargerTypeParams.SET_NAME);
+	}
+
+	@Override
+	public ConfigGroup createParameterSet(String type) {
+		if (type.equals(ChargerTypeParams.SET_NAME)) {
+			return new ChargerTypeParams();
+		}
+
+		return super.createParameterSet(type);
+	}
 }

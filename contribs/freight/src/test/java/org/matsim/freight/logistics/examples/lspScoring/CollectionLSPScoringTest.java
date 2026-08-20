@@ -37,6 +37,7 @@ import org.matsim.api.core.v01.network.Link;
 import org.matsim.api.core.v01.network.Network;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
+import org.matsim.core.config.groups.ControllerConfigGroup;
 import org.matsim.core.config.groups.VspExperimentalConfigGroup;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controller;
@@ -105,19 +106,7 @@ public class CollectionLSPScoringTest {
 		collectionLSP = LSPUtils.LSPBuilder.getInstance(Id.create("CollectionLSP", LSP.class))
 				.setInitialPlan(LSPUtils.createLSPPlan().setInitialShipmentAssigner(createSingleLogisticChainShipmentAssigner()).addLogisticChain(collectionSolution))
 				.setLogisticChainScheduler(createDefaultSimpleForwardLogisticChainScheduler(Collections.singletonList(collectionResource)))
-//				.setSolutionScorer(new ExampleLSPScoring.TipScorer())
 				.build();
-
-//		TipEventHandler handler = new TipEventHandler();
-//		LSPAttribute<Double> value = LSPInfoFunctionUtils.createInfoFunctionValue("TIP IN EUR" );
-//		LSPAttributes function = LSPInfoFunctionUtils.createDefaultInfoFunction();
-//		function.getAttributes().add(value );
-//		TipInfo info = new TipInfo();
-//		TipScorer.TipSimulationTracker tipTracker = new TipScorer.TipSimulationTracker();
-//		collectionResource.addSimulationTracker(tipTracker);
-//		TipScorer tipScorer = new TipScorer();
-//		collectionLSP.addSimulationTracker( tipScorer );
-//		collectionLSP.setScorer(tipScorer);
 
 		List<Link> linkList = new LinkedList<>(network.getLinks().values());
 
@@ -147,16 +136,12 @@ public class CollectionLSPScoringTest {
 			builder.setStartTimeWindow(startTimeWindow);
 			builder.setDeliveryServiceTime(capacityDemand * 60);
 			LspShipment shipment = builder.build();
-			collectionLSP.assignShipmentToLSP(shipment);
+			collectionLSP.assignShipmentToLspPlan(shipment);
 		}
 
 		collectionLSP.scheduleLogisticChains();
 
-		ArrayList<LSP> lspList = new ArrayList<>();
-		lspList.add(collectionLSP);
-		LSPs lsps = new LSPs(lspList);
-
-		LSPUtils.addLSPs(scenario, lsps);
+		LSPUtils.loadLspsIntoScenario(scenario, Collections.singletonList(collectionLSP));
 
 		Controller controller = ControllerUtils.createController(scenario);
 
@@ -171,6 +156,7 @@ public class CollectionLSPScoringTest {
 		config.controller().setLastIteration(0);
 		config.controller().setOverwriteFileSetting(OverwriteFileSetting.deleteDirectoryIfExists);
 		config.controller().setOutputDirectory(utils.getOutputDirectory());
+		config.controller().setCompressionType(ControllerConfigGroup.CompressionType.gzip);
 		//The VSP default settings are designed for person transport simulation. After talking to Kai, they will be set to WARN here. Kai MT may'23
 		controller.getConfig().vspExperimental().setVspDefaultsCheckingLevel(VspExperimentalConfigGroup.VspDefaultsCheckingLevel.warn);
 		controller.run();
