@@ -131,7 +131,7 @@ public class LinkReceiverAndCarrier {
 		// Create a new carrierPlan from the best solution
 		VehicleRoutingProblemSolution bestSolution = Solutions.bestOf(solutions);
 		VRP_SOLUTION_CACHE.put(cacheKey, bestSolution);
-		CarrierPlan newPlan = MatsimJspritFactory.createPlan(carrier, bestSolution);
+		CarrierPlan newPlan = MatsimJspritFactory.createPlan(bestSolution);
 		// Route plan so as to add routes to the plan
 		NetworkRouter.routePlan(newPlan, netBasedCosts);
 		// Assign this plan now to the carrier and make it the selected carrier plan

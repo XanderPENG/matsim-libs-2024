@@ -143,8 +143,8 @@ public final class RunMutableAfCollabReceiverDistantCarrier {
 				RunCollabReceiverDistantCarrier.ReceiverAreaPolicy.CENTERED_CHESSBOARD_EXAMPLE_AREA,
 				true);
 		return new MutableOptions(experimentOptions, 0.8, 0.1, 0.9, 0.05, 1.0, 0.9,
-			5, 6, 3, 5, 15, 3, 0.05, 0.70, MutableAfSelectionPolicy.CARRIER_BEST,
-			0.10, 0.80, 4.0, 5, 100);
+			5, 15, 5, 3, 30, 3, 0.05, 0.70, MutableAfSelectionPolicy.CARRIER_BEST,
+			0.10, 0.80, 4.0, 5, 200);
 	}
 
 	static MutableOptions parseOptions(String[] args, MutableOptions defaults) {
@@ -381,7 +381,7 @@ public final class RunMutableAfCollabReceiverDistantCarrier {
 		CollaborationUtils.createCoalitionWithCarriersAndAddCollaboratingReceivers(scenario);
 
 		CarrierVehicleTypes sourceTypes = CarrierVehicleTypes.getVehicleTypes(scenarioCarriers);
-		CarrierVehicleTypes scenarioTypes = CarriersUtils.getCarrierVehicleTypes(scenario);
+		CarrierVehicleTypes scenarioTypes = CarriersUtils.getOrAddCarrierVehicleTypes(scenario);
 		scenarioTypes.getVehicleTypes().putAll(sourceTypes.getVehicleTypes());
 		bootstrapInitialCarrierPlans(scenario, mutableConfig, freightConfig.getVrpMaxIterations());
 

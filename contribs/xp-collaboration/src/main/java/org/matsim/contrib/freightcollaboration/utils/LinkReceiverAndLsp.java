@@ -49,7 +49,7 @@ public class LinkReceiverAndLsp {
 			.build();
 		copiedPlan.setLSP(copy);
 		copyAttributes(originalLsp, copy);
-		rebuildShipments(originalLsp, Set.of()).forEach(copy::assignShipmentToLSP);
+		rebuildShipments(originalLsp, Set.of()).forEach(copy::assignShipmentToLspPlan);
 		return copy;
 	}
 	/**
@@ -97,7 +97,7 @@ public class LinkReceiverAndLsp {
 
 		// 5) rebuild shipments by cloning originals and applying receiver updates
 		List<LspShipment> newShipments = rebuildShipments(originalLsp, receiverCollaborators);
-		newShipments.forEach(newLsp::assignShipmentToLSP);
+		newShipments.forEach(newLsp::assignShipmentToLspPlan);
 
 		// 6) schedule – this will populate carrier plans on the cloned resources only
 		newLsp.scheduleLogisticChains();

@@ -151,7 +151,7 @@ public class ReRouteListener implements BeforeMobsimListener {
 		// Replace shipments and let the assigner wire them into the fresh plan
 		originalLsp.getLspShipments().clear();
 		for (LspShipment shipment : replannedLsp.getLspShipments()) {
-			originalLsp.assignShipmentToLSP(shipment);
+				originalLsp.assignShipmentToLspPlan(shipment);
 		}
 
 		// Start from clean shipment plans to avoid accumulation across iterations

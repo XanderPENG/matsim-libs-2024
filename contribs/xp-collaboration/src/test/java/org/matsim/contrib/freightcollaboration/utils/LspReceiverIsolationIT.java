@@ -289,7 +289,7 @@ class LspReceiverIsolationIT {
 				.setInitialPlan(plan)
 				.build();
 		plan.setLSP(lsp);
-		lspShipments.forEach(lsp::assignShipmentToLSP);
+		lspShipments.forEach(lsp::assignShipmentToLspPlan);
 		return lsp;
 	}
 

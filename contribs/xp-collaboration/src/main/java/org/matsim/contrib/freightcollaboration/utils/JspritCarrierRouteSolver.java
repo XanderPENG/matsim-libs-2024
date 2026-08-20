@@ -39,7 +39,7 @@ public final class JspritCarrierRouteSolver implements CarrierRouteSolver {
 		if (solutions.isEmpty()) {
 			throw new IllegalStateException("jsprit returned no carrier plan for " + carrier.getId());
 		}
-		CarrierPlan solvedPlan = MatsimJspritFactory.createPlan(carrier, Solutions.bestOf(solutions));
+		CarrierPlan solvedPlan = MatsimJspritFactory.createPlan(Solutions.bestOf(solutions));
 		NetworkRouter.routePlan(solvedPlan, costs);
 		return solvedPlan;
 	}

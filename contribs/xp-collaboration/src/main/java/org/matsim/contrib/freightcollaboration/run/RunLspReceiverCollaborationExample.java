@@ -72,8 +72,7 @@ public class RunLspReceiverCollaborationExample {
 		lsp.scheduleLogisticChains();
 
 		// Register LSPs in scenario (also adds carrier resources)
-		LSPs lsps = new LSPs(Set.of(lsp));
-		LSPUtils.addLSPs(scenario, lsps);
+		LSPUtils.loadLspsIntoScenario(scenario, Set.of(lsp));
 
 		// Link receivers to carriers and create coalition
 		CollaborationUtils.linkReceiverOrdersToCarriers(ReceiverUtils.getReceivers(scenario), CarriersUtils.getCarriers(scenario));
@@ -260,7 +259,7 @@ public class RunLspReceiverCollaborationExample {
 		plan.setLSP(lsp);
 
 		// assign shipments to LSP (adds them into chains and shipment plans)
-		lspShipments.forEach(lsp::assignShipmentToLSP);
+		lspShipments.forEach(lsp::assignShipmentToLspPlan);
 
 		// Schedule LSP to convert LSP shipments to carrier shipments
 //		lsp.scheduleLogisticChains();
