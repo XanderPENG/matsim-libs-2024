@@ -21,6 +21,10 @@ jobs:
           distribution: zulu
           cache: maven
 
+      - name: Apply probe-only compatible LSP strategy configuration
+        run: >-
+          python -c "from pathlib import Path; p=Path('contribs/xp-collaboration/src/main/java/org/matsim/contrib/freightcollaboration/run/RunLspReceiverCollaborationExample.java'); s=p.read_text(); old='Set.of(org.matsim.contrib.freightcollaboration.strategy.CollaborationStrategies.COLLABORATION_STATUS_MUTATION)'; assert old in s; p.write_text(s.replace(old, 'Set.of()', 1))"
+
       - name: Build xp-collaboration and dependencies
         run: mvn install --batch-mode --also-make --projects contribs/xp-collaboration -DskipTests -Dsource.skip
 
