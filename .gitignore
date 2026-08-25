@@ -42,3 +42,7 @@ data/chessboardCRCollabMoreDispersed/
 data/freightChessboardRC/figures
 /figures
 /python/freightCollabGrid-DistantCarrier/test
+data/randomDemand15Receivers_nni.7z
+.github/workflows/lsp-example-smoke-temporary.yml
+/doc/*
+doc
