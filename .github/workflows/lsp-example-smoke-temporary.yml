@@ -1,0 +1,33 @@
+name: lsp-example-smoke-temporary
+
+on:
+  push:
+    branches:
+      - docs/lsp-collaboration-review-20260825
+  workflow_dispatch:
+
+jobs:
+  run-lsp-receiver-example:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          java-version: 25
+          distribution: zulu
+          cache: maven
+
+      - name: Build xp-collaboration and dependencies
+        run: mvn install --batch-mode --also-make --projects contribs/xp-collaboration -DskipTests -Dsource.skip
+
+      - name: Run LSP-receiver collaboration example
+        run: >-
+          mvn --batch-mode --projects contribs/xp-collaboration
+          -Dmatsim.preferLocalDtds=true
+          -Dexec.mainClass=org.matsim.contrib.freightcollaboration.run.RunLspReceiverCollaborationExample
+          -Dexec.cleanupDaemonThreads=false
+          org.codehaus.mojo:exec-maven-plugin:3.5.1:java
