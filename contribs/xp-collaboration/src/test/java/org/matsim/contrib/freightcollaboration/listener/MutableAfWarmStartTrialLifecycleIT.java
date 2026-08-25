@@ -109,8 +109,18 @@ class MutableAfWarmStartTrialLifecycleIT {
 		assertEquals(MutableAfPhase.ADAPT, fixture.store.snapshot(fixture.carrier.getId()).phase());
 		assertEquals(1, fixture.store.snapshot(fixture.carrier.getId()).dwell());
 		assertEquals(1, fixture.store.snapshot(fixture.carrier.getId()).stabilityWindowSize());
-		assertEquals("WARM_START_TRIAL_COMPLETE",
-			fixture.store.snapshot(fixture.carrier.getId()).decision());
+		MutableAfLearningStore.CarrierSnapshot trialRow = fixture.store.snapshot(fixture.carrier.getId());
+		assertEquals("WARM_START_TRIAL_COMPLETE", trialRow.decision());
+		assertTrue(trialRow.warmStartTrial());
+		assertEquals(0, trialRow.warmStartSourceFactorIndex());
+		assertTrue(trialRow.warmStartScoreClearedBeforeMobsim());
+
+		fixture.store.prepareReplanning(5);
+		MutableAfLearningStore.CarrierSnapshot nextRow = fixture.store.snapshot(fixture.carrier.getId());
+		assertEquals("NO_DECISION", nextRow.decision());
+		assertFalse(nextRow.warmStartTrial());
+		assertNull(nextRow.warmStartSourceFactorIndex());
+		assertFalse(nextRow.warmStartScoreClearedBeforeMobsim());
 	}
 
 	private static Fixture fixture() {

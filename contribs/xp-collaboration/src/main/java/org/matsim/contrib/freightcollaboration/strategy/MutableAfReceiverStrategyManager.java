@@ -22,6 +22,7 @@ import org.matsim.freight.receiver.replanning.ReceiverStrategyManager;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -99,6 +100,7 @@ public final class MutableAfReceiverStrategyManager implements ReceiverStrategyM
 	}
 
 	private void selectOrMutate(Receiver receiver) {
+		normalizeAndTrim(receiver);
 		double draw = MatsimRandom.getLocalInstance().nextDouble() * (SELECTION_WEIGHT + MUTATION_WEIGHT);
 		if (draw < SELECTION_WEIGHT || receiver.getPlans().isEmpty()) {
 			receiver.setSelectedPlan(select(receiver));
@@ -126,9 +128,18 @@ public final class MutableAfReceiverStrategyManager implements ReceiverStrategyM
 			? current.getEnd() + TW_STEP : current.getEnd() - TW_STEP;
 		double newEnd = Math.max(originalEnd, Math.min(maximumEnd, candidate));
 		mutated.getTimeWindows().set(0, TimeWindow.newInstance(current.getStart(), newEnd));
+		String signature = MutableAfPlanUtils.receiverPlanSignature(mutated);
+		ReceiverPlan existing = receiver.getPlans().stream()
+			.filter(plan -> MutableAfPlanUtils.receiverPlanSignature(plan).equals(signature))
+			.findFirst().orElse(null);
+		if (existing != null) {
+			receiver.setSelectedPlan(existing);
+			normalizeAndTrim(receiver);
+			return;
+		}
 		receiver.addPlan(mutated);
 		receiver.setSelectedPlan(mutated);
-		trim(receiver);
+		normalizeAndTrim(receiver);
 	}
 
 	private ReceiverPlan select(Receiver receiver) {
@@ -163,10 +174,32 @@ public final class MutableAfReceiverStrategyManager implements ReceiverStrategyM
 		return scored.getLast();
 	}
 
-	private void trim(Receiver receiver) {
+	void normalizeAndTrim(Receiver receiver) {
+		List<ReceiverPlan> originalOrder = new ArrayList<>(receiver.getPlans());
+		ReceiverPlan selected = receiver.getSelectedPlan();
+		Map<String, List<ReceiverPlan>> bySignature = new LinkedHashMap<>();
+		for (ReceiverPlan plan : originalOrder) {
+			bySignature.computeIfAbsent(MutableAfPlanUtils.receiverPlanSignature(plan),
+				ignored -> new ArrayList<>()).add(plan);
+		}
+		for (List<ReceiverPlan> equivalents : bySignature.values()) {
+			if (equivalents.size() < 2) {
+				continue;
+			}
+			ReceiverPlan canonical = equivalents.stream()
+				.max((left, right) -> compareCanonical(left, right, selected, originalOrder))
+				.orElseThrow();
+			if (equivalents.contains(selected) && canonical != selected) {
+				receiver.setSelectedPlan(canonical);
+			}
+			for (ReceiverPlan duplicate : equivalents) {
+				if (duplicate != canonical) {
+					receiver.removePlan(duplicate);
+				}
+			}
+		}
 		while (receiver.getPlans().size() > maxPlans) {
-			ReceiverPlan duplicate = findInferiorDuplicate(receiver);
-			ReceiverPlan removable = duplicate != null ? duplicate : receiver.getPlans().stream()
+			ReceiverPlan removable = receiver.getPlans().stream()
 				.filter(plan -> plan != receiver.getSelectedPlan())
 				.filter(plan -> !learningStore.isOutsideOption(plan))
 				.min(Comparator.comparingDouble(MutableAfReceiverStrategyManager::removalScore)
@@ -176,15 +209,22 @@ public final class MutableAfReceiverStrategyManager implements ReceiverStrategyM
 		}
 	}
 
-	private ReceiverPlan findInferiorDuplicate(Receiver receiver) {
-		Map<String, List<ReceiverPlan>> bySignature = receiver.getPlans().stream()
-			.filter(plan -> plan != receiver.getSelectedPlan())
-			.filter(plan -> !learningStore.isOutsideOption(plan))
-			.collect(java.util.stream.Collectors.groupingBy(MutableAfPlanUtils::receiverPlanSignature));
-		return bySignature.values().stream().filter(plans -> plans.size() > 1)
-			.flatMap(List::stream)
-			.min(Comparator.comparingDouble(MutableAfReceiverStrategyManager::removalScore))
-			.orElse(null);
+	private int compareCanonical(ReceiverPlan left, ReceiverPlan right, ReceiverPlan selected,
+			List<ReceiverPlan> originalOrder) {
+		int comparison = Boolean.compare(learningStore.isOutsideOption(left),
+			learningStore.isOutsideOption(right));
+		if (comparison != 0) {
+			return comparison;
+		}
+		comparison = Boolean.compare(left == selected, right == selected);
+		if (comparison != 0) {
+			return comparison;
+		}
+		comparison = Double.compare(removalScore(left), removalScore(right));
+		if (comparison != 0) {
+			return comparison;
+		}
+		return Integer.compare(originalOrder.indexOf(right), originalOrder.indexOf(left));
 	}
 
 	private double originalUpperBound(Id<Receiver> receiverId) {

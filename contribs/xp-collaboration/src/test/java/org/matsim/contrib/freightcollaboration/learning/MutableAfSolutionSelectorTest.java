@@ -91,6 +91,6 @@ class MutableAfSolutionSelectorTest {
 			CARRIER_ID, factorIndex, 1, carrierScore, receiverScores,
 			receiverAScore + receiverBScore, Set.of(RECEIVER_A), surplus, 0.0,
 			"receiver-profile-" + iteration, "route-profile-" + iteration, feasible, feasible);
-		return new ExecutedJointSnapshot(observation, factorIndex / 10.0, List.of(), Map.of());
+		return new ExecutedJointSnapshot(observation, factorIndex / 10.0, null, List.of(), Map.of());
 	}
 }

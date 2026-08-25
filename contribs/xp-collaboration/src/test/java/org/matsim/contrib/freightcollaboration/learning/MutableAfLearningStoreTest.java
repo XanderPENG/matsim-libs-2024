@@ -382,6 +382,7 @@ class MutableAfLearningStoreTest {
 	@Test
 	void boundedMemoryEvictsInferiorDormantFactorButKeepsLightweightStatistics() {
 		Fixture fixture = fixture(0.5, 0.7, 0.1, 2, 1, 1, 0.05);
+		fixture.carrier.getSelectedPlan().setJspritScore(55.0);
 		CarrierPlan factorSix = MutableAfPlanUtils.copyCarrierPlan(
 			fixture.carrier.getSelectedPlan(), false);
 		CarrierAllocationFactor.set(factorSix, 0.6, fixture.config);
@@ -418,6 +419,9 @@ class MutableAfLearningStoreTest {
 			"an evicted live plan must be reconstructable from its immutable checkpoint archive");
 		assertEquals(List.of(0.5, 0.6), fixture.carrier.getPlans().stream()
 			.map(CarrierAllocationFactor::require).sorted().toList());
+		assertEquals(55.0, fixture.carrier.getPlans().stream()
+			.filter(plan -> CarrierAllocationFactor.require(plan) == 0.6)
+			.findFirst().orElseThrow().getJspritScore());
 	}
 
 	@Test
@@ -472,6 +476,93 @@ class MutableAfLearningStoreTest {
 		execute(fixture, 100, 25.0, 9.0, 0.0);
 		assertEquals(25.0, snapshot(fixture).finalSelectionExecutedScore());
 		assertEquals("FINAL_SELECTION_EXECUTED", snapshot(fixture).decision());
+	}
+
+	@Test
+	void finalSelectionRetainsTheLatestEligibleRevisitAcrossConsecutiveUnsafeExecutions() {
+		Fixture fixture = fixture(0.5, 0.6, 0.1, 2, 1, 2, 0.05);
+		fixture.carrier.getSelectedPlan().setJspritScore(41.0);
+		baseline(fixture);
+		setCoalition(fixture, true);
+		fixture.store.prepareReplanning(1);
+		fixture.carrier.getSelectedPlan().setJspritScore(42.0);
+		execute(fixture, 1, 12.0, 6.0, 5.0);
+
+		fixture.store.prepareReplanning(90);
+		fixture.store.beginFinalExecution(90);
+		fixture.carrier.getSelectedPlan().setJspritScore(43.0);
+		execute(fixture, 90, 20.0, 7.0, 6.0);
+
+		fixture.store.prepareReplanning(91);
+		fixture.store.beginFinalExecution(91);
+		fixture.carrier.getSelectedPlan().setJspritScore(91.0);
+		execute(fixture, 91, 100.0, 4.0, 7.0);
+		assertTrue(snapshot(fixture).decision().startsWith("FINAL_REVISIT_INELIGIBLE_"));
+
+		fixture.store.prepareReplanning(92);
+		fixture.store.beginFinalExecution(92);
+		fixture.carrier.getSelectedPlan().setJspritScore(92.0);
+		execute(fixture, 92, 200.0, 7.0, -5.0);
+		assertTrue(snapshot(fixture).decision().startsWith("FINAL_REVISIT_INELIGIBLE_"));
+
+		fixture.store.prepareReplanning(100);
+		assertEquals(MutableAfPhase.FINAL_SELECTION, snapshot(fixture).phase());
+		assertEquals(20.0, fixture.carrier.getSelectedPlan().getScore());
+		assertEquals(43.0, fixture.carrier.getSelectedPlan().getJspritScore());
+		assertEquals(7.0, fixture.receiver.getSelectedPlan().getScore());
+		assertEquals(20.0, snapshot(fixture).checkpointSelectionScore());
+		assertEquals(90, snapshot(fixture).checkpointSourceIteration());
+		MutableAfLearningStore.CheckpointEvent finalEvent = fixture.store.checkpointEvents().getLast();
+		assertTrue(finalEvent.finalSelection());
+		assertTrue(finalEvent.participationFeasible());
+		assertEquals(6.0, finalEvent.totalSurplus());
+		assertEquals(90, finalEvent.sourceIteration());
+	}
+
+	@Test
+	void finalSelectionExcludesNegativeSurplusCheckpointsAndRestoresBaselineMetadata() {
+		Fixture fixture = fixture(0.5, 0.6, 0.1, 2, 1, 2, 0.05);
+		fixture.carrier.getSelectedPlan().setJspritScore(31.0);
+		baseline(fixture);
+		setCoalition(fixture, true);
+		fixture.store.prepareReplanning(1);
+		fixture.carrier.getSelectedPlan().setJspritScore(99.0);
+		execute(fixture, 1, 12.0, 6.0, -0.1);
+
+		FactorCheckpoint negativeSurplus = fixture.store.checkpoint(
+			fixture.carrier.getId(), 0).orElseThrow();
+		assertTrue(negativeSurplus.participationFeasible());
+		assertEquals(-0.1, negativeSurplus.executedState().observation().totalSurplus(), 1e-12);
+
+		fixture.store.prepareReplanning(90);
+		assertEquals("FINAL_REVISIT_BASELINE_ONLY", snapshot(fixture).finalStatus());
+		assertEquals(10.0, fixture.carrier.getSelectedPlan().getScore());
+		assertEquals(31.0, fixture.carrier.getSelectedPlan().getJspritScore());
+		fixture.store.beginFinalExecution(90);
+		fixture.carrier.getSelectedPlan().setJspritScore(100.0);
+		execute(fixture, 90, 100.0, 100.0, 50.0);
+		fixture.store.prepareReplanning(100);
+		assertEquals("NO_FEASIBLE_FACTOR_BASELINE_FALLBACK", snapshot(fixture).finalStatus());
+		assertEquals(10.0, snapshot(fixture).checkpointSelectionScore());
+		assertEquals(0, snapshot(fixture).checkpointSourceIteration());
+		assertEquals(10.0, fixture.carrier.getSelectedPlan().getScore());
+		assertEquals(0.5, CarrierAllocationFactor.require(fixture.carrier.getSelectedPlan()));
+		assertEquals(31.0, fixture.carrier.getSelectedPlan().getJspritScore());
+		assertEquals("BASELINE", fixture.store.checkpointEvents().getLast().finalSelectionTier());
+	}
+
+	@Test
+	void finalEligibilityUsesTheConfiguredNumericalSurplusBoundary() {
+		assertTrue(MutableAfLearningStore.isFinalSelectionEligible(
+			observationWithEligibility(-1e-9, true)));
+		assertTrue(MutableAfLearningStore.isFinalSelectionEligible(
+			observationWithEligibility(-5e-10, true)));
+		assertFalse(MutableAfLearningStore.isFinalSelectionEligible(
+			observationWithEligibility(-1.000001e-9, true)));
+		assertFalse(MutableAfLearningStore.isFinalSelectionEligible(
+			observationWithEligibility(1.0, false)));
+		assertFalse(MutableAfLearningStore.isFinalSelectionEligible(
+			observationWithEligibility(Double.NaN, true)));
 	}
 
 	@Test
@@ -639,6 +730,13 @@ class MutableAfLearningStoreTest {
 	private static void setScores(Fixture fixture, double carrierScore, double receiverScore) {
 		fixture.carrier.getSelectedPlan().setScore(carrierScore);
 		fixture.receiver.getSelectedPlan().setScore(receiverScore);
+	}
+
+	private static ExecutedJointObservation observationWithEligibility(double surplus,
+			boolean participationFeasible) {
+		return new ExecutedJointObservation(1, 1, Id.create("carrier", Carrier.class), 0, 1,
+			10.0, Map.of(), 0.0, Set.of(), surplus, 0.0, "receiver", "route", true,
+			participationFeasible);
 	}
 
 	private static void setRouteProfile(Fixture fixture) {

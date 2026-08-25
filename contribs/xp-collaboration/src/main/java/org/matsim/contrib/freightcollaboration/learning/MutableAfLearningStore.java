@@ -15,7 +15,6 @@ import org.matsim.core.gbl.MatsimRandom;
 import org.matsim.freight.carriers.Carrier;
 import org.matsim.freight.carriers.CarrierPlan;
 import org.matsim.freight.carriers.CarriersUtils;
-import org.matsim.freight.carriers.ScheduledTour;
 import org.matsim.freight.carriers.TimeWindow;
 import org.matsim.freight.receiver.Receiver;
 import org.matsim.freight.receiver.ReceiverPlan;
@@ -42,6 +41,8 @@ import java.util.StringJoiner;
  */
 @Singleton
 public final class MutableAfLearningStore {
+	private static final double FINAL_SURPLUS_EPSILON = 1e-9;
+	private static final String JSPRIT_SCORE_ATTRIBUTE = "jspritScore";
 
 	private final Scenario scenario;
 	private final MutableAllocationFactorConfigGroup config;
@@ -114,6 +115,10 @@ public final class MutableAfLearningStore {
 		for (CarrierState state : carrierStates.values()) {
 			state.routeReplanned = false;
 			state.lastEviction = "";
+			state.lastDecision = "NO_DECISION";
+			state.warmStartTrialThisIteration = false;
+			state.warmStartSourceFactorIndex = null;
+			state.warmStartScoreClearedBeforeMobsim = false;
 			if (iteration == lastIteration) {
 				prepareFinalSelection(state, iteration);
 				continue;
@@ -319,7 +324,7 @@ public final class MutableAfLearningStore {
 			state.lastCheckpointSourceIteration, state.livePlans.keySet().stream().sorted().toList(),
 			state.lastEviction, state.factors.entrySet().stream().sorted(Map.Entry.comparingByKey())
 				.map(entry -> entry.getKey() + ":" + entry.getValue().maturity).toList(),
-			state.phase == MutableAfPhase.WARM_START_TRIAL, state.warmStartSourceFactorIndex,
+			state.warmStartTrialThisIteration, state.warmStartSourceFactorIndex,
 			state.warmStartScoreClearedBeforeMobsim, state.finalStatus,
 			state.finalRevisitCandidates.keySet().stream().sorted().toList(),
 			state.finalRevisitSelectionCount, state.checkpointSelectionScore,
@@ -372,7 +377,6 @@ public final class MutableAfLearningStore {
 	private void captureBaseline(CarrierState state, ExecutedJointSnapshot baseline) {
 		state.baseline = baseline;
 		state.baselineCarrierScore = baseline.observation().carrierScore();
-		state.baselineTours = MutableAfPlanUtils.copyTours(baseline.carrierTours());
 		baseline.observation().receiverScores().forEach(receiverBaselines::put);
 		for (Id<Receiver> receiverId : state.receiverIds) {
 			Receiver receiver = receiver(receiverId);
@@ -559,6 +563,7 @@ public final class MutableAfLearningStore {
 		state.warmStartSourceFactorIndex = revisit ? null : current;
 		state.warmStartExecutionIteration = -1;
 		state.warmStartScoreClearedBeforeMobsim = false;
+		state.warmStartTrialThisIteration = !revisit;
 		state.phase = revisit ? MutableAfPhase.ADAPT : MutableAfPhase.WARM_START_TRIAL;
 		state.lastDecision = (revisit ? "SWITCH_" : "WARM_START_")
 			+ (explore ? "EXPLORE" : "EXPLOIT") + "_"
@@ -688,7 +693,8 @@ public final class MutableAfLearningStore {
 	private void initializeFinalRevisitCandidates(CarrierState state) {
 		List<FactorCheckpoint> checkpoints = state.factors.values().stream()
 			.map(record -> record.checkpoint).filter(Objects::nonNull)
-			.filter(FactorCheckpoint::participationFeasible)
+			.filter(checkpoint -> isFinalSelectionEligible(
+				checkpoint.executedState().observation()))
 			.sorted(Comparator
 				.comparingDouble((FactorCheckpoint checkpoint) ->
 					checkpoint.executedState().observation().carrierScore()).reversed()
@@ -717,10 +723,7 @@ public final class MutableAfLearningStore {
 		ExecutedJointSnapshot snapshot = candidate.latestExecuted;
 		CarrierPlan plan = new CarrierPlan(state.carrier,
 			MutableAfPlanUtils.copyTours(snapshot.carrierTours()));
-		CarrierAllocationFactor.set(plan, config.valueAt(candidate.factorIndex), config);
-		plan.setScore(snapshot.observation().carrierScore());
-		plan.getAttributes().putAttribute(MutableAfPlanUtils.CARRIER_ROUTE_PROFILE,
-			selectedProfile(snapshot.selectedReceiverPlans()));
+		restoreCarrierPlan(plan, snapshot);
 		state.carrier.addPlan(plan);
 		state.livePlans.put(candidate.factorIndex, plan);
 		state.finalRevisitCandidates.put(candidate.factorIndex, candidate);
@@ -780,7 +783,15 @@ public final class MutableAfLearningStore {
 		}
 		candidate.latestExecuted = executed;
 		candidate.evaluations++;
-		state.lastDecision = "FINAL_REVISIT_EVALUATED_" + config.valueAt(candidate.factorIndex);
+		if (candidate.checkpoint != null && isFinalSelectionEligible(executed.observation())) {
+			candidate.latestEligible = executed;
+			state.lastDecision = "FINAL_REVISIT_EVALUATED_" + config.valueAt(candidate.factorIndex);
+		} else if (candidate.checkpoint == null) {
+			state.lastDecision = "FINAL_REVISIT_BASELINE_PROBE_"
+				+ config.valueAt(candidate.factorIndex);
+		} else {
+			state.lastDecision = "FINAL_REVISIT_INELIGIBLE_" + config.valueAt(candidate.factorIndex);
+		}
 	}
 
 	private void prepareFinalSelection(CarrierState state, int iteration) {
@@ -792,20 +803,20 @@ public final class MutableAfLearningStore {
 			initializeFinalRevisitCandidates(state);
 		}
 		FinalRevisitCandidate selected = state.finalRevisitCandidates.values().stream()
-			.max(Comparator.comparingDouble(FinalRevisitCandidate::carrierScore)
-				.thenComparingInt(candidate -> candidate.latestExecuted.observation().executionIteration())
+			.max(Comparator.comparingDouble(FinalRevisitCandidate::eligibleCarrierScore)
+				.thenComparingInt(candidate -> candidate.latestEligible.observation().executionIteration())
 				.thenComparingInt(candidate -> -candidate.factorIndex))
 			.orElseThrow(() -> new IllegalStateException("No final mutable-AF candidate for carrier "
 				+ state.carrier.getId()));
-		restoreFinalRevisitCandidate(state, selected);
+		restoreFinalRevisitCandidate(state, selected, selected.latestEligible);
 		state.phase = MutableAfPhase.FINAL_SELECTION;
-		state.checkpointSelectionScore = selected.carrierScore();
-		state.lastCheckpointSourceIteration = selected.latestExecuted.observation().executionIteration();
+		state.checkpointSelectionScore = selected.eligibleCarrierScore();
+		state.lastCheckpointSourceIteration = selected.latestEligible.observation().executionIteration();
 		if (selected.checkpoint == null) {
 			state.finalStatus = "NO_FEASIBLE_FACTOR_BASELINE_FALLBACK";
 			state.lastDecision = "FINAL_SELECTION_BASELINE";
 			checkpointEvents.add(baselineEvent(++checkpointSequence, state,
-				selected.latestExecuted));
+				selected.latestEligible));
 		} else {
 			FactorCheckpoint finalView = finalSelectionView(state, selected);
 			String tier = selected.checkpoint.maturity() == FactorMaturity.STABLE_CHECKPOINT
@@ -822,7 +833,7 @@ public final class MutableAfLearningStore {
 	private FactorCheckpoint finalSelectionView(CarrierState state,
 			FinalRevisitCandidate candidate) {
 		FactorCheckpoint source = Objects.requireNonNull(candidate.checkpoint);
-		ExecutedJointSnapshot executed = candidate.latestExecuted;
+		ExecutedJointSnapshot executed = candidate.latestEligible;
 		return new FactorCheckpoint(candidate.factorIndex, config.valueAt(candidate.factorIndex),
 			source.visit(), executed.observation().executionIteration(), source.reason(),
 			source.maturity(), MutableAfSelectionPolicy.CARRIER_BEST, executed,
@@ -832,29 +843,27 @@ public final class MutableAfLearningStore {
 
 	private void restoreFinalRevisitCandidate(CarrierState state,
 			FinalRevisitCandidate candidate) {
+		restoreFinalRevisitCandidate(state, candidate, candidate.latestExecuted);
+	}
+
+	private void restoreFinalRevisitCandidate(CarrierState state,
+			FinalRevisitCandidate candidate, ExecutedJointSnapshot snapshot) {
 		CarrierPlan plan = Objects.requireNonNull(state.livePlans.get(candidate.factorIndex),
 			"Final-revisit CarrierPlan is missing for factor " + candidate.factorIndex);
-		ExecutedJointSnapshot snapshot = candidate.latestExecuted;
 		state.carrier.setSelectedPlan(plan);
-		MutableAfPlanUtils.replaceTours(plan, snapshot.carrierTours());
-		plan.setScore(snapshot.observation().carrierScore());
+		restoreCarrierPlan(plan, snapshot);
 		state.activeFactorIndex = candidate.factorIndex;
 		state.activeFinalRevisitFactorIndex = candidate.factorIndex;
 		restoreCheckpointReceivers(state, snapshot);
-		plan.getAttributes().putAttribute(MutableAfPlanUtils.CARRIER_ROUTE_PROFILE,
-			selectedProfile(snapshot.selectedReceiverPlans()));
 	}
 
 	private void restoreCheckpoint(CarrierState state, FactorCheckpoint checkpoint) {
 		CarrierPlan plan = Objects.requireNonNull(state.livePlans.get(checkpoint.factorIndex()),
 			"Final checkpoint factor is no longer retained: " + checkpoint.factorIndex());
 		state.carrier.setSelectedPlan(plan);
-		MutableAfPlanUtils.replaceTours(plan, checkpoint.executedState().carrierTours());
-		plan.setScore(checkpoint.executedState().observation().carrierScore());
+		restoreCarrierPlan(plan, checkpoint.executedState());
 		state.activeFactorIndex = checkpoint.factorIndex();
 		restoreCheckpointReceivers(state, checkpoint.executedState());
-		plan.getAttributes().putAttribute(MutableAfPlanUtils.CARRIER_ROUTE_PROFILE,
-			selectedProfile(checkpoint.executedState().selectedReceiverPlans()));
 	}
 
 	private void restoreBaseline(CarrierState state) {
@@ -867,8 +876,8 @@ public final class MutableAfLearningStore {
 				throw new IllegalStateException("Cannot restore baseline within MAX_FACTOR_PLANS for carrier "
 					+ state.carrier.getId());
 			}
-			plan = new CarrierPlan(state.carrier, MutableAfPlanUtils.copyTours(state.baselineTours));
-			CarrierAllocationFactor.set(plan, config.getInitialAllocationFactor(), config);
+			plan = new CarrierPlan(state.carrier,
+				MutableAfPlanUtils.copyTours(state.baseline.carrierTours()));
 			state.carrier.addPlan(plan);
 			state.livePlans.put(initial, plan);
 			state.carrier.setSelectedPlan(plan);
@@ -877,8 +886,7 @@ public final class MutableAfLearningStore {
 			}
 		}
 		state.carrier.setSelectedPlan(plan);
-		MutableAfPlanUtils.replaceTours(plan, state.baselineTours);
-		plan.setScore(state.baselineCarrierScore);
+		restoreCarrierPlan(plan, state.baseline);
 		state.activeFactorIndex = initial;
 		Map<Id<?>, ? extends BasicPlan> originals = collaborationDataStore.getOriginalPlans()
 			.getOrDefault(CollaboratorRole.RECEIVER, Map.of());
@@ -954,21 +962,15 @@ public final class MutableAfLearningStore {
 				throw new IllegalStateException("Missing Receiver context and checkpoint for factor " + target);
 			}
 			CarrierPlan plan = state.carrier.getSelectedPlan();
-			MutableAfPlanUtils.replaceTours(plan, checkpoint.executedState().carrierTours());
-			plan.setScore(checkpoint.executedState().observation().carrierScore());
+			restoreCarrierPlan(plan, checkpoint.executedState());
 			restoreCheckpointReceivers(state, checkpoint.executedState());
-			plan.getAttributes().putAttribute(MutableAfPlanUtils.CARRIER_ROUTE_PROFILE,
-				selectedProfile(checkpoint.executedState().selectedReceiverPlans()));
 			return;
 		}
 		if (checkpoint != null) {
 			CarrierPlan plan = state.carrier.getSelectedPlan();
-			MutableAfPlanUtils.replaceTours(plan, checkpoint.executedState().carrierTours());
-			plan.setScore(checkpoint.executedState().observation().carrierScore());
+			restoreCarrierPlan(plan, checkpoint.executedState());
 			contexts = mergeCheckpointSelection(contexts, checkpoint.executedState());
 			state.receiverContexts.put(target, contexts);
-			plan.getAttributes().putAttribute(MutableAfPlanUtils.CARRIER_ROUTE_PROFILE,
-				selectedProfile(checkpoint.executedState().selectedReceiverPlans()));
 		}
 		restoreReceiverContexts(state, contexts);
 	}
@@ -1129,7 +1131,8 @@ public final class MutableAfLearningStore {
 			Map.copyOf(receiverScores), receiverAggregate, collaborating, surplus, transfer,
 			hash(executedProfile), hash(routeProfile), receiverFeasible, feasible);
 		return new ExecutedJointSnapshot(observation, config.valueAt(state.activeFactorIndex),
-			MutableAfPlanUtils.copyTours(selected.getScheduledTours()), selectedReceiverPlans);
+			selected.getJspritScore(), MutableAfPlanUtils.copyTours(selected.getScheduledTours()),
+			selectedReceiverPlans);
 	}
 
 	private void validateCollaborationResults(CarrierState state, int iteration,
@@ -1446,6 +1449,26 @@ public final class MutableAfLearningStore {
 		return value + tolerance * scale >= baseline;
 	}
 
+	static boolean isFinalSelectionEligible(ExecutedJointObservation observation) {
+		Objects.requireNonNull(observation, "observation");
+		return observation.participationFeasible()
+			&& Double.isFinite(observation.totalSurplus())
+			&& observation.totalSurplus() >= -FINAL_SURPLUS_EPSILON;
+	}
+
+	private void restoreCarrierPlan(CarrierPlan plan, ExecutedJointSnapshot snapshot) {
+		MutableAfPlanUtils.replaceTours(plan, snapshot.carrierTours());
+		plan.setScore(snapshot.observation().carrierScore());
+		CarrierAllocationFactor.set(plan, snapshot.allocationFactor(), config);
+		if (snapshot.carrierJspritScore() == null) {
+			plan.getAttributes().removeAttribute(JSPRIT_SCORE_ATTRIBUTE);
+		} else {
+			plan.setJspritScore(snapshot.carrierJspritScore());
+		}
+		plan.getAttributes().putAttribute(MutableAfPlanUtils.CARRIER_ROUTE_PROFILE,
+			selectedProfile(snapshot.selectedReceiverPlans()));
+	}
+
 	private static double requireFiniteScore(Double value, String description) {
 		if (value == null || !Double.isFinite(value)) {
 			throw new IllegalStateException("Missing or non-finite " + description + ": " + value);
@@ -1480,7 +1503,8 @@ public final class MutableAfLearningStore {
 	private static FactorCheckpoint copyCheckpoint(FactorCheckpoint source) {
 		ExecutedJointSnapshot snapshot = source.executedState();
 		ExecutedJointSnapshot copy = new ExecutedJointSnapshot(snapshot.observation(),
-			snapshot.allocationFactor(), snapshot.carrierTours(), snapshot.selectedReceiverPlans());
+			snapshot.allocationFactor(), snapshot.carrierJspritScore(), snapshot.carrierTours(),
+			snapshot.selectedReceiverPlans());
 		return new FactorCheckpoint(source.factorIndex(), source.factor(), source.visit(),
 			source.sourceIteration(), source.reason(), source.maturity(), source.selectionPolicy(),
 			copy, source.windowStatistics(), source.objectiveValue(), source.participationFeasible());
@@ -1592,7 +1616,6 @@ public final class MutableAfLearningStore {
 		private int dwell;
 		private boolean routeReplanned;
 		private double baselineCarrierScore = Double.NaN;
-		private List<ScheduledTour> baselineTours = List.of();
 		private ExecutedJointSnapshot baseline;
 		private ExecutedJointSnapshot lastExecuted;
 		private ExecutedJointSnapshot visitBest;
@@ -1606,6 +1629,7 @@ public final class MutableAfLearningStore {
 		private Integer warmStartSourceFactorIndex;
 		private int warmStartExecutionIteration = -1;
 		private boolean warmStartScoreClearedBeforeMobsim;
+		private boolean warmStartTrialThisIteration;
 		private final Map<Integer, FinalRevisitCandidate> finalRevisitCandidates =
 			new LinkedHashMap<>();
 		private int activeFinalRevisitFactorIndex = -1;
@@ -1646,6 +1670,7 @@ public final class MutableAfLearningStore {
 		private final int factorIndex;
 		private final FactorCheckpoint checkpoint;
 		private ExecutedJointSnapshot latestExecuted;
+		private ExecutedJointSnapshot latestEligible;
 		private int evaluations;
 
 		private FinalRevisitCandidate(int factorIndex, FactorCheckpoint checkpoint,
@@ -1653,10 +1678,15 @@ public final class MutableAfLearningStore {
 			this.factorIndex = factorIndex;
 			this.checkpoint = checkpoint;
 			this.latestExecuted = Objects.requireNonNull(latestExecuted, "latestExecuted");
+			this.latestEligible = latestExecuted;
 		}
 
 		private double carrierScore() {
 			return latestExecuted.observation().carrierScore();
+		}
+
+		private double eligibleCarrierScore() {
+			return latestEligible.observation().carrierScore();
 		}
 	}
 

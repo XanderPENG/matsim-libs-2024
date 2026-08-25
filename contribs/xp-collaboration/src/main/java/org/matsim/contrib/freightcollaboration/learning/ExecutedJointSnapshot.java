@@ -14,6 +14,7 @@ import java.util.Objects;
 public record ExecutedJointSnapshot(
 	ExecutedJointObservation observation,
 	double allocationFactor,
+	Double carrierJspritScore,
 	List<ScheduledTour> carrierTours,
 	Map<Id<Receiver>, ReceiverPlan> selectedReceiverPlans
 ) {
@@ -21,6 +22,9 @@ public record ExecutedJointSnapshot(
 		observation = Objects.requireNonNull(observation, "observation");
 		if (!Double.isFinite(allocationFactor)) {
 			throw new IllegalArgumentException("allocationFactor must be finite");
+		}
+		if (carrierJspritScore != null && !Double.isFinite(carrierJspritScore)) {
+			throw new IllegalArgumentException("carrierJspritScore must be null or finite");
 		}
 		carrierTours = List.copyOf(MutableAfPlanUtils.copyTours(
 			Objects.requireNonNull(carrierTours, "carrierTours")));

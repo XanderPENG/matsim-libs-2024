@@ -35,6 +35,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MutableAllocationFactorStatsListenerTest {
@@ -42,6 +43,10 @@ class MutableAllocationFactorStatsListenerTest {
 	@Test
 	void writesStateAndInitializesAllThreeCsvFiles(@TempDir Path directory) throws Exception {
 		MutableAllocationFactorConfigGroup mutableConfig = new MutableAllocationFactorConfigGroup();
+		mutableConfig.setNewFactorMinDwell(1);
+		mutableConfig.setRevisitFactorMinDwell(1);
+		mutableConfig.setStabilityWindow(1);
+		mutableConfig.setMaxAdaptDwell(2);
 		Config config = ConfigUtils.createConfig(mutableConfig);
 		config.controller().setLastIteration(100);
 		config.controller().setOutputDirectory(directory.toString());
@@ -87,9 +92,41 @@ class MutableAllocationFactorStatsListenerTest {
 		learningStore.observeIterationEnd(0);
 		listener.notifyIterationEnds(new IterationEndsEvent(null, 0, false));
 
+		coalitionManager.setMutableFreightCoalitions(List.of());
+		learningStore.prepareReplanning(1);
+		collaborationStore.reset(1);
+		carrier.getSelectedPlan().setScore(11.0);
+		receiver.getSelectedPlan().setScore(6.0);
+		carrier.getSelectedPlan().getAttributes().putAttribute(
+			MutableAfPlanUtils.CARRIER_ROUTE_PROFILE,
+			MutableAfPlanUtils.selectedReceiverProfile(carrier, List.of(receiver)));
+		learningStore.observeIterationEnd(1);
+		listener.notifyIterationEnds(new IterationEndsEvent(null, 1, false));
+
+		learningStore.prepareReplanning(2);
+		learningStore.beginWarmStartExecution(2);
+		collaborationStore.reset(2);
+		carrier.getSelectedPlan().setScore(12.0);
+		receiver.getSelectedPlan().setScore(7.0);
+		carrier.getSelectedPlan().getAttributes().putAttribute(
+			MutableAfPlanUtils.CARRIER_ROUTE_PROFILE,
+			MutableAfPlanUtils.selectedReceiverProfile(carrier, List.of(receiver)));
+		learningStore.observeIterationEnd(2);
+		listener.notifyIterationEnds(new IterationEndsEvent(null, 2, false));
+
+		learningStore.prepareReplanning(3);
+		collaborationStore.reset(3);
+		carrier.getSelectedPlan().setScore(12.0);
+		receiver.getSelectedPlan().setScore(7.0);
+		carrier.getSelectedPlan().getAttributes().putAttribute(
+			MutableAfPlanUtils.CARRIER_ROUTE_PROFILE,
+			MutableAfPlanUtils.selectedReceiverProfile(carrier, List.of(receiver)));
+		learningStore.observeIterationEnd(3);
+		listener.notifyIterationEnds(new IterationEndsEvent(null, 3, false));
+
 		List<String> lines = Files.readAllLines(directory.resolve(
 			MutableAllocationFactorStatsListener.OUTPUT_FILE));
-		assertEquals(2, lines.size());
+		assertEquals(5, lines.size());
 		assertTrue(lines.getFirst().startsWith("iteration,carrierId,phase,activeFactorIndex"));
 		assertTrue(lines.getFirst().contains(
 			"warmStartTrial,warmStartSourceFactorIndex,warmStartScoreClearedBeforeMobsim"));
@@ -99,9 +136,12 @@ class MutableAllocationFactorStatsListenerTest {
 			"finalRevisitCandidateIndices,finalRevisitSelectionCount"));
 		assertTrue(lines.get(1).startsWith("0,\"carrier,quoted\",BASELINE,8,0.8"));
 		assertTrue(lines.get(1).contains(",false,,false,"));
-		assertEquals(1, Files.readAllLines(directory.resolve(
+		assertTrue(lines.get(3).contains(",WARM_START_TRIAL_COMPLETE,false,true,8,true,"));
+		assertFalse(lines.get(4).contains("WARM_START_TRIAL_COMPLETE"));
+		assertTrue(lines.get(4).contains(",false,,false,"));
+		assertEquals(3, Files.readAllLines(directory.resolve(
 			MutableAllocationFactorStatsListener.LOCAL_OPTIMA_FILE)).size());
-		assertEquals(1, Files.readAllLines(directory.resolve(
+		assertEquals(3, Files.readAllLines(directory.resolve(
 			MutableAllocationFactorStatsListener.RECEIVER_OUTCOMES_FILE)).size());
 	}
 }

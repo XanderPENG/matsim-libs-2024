@@ -89,6 +89,7 @@ class MutableAfReceiverStrategyManagerTest {
 		assertSame(selectedAfterFirstCall, receiver.getSelectedPlan());
 		for (int iteration = 2; iteration < 40; iteration++) {
 			manager.run(List.of(receiver), iteration, null);
+			assertUniqueBehaviors(receiver);
 		}
 		assertTrue(receiver.getPlans().size() <= 3);
 		assertEquals(1, receiver.getPlans().stream().filter(store::isOutsideOption).count());
@@ -98,6 +99,49 @@ class MutableAfReceiverStrategyManagerTest {
 			plan.getTimeWindows().getFirst().getEnd() >= 10 * 3600.0));
 		assertTrue(receiver.getPlans().stream().allMatch(plan ->
 			plan.getTimeWindows().getFirst().getStart() == 8 * 3600.0));
+	}
+
+	@Test
+	void normalizesLegacyDuplicatesWithOutsideSelectedScoreAndOrderPriority() {
+		Fixture fixture = fixture();
+		ReceiverPlan outside = fixture.receiver.getSelectedPlan();
+
+		ReceiverPlan selectedLowerScore = planWithEnd(outside, 11 * 3600.0, 6.0, false);
+		ReceiverPlan unselectedHigherScore = MutableAfPlanUtils.copyReceiverPlan(
+			selectedLowerScore, true);
+		unselectedHigherScore.setScore(9.0);
+		fixture.receiver.addPlan(selectedLowerScore);
+		fixture.receiver.addPlan(unselectedHigherScore);
+		fixture.receiver.setSelectedPlan(selectedLowerScore);
+		fixture.manager.normalizeAndTrim(fixture.receiver);
+
+		assertTrue(fixture.receiver.getPlans().contains(selectedLowerScore),
+			"the selected duplicate outranks a higher-scored equivalent");
+		assertFalse(fixture.receiver.getPlans().contains(unselectedHigherScore));
+
+		ReceiverPlan selectedOutsideDuplicate = MutableAfPlanUtils.copyReceiverPlan(outside, true);
+		selectedOutsideDuplicate.getAttributes().putAttribute(
+			MutableAfPlanUtils.RECEIVER_OUTSIDE_OPTION, false);
+		selectedOutsideDuplicate.setScore(100.0);
+		fixture.receiver.addPlan(selectedOutsideDuplicate);
+		fixture.receiver.setSelectedPlan(selectedOutsideDuplicate);
+		fixture.manager.normalizeAndTrim(fixture.receiver);
+
+		assertSame(outside, fixture.receiver.getSelectedPlan(),
+			"the outside option outranks an equivalent selected adaptive plan");
+		assertFalse(fixture.receiver.getPlans().contains(selectedOutsideDuplicate));
+
+		ReceiverPlan firstEqualScore = planWithEnd(outside, 12 * 3600.0, 8.0, false);
+		ReceiverPlan laterEqualScore = MutableAfPlanUtils.copyReceiverPlan(firstEqualScore, true);
+		fixture.receiver.addPlan(firstEqualScore);
+		fixture.receiver.addPlan(laterEqualScore);
+		fixture.manager.normalizeAndTrim(fixture.receiver);
+
+		assertTrue(fixture.receiver.getPlans().contains(firstEqualScore));
+		assertFalse(fixture.receiver.getPlans().contains(laterEqualScore),
+			"original list order breaks otherwise equal canonicalization ties");
+		assertUniqueBehaviors(fixture.receiver);
+		assertEquals(1, fixture.receiver.getPlans().stream().filter(fixture.store::isOutsideOption).count());
 	}
 
 	@Test
@@ -335,6 +379,21 @@ class MutableAfReceiverStrategyManagerTest {
 		carrier.getSelectedPlan().getAttributes().putAttribute(
 			MutableAfPlanUtils.CARRIER_ROUTE_PROFILE,
 			MutableAfPlanUtils.selectedReceiverProfile(carrier, List.of(receiver)));
+	}
+
+	private static ReceiverPlan planWithEnd(ReceiverPlan source, double end, double score,
+			boolean outside) {
+		ReceiverPlan copy = MutableAfPlanUtils.copyReceiverPlan(source, false);
+		TimeWindow current = copy.getTimeWindows().getFirst();
+		copy.getTimeWindows().set(0, TimeWindow.newInstance(current.getStart(), end));
+		copy.getAttributes().putAttribute(MutableAfPlanUtils.RECEIVER_OUTSIDE_OPTION, outside);
+		copy.setScore(score);
+		return copy;
+	}
+
+	private static void assertUniqueBehaviors(Receiver receiver) {
+		assertEquals(receiver.getPlans().size(), receiver.getPlans().stream()
+			.map(MutableAfPlanUtils::receiverPlanSignature).distinct().count());
 	}
 
 	private record Fixture(MutableAllocationFactorConfigGroup config, Carrier carrier, Receiver receiver,
